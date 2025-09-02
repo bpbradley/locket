@@ -1,0 +1,147 @@
+use secret_sidecar::{config::Config, mirror, envvars, provider::{SecretsProvider, ProviderError, ValueKind}};
+use std::env;
+
+#[derive(Clone, Default)]
+struct MockProvider {
+    inject_should_fail: bool,
+    read_bytes: Option<Vec<u8>>,
+}
+
+impl SecretsProvider for MockProvider {
+    fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
+        if self.inject_should_fail {
+            return Err(ProviderError::Failed("inject failed (mock)".into()));
+        }
+        let data = std::fs::read(src).map_err(|e| ProviderError::Failed(e.to_string()))?;
+        std::fs::write(dst, data).map_err(|e| ProviderError::Failed(e.to_string()))?;
+        Ok(())
+    }
+    fn read(&self, reference: &str) -> Result<Vec<u8>, ProviderError> {
+        Ok(self.read_bytes.clone().unwrap_or_else(|| reference.as_bytes().to_vec()))
+    }
+    fn classify_value(&self, s: &str) -> ValueKind {
+        let t = s.trim();
+        if t.starts_with("op://") && !t.contains("{{") && !t.contains("}}") {
+            ValueKind::DirectRef
+        } else {
+            ValueKind::Template
+        }
+    }
+}
+
+#[test]
+fn mirror_inject_success() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tpl = tmp.path().join("templates");
+    let out = tmp.path().join("out");
+    std::fs::create_dir_all(&tpl).unwrap();
+    std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
+
+    let mut cfg = Config::default();
+    cfg.templates_dir = tpl.to_string_lossy().into_owned();
+    cfg.output_dir = out.to_string_lossy().into_owned();
+    cfg.inject_fallback_copy = true;
+
+    let provider = MockProvider::default();
+    mirror::sync_templates(&cfg, &provider).unwrap();
+
+    let got = std::fs::read(out.join("a.txt")).unwrap();
+    assert_eq!(got, b"hello");
+}
+
+#[test]
+fn mirror_inject_failure_fallback_copy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tpl = tmp.path().join("templates");
+    let out = tmp.path().join("out");
+    std::fs::create_dir_all(&tpl).unwrap();
+    std::fs::write(tpl.join("bin.dat"), b"RAW-BYTES").unwrap();
+
+    let mut cfg = Config::default();
+    cfg.templates_dir = tpl.to_string_lossy().into_owned();
+    cfg.output_dir = out.to_string_lossy().into_owned();
+    cfg.inject_fallback_copy = true;
+
+    let provider = MockProvider { inject_should_fail: true, ..Default::default() };
+    mirror::sync_templates(&cfg, &provider).unwrap();
+
+    let got = std::fs::read(out.join("bin.dat")).unwrap();
+    assert_eq!(got, b"RAW-BYTES");
+}
+
+#[test]
+fn mirror_inject_failure_no_fallback_is_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tpl = tmp.path().join("templates");
+    let out = tmp.path().join("out");
+    std::fs::create_dir_all(&tpl).unwrap();
+    std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
+
+    let mut cfg = Config::default();
+    cfg.templates_dir = tpl.to_string_lossy().into_owned();
+    cfg.output_dir = out.to_string_lossy().into_owned();
+    cfg.inject_fallback_copy = false;
+
+    let provider = MockProvider { inject_should_fail: true, ..Default::default() };
+    let err = mirror::sync_templates(&cfg, &provider).unwrap_err();
+    let msg = format!("{}", err);
+    assert!(msg.contains("fallback disabled"));
+}
+
+#[test]
+fn env_single_ref_uses_read() {
+    let _g = TestEnv::set_vars(vec![
+        ("secret_DB_PASSWORD", "op://vault/item/password"),
+    ]);
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.output_dir = tmp.path().to_string_lossy().into_owned();
+
+    let provider = MockProvider { read_bytes: Some(b"supersecret".to_vec()), ..Default::default() };
+    envvars::sync_env_secrets(&cfg, &provider).unwrap();
+
+    let got = std::fs::read(tmp.path().join("db_password")).unwrap();
+    assert_eq!(got, b"supersecret");
+}
+
+#[test]
+fn env_inline_template_uses_inject() {
+    let _g = TestEnv::set_vars(vec![
+        ("secret_GREETING", "Hello {{name}}!"),
+    ]);
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.output_dir = tmp.path().to_string_lossy().into_owned();
+
+    let provider = MockProvider::default();
+    envvars::sync_env_secrets(&cfg, &provider).unwrap();
+
+    let got = std::fs::read(tmp.path().join("greeting")).unwrap();
+    // Mock inject copies template bytes directly
+    assert_eq!(got, b"Hello {{name}}!");
+}
+
+struct TestEnv { saved: Vec<(String, Option<String>)> }
+impl TestEnv {
+    fn set_vars(vars: Vec<(&str, &str)>) -> Self {
+        let keys: Vec<String> = vars.iter().map(|(k, _)| k.to_string()).collect();
+        let mut saved = Vec::new();
+        // save any existing
+        for k in &keys { saved.push((k.clone(), env::var(k).ok())); }
+        // clear everything starting with secret_ to avoid interference
+        for (k, _) in env::vars() { if k.starts_with("secret_") { env::remove_var(k); } }
+        // set requested
+        for (k, v) in vars { env::set_var(k, v); }
+        Self { saved }
+    }
+}
+impl Drop for TestEnv {
+    fn drop(&mut self) {
+        // remove all secret_ vars set during test
+        for (k, _) in env::vars() { if k.starts_with("secret_") { env::remove_var(k); } }
+        // restore saved
+        for (k, v) in self.saved.drain(..) {
+            match v { Some(val) => env::set_var(&k, val), None => env::remove_var(&k) }
+        }
+    }
+}

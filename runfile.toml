@@ -1,0 +1,25 @@
+# Runnables for secret-sidecar (usable with `runnables-cli`)
+
+[build]
+description = "cargo build (release)"
+cmd = "cargo build --release"
+
+[run]
+description = "cargo run -- --once"
+cmd = "cargo run -- --once"
+
+[test]
+description = "cargo test"
+cmd = "cargo test"
+
+[fmt]
+description = "cargo fmt --all"
+cmd = "cargo fmt --all"
+
+[clippy]
+description = "cargo clippy -- -D warnings"
+cmd = "cargo clippy --all-targets -- -D warnings"
+
+[docker-build]
+description = "docker build dev image"
+cmd = "docker build -t secret-sidecar:dev ."

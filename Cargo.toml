@@ -1,0 +1,33 @@
+[package]
+name = "secret-sidecar"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
+description = "Helper tool for secret injection from templates and env vars to be used as sidecar for docker compose"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+notify = "6"
+tempfile = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+rand = "0.8"
+walkdir = "2"
+
+[dev-dependencies]
+assert_fs = "1"
+
+[lib]
+name = "secret_sidecar"
+path = "src/lib.rs"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true

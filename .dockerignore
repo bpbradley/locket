@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+**/*.swp
+**/*.swo
+**/*.tmp
+**/*.log
+.git
+.gitignore
+.dockerignore
+Dockerfile
+.github
+.vscode
+tmp
+tests/tmp
+.cargo
