@@ -100,10 +100,13 @@ fn main() -> anyhow::Result<()> {
     debug!("initialization complete; creating status file");
     health::mark_ready(&cfg.status_file)?;
 
-    // If --once, exit after one successful sync; otherwise, block (watch TBD)
+    // If --once, exit after one successful sync; otherwise, start watch if enabled
     if cli.once {
         Ok(())
+    } else if cfg.watch {
+        watch::run_watch(&cfg, provider.as_ref())
     } else {
+        // Passive block when watch is disabled
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3600));
         }
