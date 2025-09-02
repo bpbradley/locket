@@ -55,33 +55,12 @@ pub fn run_watch(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result
                             // Drain and dedup changed paths, then selectively sync
                             dirty_paths.sort();
                             dirty_paths.dedup();
-                            let mut ok_count = 0usize;
-                            let mut err_count = 0usize;
-                            for p in dirty_paths.drain(..) {
-                                if p.exists() && p.is_file() {
-                                    match mirror::sync_template_path(cfg, provider, &p) {
-                                        Ok(()) => ok_count += 1,
-                                        Err(e) => {
-                                            warn!(path=?p, error=?e, "template sync failed");
-                                            err_count += 1;
-                                        }
-                                    }
-                                } else {
-                                    // Source gone or not a file; remove the mirrored destination if present.
-                                    match mirror::remove_dst_for_src(cfg, &p) {
-                                        Ok(()) => ok_count += 1,
-                                        Err(e) => {
-                                            warn!(path=?p, error=?e, "failed to remove mirrored destination");
-                                            err_count += 1;
-                                        }
-                                    }
-                                }
-                            }
+                            let (ok_count, err_count) = process_changed_paths(cfg, provider, dirty_paths.drain(..));
                             // We reached a consistent state; mark healthy (idempotent)
                             if let Err(e) = health::mark_ready(&cfg.status_file) {
                                 warn!(error=?e, "failed to update status file after resync");
                             }
-                            info!(ok=?ok_count, errors=?err_count, "resync complete after changes");
+                            info!(ok=?ok_count, errors=?err_count, "selective resync complete after changes");
                         }
                     }
                 }
@@ -94,4 +73,29 @@ pub fn run_watch(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result
     }
 
     Ok(())
+}
+
+/// Process a set of changed paths: update outputs for files, remove outputs for missing/non-files.
+/// Returns (ok_count, err_count)
+pub(crate) fn process_changed_paths<I: IntoIterator<Item = std::path::PathBuf>>(
+    cfg: &Config,
+    provider: &dyn SecretsProvider,
+    paths: I,
+) -> (usize, usize) {
+    let mut ok_count = 0usize;
+    let mut err_count = 0usize;
+    for p in paths {
+        if p.exists() && p.is_file() {
+            match mirror::sync_template_path(cfg, provider, &p) {
+                Ok(()) => ok_count += 1,
+                Err(_) => err_count += 1,
+            }
+        } else {
+            match mirror::remove_dst_for_src(cfg, &p) {
+                Ok(()) => ok_count += 1,
+                Err(_) => err_count += 1,
+            }
+        }
+    }
+    (ok_count, err_count)
 }
