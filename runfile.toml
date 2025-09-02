@@ -4,7 +4,7 @@
 description = "cargo build (release)"
 cmd = "cargo build --release"
 
-[run]
+[run-once]
 description = "cargo run -- --once"
 cmd = "cargo run -- --once"
 
