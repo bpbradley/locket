@@ -19,9 +19,6 @@ jobs:
   test:
     name: Build, clippy, and test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: secret-sidecar
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,8 +34,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            secret-sidecar/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('secret-sidecar/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -83,8 +80,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ./secret-sidecar
-          file: ./secret-sidecar/Dockerfile
+          context: .
+          file: ./Dockerfile
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
