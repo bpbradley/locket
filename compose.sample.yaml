@@ -1,27 +1,30 @@
+name: demo
 services:
   secret-sidecar:
-    build: .
-    image: ghcr.io/bpbradley/secret-sidecar:latest
-    user: "65532:65532"
+    image: secret-sidecar:dev
     environment:
       # Choose one:
       # OP_SERVICE_ACCOUNT_TOKEN_FILE: /path/to/file
       OP_SERVICE_ACCOUNT_TOKEN: $OP_SERVICE_ACCOUNT_TOKEN
-      secret_DB_PASSWORD: "op://Prod DB/Postgres/password"
+      secret_TEST_SECRET: "op://Testing/SecretPassword/password"
+    command: --log-level=debug
     volumes:
       - ./secrets/templates:/templates:ro
       - secrets-store:/run/secrets
-      - sidecar-status:/status
   demo:
     image: busybox
     user: "65532:65532"
-    command: ["sh", "-c", "sleep 3600"]
+    command: ["cat", "/run/secrets/test_secret"]
     depends_on:
       secret-sidecar:
         condition: service_healthy
     volumes:
-      - secrets-store:/run/secrets:ro
+      - secrets-store:/run/secrets
 
 volumes:
   secrets-store:
-  sidecar-status:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+

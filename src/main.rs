@@ -18,9 +18,9 @@ struct Cli {
     #[arg(long, action=ArgAction::SetTrue)]
     once: bool,
 
-    /// Healthcheck path
-    #[arg(long, value_name = "PATH")]
-    healthcheck: Option<String>,
+    /// Healthcheck: exit 0 if secrets are ready
+    #[arg(long, action=ArgAction::SetTrue)]
+    healthcheck: bool,
 
     /// Log format: text|json
     #[arg(long, value_name="FORMAT", default_value_t=String::from("text"))]
@@ -30,19 +30,19 @@ struct Cli {
     #[arg(long, value_name="LEVEL", default_value_t=String::from("info"))]
     log_level: String,
 
-    /// Templates directory (overrides TEMPLATES_DIR)
+    /// Templates directory
     #[arg(long, value_name = "PATH")]
     templates_dir: Option<String>,
 
-    /// Output directory (overrides OUTPUT_DIR)
+    /// Output directory
     #[arg(long, value_name = "PATH")]
     output_dir: Option<String>,
 
-    /// Status file path (overrides STATUS_FILE)
+    /// Status file path
     #[arg(long, value_name = "PATH")]
     status_file: Option<String>,
 
-    /// Watch for changes (overrides WATCH)
+    /// Watch for changes
     #[arg(long, value_name="BOOL", value_parser=clap::value_parser!(bool))]
     watch: Option<bool>,
 
@@ -54,8 +54,18 @@ struct Cli {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    if let Some(path) = &cli.healthcheck {
-        std::process::exit(if health::is_ready(path) { 0 } else { 1 });
+    // Short circuit healthcheck before initializing logging/provider.
+    if cli.healthcheck {
+        let mut cfg = config::Config::from_env()?;
+        // Apply the subset of CLI overrides that affect the status file path.
+        if let Some(v) = cli.status_file.clone() {
+            cfg.status_file = v;
+        }
+        std::process::exit(if health::is_ready(&cfg.status_file) {
+            0
+        } else {
+            1
+        });
     }
 
     logging::init(&cli.log_format, &cli.log_level)?;
