@@ -1,66 +1,12 @@
-mod config;
-mod envvars;
-mod health;
-mod logging;
-mod mirror;
-mod provider;
-mod watch;
-mod write;
-
-use clap::{ArgAction, Parser};
+use clap::Parser;
+use secret_sidecar::{cli, config, envvars, health, logging, mirror, provider, watch};
 use tracing::{debug, error};
 
-#[derive(Parser, Debug)]
-#[command(name = "secret-sidecar")]
-#[command(version, about = "Materialize secrets from environment or templates", long_about = None)]
-struct Cli {
-    /// Run a single sync then block (no watch yet)
-    #[arg(long, action=ArgAction::SetTrue)]
-    once: bool,
-
-    /// Healthcheck: exit 0 if secrets are ready
-    #[arg(long, action=ArgAction::SetTrue)]
-    healthcheck: bool,
-
-    /// Log format: text|json
-    #[arg(long, value_name="FORMAT", default_value_t=String::from("text"))]
-    log_format: String,
-
-    /// Log level: trace|debug|info|warn|error
-    #[arg(long, value_name="LEVEL", default_value_t=String::from("info"))]
-    log_level: String,
-
-    /// Templates directory
-    #[arg(long, value_name = "PATH")]
-    templates_dir: Option<String>,
-
-    /// Output directory
-    #[arg(long, value_name = "PATH")]
-    output_dir: Option<String>,
-
-    /// Status file path
-    #[arg(long, value_name = "PATH")]
-    status_file: Option<String>,
-
-    /// Watch for changes
-    #[arg(long, value_name="BOOL", value_parser=clap::value_parser!(bool))]
-    watch: Option<bool>,
-
-    /// Allow inject fallback to raw copy (overrides INJECT_FALLBACK_COPY)
-    #[arg(long, value_name="BOOL", value_parser=clap::value_parser!(bool))]
-    inject_fallback_copy: Option<bool>,
-}
-
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-
+    let cli = cli::Cli::parse();
+    let cfg = config::Config::from_env()?.with(&cli);
     // Short circuit healthcheck before initializing logging/provider.
     if cli.healthcheck {
-        let mut cfg = config::Config::from_env()?;
-        // Apply the subset of CLI overrides that affect the status file path.
-        if let Some(v) = cli.status_file.clone() {
-            cfg.status_file = v;
-        }
         std::process::exit(if health::is_ready(&cfg.status_file) {
             0
         } else {
@@ -69,23 +15,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     logging::init(&cli.log_format, &cli.log_level)?;
-    let mut cfg = config::Config::from_env()?;
-    // CLI overrides env
-    if let Some(v) = cli.templates_dir.clone() {
-        cfg.templates_dir = v;
-    }
-    if let Some(v) = cli.output_dir.clone() {
-        cfg.output_dir = v;
-    }
-    if let Some(v) = cli.status_file.clone() {
-        cfg.status_file = v;
-    }
-    if let Some(v) = cli.watch {
-        cfg.watch = v;
-    }
-    if let Some(v) = cli.inject_fallback_copy {
-        cfg.inject_fallback_copy = v;
-    }
+
     let provider = provider::build_provider(&cfg).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     if let Err(e) = provider.prepare() {
         error!("{}", e);

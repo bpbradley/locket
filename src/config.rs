@@ -1,6 +1,6 @@
+use crate::cli::Cli;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub templates_dir: String,
@@ -9,6 +9,29 @@ pub struct Config {
     pub watch: bool,
     pub inject_fallback_copy: bool,
     pub provider: String,
+}
+pub trait ConfigLayer {
+    fn apply(self, cfg: &mut Config);
+}
+
+impl ConfigLayer for &Cli {
+    fn apply(self, cfg: &mut Config) {
+        if let Some(v) = self.templates_dir.clone() {
+            cfg.templates_dir = v;
+        }
+        if let Some(v) = self.output_dir.clone() {
+            cfg.output_dir = v;
+        }
+        if let Some(v) = self.status_file.clone() {
+            cfg.status_file = v;
+        }
+        if let Some(v) = self.watch {
+            cfg.watch = v;
+        }
+        if let Some(v) = self.inject_fallback_copy {
+            cfg.inject_fallback_copy = v;
+        }
+    }
 }
 
 impl Default for Config {
@@ -46,6 +69,10 @@ impl Config {
             cfg.provider = v;
         }
         Ok(cfg)
+    }
+    pub fn with<L: ConfigLayer>(mut self, layer: L) -> Self {
+        layer.apply(&mut self);
+        self
     }
 }
 
