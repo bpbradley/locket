@@ -55,7 +55,8 @@ pub fn run_watch(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result
                             // Drain and dedup changed paths, then selectively sync
                             dirty_paths.sort();
                             dirty_paths.dedup();
-                            let (ok_count, err_count) = process_changed_paths(cfg, provider, dirty_paths.drain(..));
+                            let (ok_count, err_count) =
+                                process_changed_paths(cfg, provider, dirty_paths.drain(..));
                             // We reached a consistent state; mark healthy (idempotent)
                             if let Err(e) = health::mark_ready(&cfg.status_file) {
                                 warn!(error=?e, "failed to update status file after resync");

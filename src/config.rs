@@ -16,7 +16,7 @@ impl Default for Config {
         Self {
             templates_dir: "/templates".into(),
             output_dir: "/run/secrets".into(),
-            status_file: "/status/ready".into(),
+            status_file: "/tmp/.secret-sidecar/ready".into(),
             watch: true,
             inject_fallback_copy: true,
             provider: "op".into(),

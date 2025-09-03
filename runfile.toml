@@ -4,9 +4,13 @@
 description = "cargo build (release)"
 cmd = "cargo build --release"
 
-[run-once]
+[once]
 description = "cargo run -- --once"
 cmd = "cargo run -- --once"
+
+[watch]
+description = "cargo run"
+cmd = "cargo run --"
 
 [test]
 description = "cargo test"
@@ -23,3 +27,7 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 [docker-build]
 description = "docker build dev image"
 cmd = "docker build -t secret-sidecar:dev ."
+
+[docker-run-test]
+description = "Run test of docker image"
+cmd = "docker compose -f compose.sample.yaml -p demo up"

@@ -11,7 +11,8 @@ FROM gcr.io/distroless/cc-debian12:nonroot
 WORKDIR /
 COPY --from=build   /src/target/release/secret-sidecar /secret-sidecar
 COPY --from=opstage /usr/local/bin/op /usr/local/bin/op
-VOLUME ["/run/secrets", "/templates", "/status"]
+VOLUME ["/run/secrets", "/templates"]
 USER nonroot:nonroot
-HEALTHCHECK --interval=5s --timeout=3s --retries=30   CMD ["/secret-sidecar","--healthcheck","/status/ready"]
+HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
+    CMD ["/secret-sidecar","--healthcheck"]
 ENTRYPOINT ["/secret-sidecar"]
