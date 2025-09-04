@@ -10,7 +10,7 @@ cmd = "cargo run -- --once"
 
 [watch]
 description = "cargo run"
-cmd = "cargo run --"
+cmd = "cargo run"
 
 [test]
 description = "cargo test"

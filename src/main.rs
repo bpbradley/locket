@@ -1,11 +1,28 @@
 use clap::Parser;
-use secret_sidecar::{cli, config, envvars, health, logging, mirror, provider, watch};
+use secret_sidecar::{config, envvars, health, logging, mirror, provider, watch};
 use tracing::{debug, error};
 
+#[derive(Parser, Debug)]
+#[command(name = "secret-sidecar")]
+#[command(version, about = "Materialize secrets from environment or templates", long_about = None)]
+pub struct Cli {
+    /// Run a single sync and exit
+    #[arg(long)]
+    pub once: bool,
+
+    /// Healthcheck: exit 0 if secrets are ready
+    #[arg(long)]
+    pub healthcheck: bool,
+
+    /// Configuration overrides
+    #[command(flatten)]
+    pub config: config::Config,
+}
+
 fn main() -> anyhow::Result<()> {
-    let cli = cli::Cli::parse();
-    let cfg = config::Config::from_env()?.with(&cli);
-    // Short circuit healthcheck before initializing logging/provider.
+    let cli = Cli::parse();
+    let cfg = cli.config.clone();
+
     if cli.healthcheck {
         std::process::exit(if health::is_ready(&cfg.status_file) {
             0
@@ -14,7 +31,7 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    logging::init(&cli.log_format, &cli.log_level)?;
+    logging::init(&cfg.log_format, &cfg.log_level)?;
 
     let provider = provider::build_provider(&cfg).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     if let Err(e) = provider.prepare() {
