@@ -55,7 +55,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn writes_correctly() {
+    fn writes_files() {
         let tmp = assert_fs::TempDir::new().unwrap();
         let path = tmp.join("out.txt");
         atomic_write(&path, b"hello").unwrap();
