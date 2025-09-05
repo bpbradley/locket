@@ -1,5 +1,6 @@
 use clap::Parser;
 use secret_sidecar::{config, envvars, health, logging, mirror, provider, watch};
+use secret_sidecar::provider::SecretsProvider;
 use tracing::{debug, error};
 
 #[derive(Parser, Debug)]
@@ -17,6 +18,9 @@ pub struct Cli {
     /// Configuration overrides
     #[command(flatten)]
     pub config: config::Config,
+
+    #[command(subcommand)]
+    pub provider: Option<provider::ProviderSubcommand>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,11 +37,12 @@ fn main() -> anyhow::Result<()> {
 
     logging::init(&cfg.log_format, &cfg.log_level)?;
 
-    let provider = provider::build_provider(&cfg).map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    if let Err(e) = provider.prepare() {
-        error!("{}", e);
-        std::process::exit(1);
-    }
+    let provider = match cli.provider {
+        Some(sc) => sc,
+        None => provider::ProviderSubcommand::from_env_or_default()?,
+    };
+
+    provider.prepare().map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     // Plan both sides for conflict detection
     let env_plans = envvars::plan_env_secrets(&cfg);
@@ -51,8 +56,8 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(2);
     }
 
-    mirror::sync_templates(&cfg, provider.as_ref())?;
-    envvars::sync_env_secrets(&cfg, provider.as_ref())?;
+    mirror::sync_templates(&cfg, &provider)?;
+    envvars::sync_env_secrets(&cfg, &provider)?;
 
     debug!("initialization complete; creating status file");
     health::mark_ready(&cfg.status_file)?;
@@ -61,7 +66,7 @@ fn main() -> anyhow::Result<()> {
     if cli.once {
         Ok(())
     } else if cfg.watch {
-        watch::run_watch(&cfg, provider.as_ref())
+        watch::run_watch(&cfg, &provider)
     } else {
         // Passive block when watch is disabled
         loop {

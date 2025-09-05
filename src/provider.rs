@@ -2,9 +2,25 @@
 //!
 //! Providers can either read a direct reference (e.g., a provider-specific URI)
 //! or inject a template file to a rendered output.
-
-use crate::config::Config;
+use anyhow::Result;
+use clap::{Args, Subcommand};
 use std::process::Command;
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ProviderSubcommand {
+    /// 1Password
+    Op(OpProvider),
+}
+
+impl ProviderSubcommand {
+    pub fn from_env_or_default() -> Result<Self> {
+        let kind = std::env::var("SECRETS_PROVIDER").unwrap_or_else(|_| "op".to_string());
+        match kind.to_ascii_lowercase().as_str() {
+            "op" | "1password" | "1pass" => Ok(ProviderSubcommand::Op(OpProvider::default())),
+            other => anyhow::bail!("unsupported SECRETS_PROVIDER '{}'", other),
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -25,7 +41,7 @@ pub trait SecretsProvider {
     fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError>;
     /// Read the bytes for a provider-specific secret reference.
     fn read(&self, reference: &str) -> Result<Vec<u8>, ProviderError>;
-    /// Perform any provider-specific preparation (env validation, tokens, etc.).
+    /// Perform any provider-specific preparation
     fn prepare(&self) -> Result<(), ProviderError> {
         Ok(())
     }
@@ -37,9 +53,44 @@ pub trait SecretsProvider {
     }
 }
 
+impl SecretsProvider for ProviderSubcommand {
+    fn prepare(&self) -> Result<(), ProviderError> {
+        match self {
+            ProviderSubcommand::Op(p) => p.prepare(),
+        }
+    }
+    fn classify_value(&self, s: &str) -> ValueKind {
+        match self {
+            ProviderSubcommand::Op(p) => p.classify_value(s),
+        }
+    }
+    fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
+        match self {
+            ProviderSubcommand::Op(p) => p.inject(src, dst),
+        }
+    }
+    fn read(&self, reference: &str) -> Result<Vec<u8>, ProviderError> {
+        match self {
+            ProviderSubcommand::Op(p) => p.read(reference),
+        }
+    }
+}
+
 /// 1Password `op`-based provider;
-#[derive(Debug, Clone, Default)]
-pub struct OpProvider;
+#[derive(Args, Debug, Clone, Default)]
+pub struct OpProvider {
+    /// 1Password service account token
+    #[arg(
+        long,
+        env = "OP_SERVICE_ACCOUNT_TOKEN",
+        hide_env_values = true,
+        value_name = "TOKEN"
+    )]
+    pub token: Option<String>,
+    /// Path to token file (used if --token absent)
+    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE", value_name = "PATH")]
+    pub token_file: Option<String>,
+}
 
 impl SecretsProvider for OpProvider {
     fn classify_value(&self, s: &str) -> ValueKind {
@@ -52,29 +103,32 @@ impl SecretsProvider for OpProvider {
     }
 
     fn prepare(&self) -> Result<(), ProviderError> {
-        // Ensure OP token is present; allow OP_SERVICE_ACCOUNT_TOKEN or file reference.
         if let Ok(v) = std::env::var("OP_SERVICE_ACCOUNT_TOKEN") {
             if !v.is_empty() {
                 return Ok(());
             }
         }
-        if let Ok(path) = std::env::var("OP_SERVICE_ACCOUNT_TOKEN_FILE") {
-            let mut f = std::fs::File::open(&path)
-                .map_err(|e| ProviderError::Failed(format!("open token file: {}", e)))?;
-            let mut buf = String::new();
-            use std::io::Read as _;
-            f.read_to_string(&mut buf)
-                .map_err(|e| ProviderError::Failed(format!("read token file: {}", e)))?;
-            let token = buf.trim_matches(|c| c == '\n' || c == '\r').to_string();
+        if let Some(t) = &self.token {
+            if t.is_empty() {
+                return Err(ProviderError::Failed("empty --token".into()));
+            }
+            std::env::set_var("OP_SERVICE_ACCOUNT_TOKEN", t);
+            return Ok(());
+        }
+        if let Some(path) = &self.token_file {
+            let token = std::fs::read_to_string(path)
+                .map_err(|e| ProviderError::Failed(format!("read token file: {e}")))?
+                .trim()
+                .to_string();
             if token.is_empty() {
-                return Err(ProviderError::Failed("token file is empty".into()));
+                return Err(ProviderError::Failed("token file empty".into()));
             }
             std::env::set_var("OP_SERVICE_ACCOUNT_TOKEN", &token);
             return Ok(());
         }
+
         Err(ProviderError::Failed(
-            "OP_SERVICE_ACCOUNT_TOKEN not set (and OP_SERVICE_ACCOUNT_TOKEN_FILE not provided)"
-                .into(),
+            "OP_SERVICE_ACCOUNT_TOKEN not set".into(),
         ))
     }
 
@@ -112,18 +166,5 @@ impl SecretsProvider for OpProvider {
                 String::from_utf8_lossy(&output.stderr).to_string(),
             ))
         }
-    }
-}
-
-/// Build a secrets provider from config.
-pub fn build_provider(
-    cfg: &Config,
-) -> Result<Box<dyn SecretsProvider + Send + Sync>, ProviderError> {
-    match cfg.provider.as_str() {
-        "op" => Ok(Box::new(OpProvider)),
-        other => Err(ProviderError::Failed(format!(
-            "unsupported provider: {}",
-            other
-        ))),
     }
 }

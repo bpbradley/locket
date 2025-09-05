@@ -29,8 +29,4 @@ pub struct Config {
     /// Log level: trace|debug|info|warn|error
     #[arg(long, env, default_value = "info")]
     pub log_level: String,
-
-    /// Secrets provider
-    #[arg(long, env, default_value = "op")]
-    pub provider: String,
 }
