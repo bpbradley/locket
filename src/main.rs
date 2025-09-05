@@ -1,6 +1,6 @@
 use clap::Parser;
-use secret_sidecar::{config, envvars, health, logging, mirror, provider, watch};
 use secret_sidecar::provider::SecretsProvider;
+use secret_sidecar::{config, envvars, health, logging, mirror, provider, watch};
 use tracing::{debug, error};
 
 #[derive(Parser, Debug)]
@@ -42,7 +42,9 @@ fn main() -> anyhow::Result<()> {
         None => provider::ProviderSubcommand::from_env_or_default()?,
     };
 
-    provider.prepare().map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    provider
+        .prepare()
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     // Plan both sides for conflict detection
     let env_plans = envvars::plan_env_secrets(&cfg);
