@@ -1,31 +1,15 @@
-use secret_sidecar::{config::Config, mirror, envvars, provider::{SecretsProvider, ProviderError, ValueKind}};
+use secret_sidecar::{config::Config, mirror, envvars, provider::{SecretsProvider, ProviderError}};
 use std::env;
 
 #[derive(Clone, Default)]
-struct MockProvider {
-    inject_should_fail: bool,
-    read_bytes: Option<Vec<u8>>,
-}
+struct MockProvider { inject_should_fail: bool }
 
 impl SecretsProvider for MockProvider {
     fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
-        if self.inject_should_fail {
-            return Err(ProviderError::Failed("inject failed (mock)".into()));
-        }
+        if self.inject_should_fail { return Err(ProviderError::Failed("inject failed (mock)".into())); }
         let data = std::fs::read(src).map_err(|e| ProviderError::Failed(e.to_string()))?;
         std::fs::write(dst, data).map_err(|e| ProviderError::Failed(e.to_string()))?;
         Ok(())
-    }
-    fn read(&self, reference: &str) -> Result<Vec<u8>, ProviderError> {
-        Ok(self.read_bytes.clone().unwrap_or_else(|| reference.as_bytes().to_vec()))
-    }
-    fn classify_value(&self, s: &str) -> ValueKind {
-        let t = s.trim();
-        if t.starts_with("op://") && !t.contains("{{") && !t.contains("}}") {
-            ValueKind::DirectRef
-        } else {
-            ValueKind::Template
-        }
     }
 }
 
@@ -62,7 +46,7 @@ fn mirror_inject_failure_fallback_copy() {
     cfg.output_dir = out.to_string_lossy().into_owned();
     cfg.inject_fallback_copy = true;
 
-    let provider = MockProvider { inject_should_fail: true, ..Default::default() };
+    let provider = MockProvider { inject_should_fail: true };
     mirror::sync_templates(&cfg, &provider).unwrap();
 
     let got = std::fs::read(out.join("bin.dat")).unwrap();
@@ -82,26 +66,10 @@ fn mirror_inject_failure_no_fallback_is_error() {
     cfg.output_dir = out.to_string_lossy().into_owned();
     cfg.inject_fallback_copy = false;
 
-    let provider = MockProvider { inject_should_fail: true, ..Default::default() };
+    let provider = MockProvider { inject_should_fail: true };
     let err = mirror::sync_templates(&cfg, &provider).unwrap_err();
     let msg = format!("{}", err);
     assert!(msg.contains("fallback disabled"));
-}
-
-#[test]
-fn env_single_ref_uses_read() {
-    let _g = TestEnv::set_vars(vec![
-        ("secret_DB_PASSWORD", "op://vault/item/password"),
-    ]);
-    let tmp = tempfile::tempdir().unwrap();
-    let mut cfg = Config::default();
-    cfg.output_dir = tmp.path().to_string_lossy().into_owned();
-
-    let provider = MockProvider { read_bytes: Some(b"supersecret".to_vec()), ..Default::default() };
-    envvars::sync_env_secrets(&cfg, &provider).unwrap();
-
-    let got = std::fs::read(tmp.path().join("db_password")).unwrap();
-    assert_eq!(got, b"supersecret");
 }
 
 #[test]
@@ -129,7 +97,7 @@ impl TestEnv {
         // save any existing
         for k in &keys { saved.push((k.clone(), env::var(k).ok())); }
         // clear everything starting with secret_ to avoid interference
-        for (k, _) in env::vars() { if k.starts_with("secret_") { env::remove_var(k); } }
+    for (k, _) in env::vars() { if k.starts_with("secret_") { env::remove_var(k); } }
         // set requested
         for (k, v) in vars { env::set_var(k, v); }
         Self { saved }

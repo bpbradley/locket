@@ -1,10 +1,6 @@
 //! Env-sourced secrets implementation
 
-use crate::{
-    config::Config,
-    provider::{SecretsProvider, ValueKind},
-    write,
-};
+use crate::{config::Config, provider::SecretsProvider, write};
 use anyhow::Context;
 use rand::Rng;
 use std::path::{Path, PathBuf};
@@ -25,34 +21,24 @@ pub fn plan_env_secrets(cfg: &Config) -> Vec<EnvSecret> {
 pub fn sync_env_secrets(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result<()> {
     let secrets = collect_env_secrets(cfg);
     for s in secrets {
-        let kind = provider.classify_value(&s.value);
-        if matches!(kind, ValueKind::DirectRef) {
-            info!(path=?s.dst, "writing env secret via direct read");
-            let bytes = provider
-                .read(&s.value)
-                .with_context(|| format!("provider read failed for {}", s.name))?;
-            write::atomic_write(&s.dst, &bytes)
-                .with_context(|| format!("atomic write failed for {:?}", s.dst))?;
-        } else {
-            info!(path=?s.dst, "writing env secret via template injection (inline value)");
-            // Write a temporary template file with the inline value
-            let mut tmpl = NamedTempFile::new().context("create temp template file")?;
-            std::io::Write::write_all(&mut tmpl, s.value.as_bytes())?;
-            let tmpl_path = tmpl.into_temp_path();
+        info!(path=?s.dst, "writing env secret");
+        // Write a temporary template file
+        let mut tmpl = NamedTempFile::new().context("create temp template file")?;
+        std::io::Write::write_all(&mut tmpl, s.value.as_bytes())?;
+        let tmpl_path = tmpl.into_temp_path();
 
-            // inject outputs to a temp file in the destination directory
-            let tmp_out = tmp_dest_path(&s.dst);
-            if let Some(parent) = s.dst.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let src_path: String = tmpl_path.as_os_str().to_string_lossy().into_owned();
-            let dst_tmp: String = tmp_out.as_os_str().to_string_lossy().into_owned();
-            provider
-                .inject(&src_path, &dst_tmp)
-                .with_context(|| format!("template injection failed for {}", s.name))?;
-            write::atomic_move(&tmp_out, &s.dst)
-                .with_context(|| format!("atomic move failed to {:?}", s.dst))?;
+        // inject outputs to a temp file in the destination directory
+        let tmp_out = tmp_dest_path(&s.dst);
+        if let Some(parent) = s.dst.parent() {
+            std::fs::create_dir_all(parent)?;
         }
+        let src_path: String = tmpl_path.as_os_str().to_string_lossy().into_owned();
+        let dst_tmp: String = tmp_out.as_os_str().to_string_lossy().into_owned();
+        provider
+            .inject(&src_path, &dst_tmp)
+            .with_context(|| format!("injection failed for {}", s.name))?;
+        write::atomic_move(&tmp_out, &s.dst)
+            .with_context(|| format!("move failed to {:?}", s.dst))?;
     }
     Ok(())
 }
