@@ -20,7 +20,18 @@ pub struct Cli {
     pub config: config::Config,
 
     #[command(subcommand)]
-    pub provider: Option<provider::ProviderSubcommand>,
+    provider: Option<provider::ProviderSubcommand>,
+}
+
+impl Cli {
+    /// Return the selected provider or resolve one from environment (with default).
+    fn provider(&self) -> anyhow::Result<provider::ProviderSubcommand> {
+        if let Some(p) = &self.provider {
+            Ok(p.clone())
+        } else {
+            provider::ProviderSubcommand::from_env()
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -35,12 +46,9 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    logging::init(&cfg.log_format, &cfg.log_level)?;
+    logging::init(cfg.log_format, cfg.log_level)?;
 
-    let provider = match cli.provider {
-        Some(sc) => sc,
-        None => provider::ProviderSubcommand::from_env_or_default()?,
-    };
+    let provider = cli.provider()?;
 
     provider
         .prepare()

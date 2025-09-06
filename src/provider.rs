@@ -12,11 +12,14 @@ pub enum ProviderSubcommand {
 }
 
 impl ProviderSubcommand {
-    pub fn from_env_or_default() -> Result<Self> {
-        let kind = std::env::var("SECRETS_PROVIDER").unwrap_or_else(|_| "op".to_string());
+    /// Resolve provider from SECRETS_PROVIDER env
+    /// Fails if the variable is unset or unsupported.
+    pub fn from_env() -> Result<Self> {
+        let kind = std::env::var("SECRETS_PROVIDER")
+            .map_err(|_| anyhow::anyhow!("SECRETS_PROVIDER not set and no provider subcommand supplied; set SECRETS_PROVIDER=op or specify with cli"))?;
         match kind.to_ascii_lowercase().as_str() {
             "op" | "1password" | "1pass" => Ok(ProviderSubcommand::Op(OpProvider::default())),
-            other => anyhow::bail!("unsupported SECRETS_PROVIDER '{}'", other),
+            other => anyhow::bail!("unsupported SECRETS_PROVIDER '{other}'; supported: op"),
         }
     }
 }

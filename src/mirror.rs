@@ -16,8 +16,8 @@ pub struct TemplatePlan {
 
 pub fn plan_templates(cfg: &Config) -> Vec<TemplatePlan> {
     let mut v = Vec::new();
-    let src_root = Path::new(&cfg.templates_dir);
-    let out_root = Path::new(&cfg.output_dir);
+    let src_root: &Path = &cfg.templates_dir;
+    let out_root: &Path = &cfg.output_dir;
     if !src_root.exists() {
         return v;
     }
@@ -86,8 +86,8 @@ pub(crate) fn tmp_dest_path(dst: &Path) -> PathBuf {
 /// Compute destination path for a given source under templates dir. Returns None if src is
 /// not under the configured templates root.
 pub fn dst_for_src(cfg: &Config, src: &Path) -> Option<PathBuf> {
-    let src_root = Path::new(&cfg.templates_dir);
-    let out_root = Path::new(&cfg.output_dir);
+    let src_root: &Path = &cfg.templates_dir;
+    let out_root: &Path = &cfg.output_dir;
     let rel = src.strip_prefix(src_root).ok()?;
     Some(out_root.join(rel))
 }

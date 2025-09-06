@@ -30,23 +30,33 @@ fn plan_templates_maps_files() {
     assert!(plans[0].dst.ends_with("a/b/x.txt"));
 }
 
-struct TestEnv { saved: Vec<(String, Option<String>)> }
+struct TestEnv {
+    saved: Vec<(String, Option<String>)>,
+}
 impl TestEnv {
     fn set_vars(vars: Vec<(&str, &str)>) -> Self {
-        let saved = vars.iter().map(|(k, _)| {
-            let key = (*k).to_string();
-            let old = env::var(k).ok();
-            env::set_var(k, "");
-            (key, old)
-        }).collect();
-        for (k, v) in vars { env::set_var(k, v); }
+        let saved = vars
+            .iter()
+            .map(|(k, _)| {
+                let key = (*k).to_string();
+                let old = env::var(k).ok();
+                env::set_var(k, "");
+                (key, old)
+            })
+            .collect();
+        for (k, v) in vars {
+            env::set_var(k, v);
+        }
         Self { saved }
     }
 }
 impl Drop for TestEnv {
     fn drop(&mut self) {
         for (k, v) in self.saved.drain(..) {
-            match v { Some(val) => env::set_var(&k, val), None => env::remove_var(&k) }
+            match v {
+                Some(val) => env::set_var(&k, val),
+                None => env::remove_var(&k),
+            }
         }
     }
 }

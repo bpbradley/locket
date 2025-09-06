@@ -1,4 +1,4 @@
-use secret_sidecar::envvars::{sanitize_name};
+use secret_sidecar::envvars::sanitize_name;
 
 #[test]
 fn sanitize_basic() {
