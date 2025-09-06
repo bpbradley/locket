@@ -8,7 +8,14 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
 };
-#[derive(Subcommand, Debug, Clone)]
+use strum_macros::{EnumDiscriminants, EnumString, VariantNames};
+
+#[derive(Subcommand, Debug, Clone, EnumDiscriminants)]
+#[strum_discriminants(
+    name(ProviderKind),
+    derive(EnumString, VariantNames),
+    strum(serialize_all = "lowercase")
+)]
 pub enum Provider {
     /// 1Password
     Op(OpConfig),
@@ -22,12 +29,19 @@ impl Provider {
     }
 
     /// Resolve from SECRETS_PROVIDER (for when no subcommand is provided)
-    pub fn from_env() -> Result<Self> {
-        let s = std::env::var("SECRETS_PROVIDER").context("no provider configured")?;
-        match s.to_ascii_lowercase().as_str() {
-            "op" | "1password" | "1pass" => Ok(Provider::Op(OpConfig::default())),
-            other => anyhow::bail!("unsupported SECRETS_PROVIDER '{other}'; supported: op"),
-        }
+    pub fn from_env() -> anyhow::Result<Self> {
+        use anyhow::{anyhow, Context};
+
+        let raw = std::env::var("SECRETS_PROVIDER").context("no provider configured")?;
+
+        let kind: ProviderKind = raw.parse().map_err(|_| {
+            let variants = <ProviderKind as strum::VariantNames>::VARIANTS;
+            anyhow!("unsupported provider '{raw}'; supported: {:?}", variants)
+        })?;
+
+        Ok(match kind {
+            ProviderKind::Op => Provider::Op(OpConfig::default()),
+        })
     }
 }
 

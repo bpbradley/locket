@@ -5,12 +5,12 @@ description = "cargo build (release)"
 cmd = "cargo build --release"
 
 [once]
-description = "cargo run -- --once op"
-cmd = "cargo run -- --once op"
+description = "cargo run -- --once"
+cmd = "cargo run -- --once"
 
 [watch]
-description = "cargo run -- op"
-cmd = "cargo run -- op"
+description = "cargo run"
+cmd = "cargo run"
 
 [test]
 description = "cargo test"
