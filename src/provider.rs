@@ -1,24 +1,31 @@
 //! Secrets provider implementation
 //!
 //! Providers will inject secrets from templates
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
-use std::{path::PathBuf,process::Command};
-
+use secrecy::{ExposeSecret, SecretString};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 #[derive(Subcommand, Debug, Clone)]
-pub enum ProviderSubcommand {
+pub enum Provider {
     /// 1Password
-    Op(OpProvider),
+    Op(OpConfig),
 }
 
-impl ProviderSubcommand {
-    /// Resolve provider from SECRETS_PROVIDER env
-    /// Fails if the variable is unset or unsupported.
+impl Provider {
+    pub fn build(self) -> Result<Box<dyn SecretsProvider>> {
+        match self {
+            Provider::Op(cfg) => Ok(Box::new(OpProvider::new(cfg)?)),
+        }
+    }
+
+    /// Resolve from SECRETS_PROVIDER (for when no subcommand is provided)
     pub fn from_env() -> Result<Self> {
-        let kind = std::env::var("SECRETS_PROVIDER")
-            .map_err(|_| anyhow::anyhow!("no provider configured"))?;
-        match kind.to_ascii_lowercase().as_str() {
-            "op" | "1password" | "1pass" => Ok(ProviderSubcommand::Op(OpProvider::default())),
+        let s = std::env::var("SECRETS_PROVIDER").context("no provider configured")?;
+        match s.to_ascii_lowercase().as_str() {
+            "op" | "1password" | "1pass" => Ok(Provider::Op(OpConfig::default())),
             other => anyhow::bail!("unsupported SECRETS_PROVIDER '{other}'; supported: op"),
         }
     }
@@ -26,97 +33,99 @@ impl ProviderSubcommand {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
-    #[error("provider command failed: {0}")]
-    Failed(String),
+    /// File/FS/process spawning errors
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// External command errors
+    #[error("command '{program}' failed with status {status:?}: {stderr}")]
+    Exec {
+        program: &'static str,
+        status: Option<i32>,
+        stderr: String,
+    },
+
+    /// Invalid or missing configuration
+    #[error("invalid config: {0}")]
+    InvalidConfig(String),
+
+    /// Generic error
+    #[error("{0}")]
+    Other(String),
 }
 
-/// Generic secrets provider exposing a rendering primitive and optional preparation.
 pub trait SecretsProvider {
-    /// Inject a template file at `src` to a materialized file at `dst`.
     fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError>;
-    /// Perform any provider-specific preparation.
-    fn prepare(&self) -> Result<(), ProviderError> {
-        Ok(())
-    }
 }
 
-impl SecretsProvider for ProviderSubcommand {
-    fn prepare(&self) -> Result<(), ProviderError> {
-        match self {
-            ProviderSubcommand::Op(p) => p.prepare(),
-        }
-    }
-    fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
-        match self {
-            ProviderSubcommand::Op(p) => p.inject(src, dst),
-        }
-    }
-}
-
-/// 1Password `op`-based provider;
+/// 1Password `op`-based configuration.
 #[derive(Args, Debug, Clone, Default)]
-pub struct OpProvider {
-    /// 1Password service account token
-    #[arg(
-        long,
-        env = "OP_SERVICE_ACCOUNT_TOKEN",
-        hide_env_values = true,
-        value_name = "TOKEN"
-    )]
+pub struct OpConfig {
+    /// Service account token (prefer file/env over inline)
+    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
     pub token: Option<String>,
+
     /// Path to token file (used if --token absent)
-    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE", value_name = "PATH")]
+    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
     pub token_file: Option<PathBuf>,
 }
 
-impl SecretsProvider for OpProvider {
-    fn prepare(&self) -> Result<(), ProviderError> {
-        if let Ok(v) = std::env::var("OP_SERVICE_ACCOUNT_TOKEN") {
-            if !v.is_empty() {
-                return Ok(());
-            }
+impl OpConfig {
+    fn resolve_token(&self) -> Result<SecretString> {
+        if let Some(p) = &self.token_file {
+            let s = std::fs::read_to_string(p)
+                .with_context(|| format!("read token file {}", p.display()))?;
+            let t = s.trim().to_owned();
+            anyhow::ensure!(!t.is_empty(), "token file empty");
+            return Ok(SecretString::new(t.into()));
         }
         if let Some(t) = &self.token {
-            if t.is_empty() {
-                return Err(ProviderError::Failed("empty --token".into()));
-            }
-            std::env::set_var("OP_SERVICE_ACCOUNT_TOKEN", t);
-            return Ok(());
+            anyhow::ensure!(!t.is_empty(), "empty --token");
+            return Ok(SecretString::new(t.clone().into()));
         }
-        if let Some(path) = &self.token_file {
-            let token = std::fs::read_to_string(path)
-                .map_err(|e| ProviderError::Failed(format!("read token file: {e}")))?
-                .trim()
-                .to_string();
-            if token.is_empty() {
-                return Err(ProviderError::Failed("token file empty".into()));
-            }
-            std::env::set_var("OP_SERVICE_ACCOUNT_TOKEN", &token);
-            return Ok(());
-        }
-
-        Err(ProviderError::Failed(
-            "OP_SERVICE_ACCOUNT_TOKEN not set".into(),
-        ))
+        let t = std::env::var("OP_SERVICE_ACCOUNT_TOKEN")
+            .context("OP_SERVICE_ACCOUNT_TOKEN not set")?;
+        anyhow::ensure!(!t.is_empty(), "OP_SERVICE_ACCOUNT_TOKEN empty");
+        Ok(SecretString::new(t.into()))
     }
+}
 
+pub struct OpProvider {
+    token: SecretString,
+}
+
+impl OpProvider {
+    pub fn new(cfg: OpConfig) -> Result<Self> {
+        let token = cfg.resolve_token()?;
+        Ok(Self { token })
+    }
+}
+
+impl SecretsProvider for OpProvider {
     fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
-        let status = Command::new("op")
+        let output = Command::new("op")
             .arg("inject")
             .arg("-i")
             .arg(src)
             .arg("-o")
             .arg(dst)
-            .envs(std::env::vars())
-            .status()
-            .map_err(|e| ProviderError::Failed(e.to_string()))?;
-        if status.success() {
+            .env_clear()
+            .env("OP_SERVICE_ACCOUNT_TOKEN", self.token.expose_secret())
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("HOME", std::env::var("HOME").unwrap_or_default())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::null())
+            .output()?;
+
+        if output.status.success() {
             Ok(())
         } else {
-            Err(ProviderError::Failed(format!(
-                "status: {:?}",
-                status.code()
-            )))
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            Err(ProviderError::Exec {
+                program: "op",
+                status: output.status.code(),
+                stderr,
+            })
         }
     }
 }

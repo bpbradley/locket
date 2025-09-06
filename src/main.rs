@@ -1,5 +1,4 @@
 use clap::Parser;
-use secret_sidecar::provider::SecretsProvider;
 use secret_sidecar::{config, envvars, health, logging, mirror, provider, watch};
 use tracing::{debug, error};
 
@@ -20,23 +19,22 @@ pub struct Cli {
     pub config: config::Config,
 
     #[command(subcommand)]
-    provider: Option<provider::ProviderSubcommand>,
+    provider: Option<provider::Provider>,
 }
 
 impl Cli {
-    /// Return the selected provider or resolve one from environment (with default).
-    fn provider(&self) -> anyhow::Result<provider::ProviderSubcommand> {
-        if let Some(p) = &self.provider {
-            Ok(p.clone())
-        } else {
-            provider::ProviderSubcommand::from_env()
-        }
+    /// Return the selected provider or resolve one from environment
+    fn provider(&self) -> anyhow::Result<provider::Provider> {
+        self.provider
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(provider::Provider::from_env)
     }
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let cfg = cli.config.clone();
+    let cfg = &cli.config;
 
     if cli.healthcheck {
         std::process::exit(if health::is_ready(&cfg.status_file) {
@@ -48,15 +46,11 @@ fn main() -> anyhow::Result<()> {
 
     logging::init(cfg.log_format, cfg.log_level)?;
 
-    let provider = cli.provider()?;
-
-    provider
-        .prepare()
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let provider = cli.provider()?.build()?;
 
     // Plan both sides for conflict detection
-    let env_plans = envvars::plan_env_secrets(&cfg);
-    let tpl_plans = mirror::plan_templates(&cfg);
+    let env_plans = envvars::plan_env_secrets(cfg);
+    let tpl_plans = mirror::plan_templates(cfg);
     use std::collections::HashSet;
     let env_paths: HashSet<_> = env_plans.iter().map(|e| e.dst.clone()).collect();
     let tpl_paths: HashSet<_> = tpl_plans.iter().map(|t| t.dst.clone()).collect();
@@ -66,8 +60,8 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(2);
     }
 
-    mirror::sync_templates(&cfg, &provider)?;
-    envvars::sync_env_secrets(&cfg, &provider)?;
+    mirror::sync_templates(cfg, provider.as_ref())?;
+    envvars::sync_env_secrets(cfg, provider.as_ref())?;
 
     debug!("initialization complete; creating status file");
     health::mark_ready(&cfg.status_file)?;
@@ -76,7 +70,7 @@ fn main() -> anyhow::Result<()> {
     if cli.once {
         Ok(())
     } else if cfg.watch {
-        watch::run_watch(&cfg, &provider)
+        watch::run_watch(cfg, provider.as_ref())
     } else {
         // Passive block when watch is disabled
         loop {

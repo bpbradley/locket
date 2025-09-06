@@ -13,10 +13,10 @@ struct MockProvider {
 impl SecretsProvider for MockProvider {
     fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
         if self.inject_should_fail {
-            return Err(ProviderError::Failed("inject failed (mock)".into()));
+            return Err(ProviderError::Other("inject failed (mock)".into()));
         }
-        let data = std::fs::read(src).map_err(|e| ProviderError::Failed(e.to_string()))?;
-        std::fs::write(dst, data).map_err(|e| ProviderError::Failed(e.to_string()))?;
+        let data = std::fs::read(src).map_err(ProviderError::Io)?;
+        std::fs::write(dst, data).map_err(ProviderError::Io)?;
         Ok(())
     }
 }
