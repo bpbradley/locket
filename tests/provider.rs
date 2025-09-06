@@ -29,10 +29,12 @@ fn mirror_inject_success() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
 
-    let mut cfg = Config::default();
-    cfg.templates_dir = tpl.to_string_lossy().into_owned();
-    cfg.output_dir = out.to_string_lossy().into_owned();
-    cfg.inject_fallback_copy = true;
+    let cfg = Config {
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        inject_fallback_copy: true,
+        ..Default::default()
+    };
 
     let provider = MockProvider::default();
     mirror::sync_templates(&cfg, &provider).unwrap();
@@ -49,10 +51,12 @@ fn mirror_inject_failure_fallback_copy() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"RAW-BYTES").unwrap();
 
-    let mut cfg = Config::default();
-    cfg.templates_dir = tpl.to_string_lossy().into_owned();
-    cfg.output_dir = out.to_string_lossy().into_owned();
-    cfg.inject_fallback_copy = true;
+    let cfg = Config {
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        inject_fallback_copy: true,
+        ..Default::default()
+    };
 
     let provider = MockProvider {
         inject_should_fail: true,
@@ -71,10 +75,12 @@ fn mirror_inject_failure_no_fallback_is_error() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
 
-    let mut cfg = Config::default();
-    cfg.templates_dir = tpl.to_string_lossy().into_owned();
-    cfg.output_dir = out.to_string_lossy().into_owned();
-    cfg.inject_fallback_copy = false;
+    let cfg = Config {
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        inject_fallback_copy: false,
+        ..Default::default()
+    };
 
     let provider = MockProvider {
         inject_should_fail: true,
@@ -88,8 +94,10 @@ fn mirror_inject_failure_no_fallback_is_error() {
 fn env_inline_template_uses_inject() {
     let _g = TestEnv::set_vars(vec![("secret_GREETING", "Hello {{name}}!")]);
     let tmp = tempfile::tempdir().unwrap();
-    let mut cfg = Config::default();
-    cfg.output_dir = tmp.path().to_string_lossy().into_owned();
+    let cfg = Config {
+        output_dir: tmp.path().to_path_buf(),
+        ..Default::default()
+    };
 
     let provider = MockProvider::default();
     envvars::sync_env_secrets(&cfg, &provider).unwrap();

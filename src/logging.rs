@@ -1,15 +1,13 @@
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt, EnvFilter};
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
+#[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
 pub enum LogFormat {
+    #[default]
     Text,
     Json,
-}
-impl Default for LogFormat {
-    fn default() -> Self { LogFormat::Text }
 }
 impl LogFormat {
     pub fn as_str(self) -> &'static str {
@@ -20,24 +18,22 @@ impl LogFormat {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
+#[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
 pub enum LogLevel {
     Trace,
     Debug,
+    #[default]
     Info,
     Warn,
     Error,
-}
-impl Default for LogLevel {
-    fn default() -> Self { LogLevel::Info }
 }
 impl LogLevel {
     pub fn as_str(self) -> &'static str {
         match self {
             LogLevel::Trace => "trace",
             LogLevel::Debug => "debug",
-            LogLevel::Info  => "info",
-            LogLevel::Warn  => "warn",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
             LogLevel::Error => "error",
         }
     }

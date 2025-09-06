@@ -21,9 +21,11 @@ fn plan_templates_maps_files() {
     std::fs::create_dir_all(tpl.join("a/b")).unwrap();
     std::fs::write(tpl.join("a/b/x.txt"), b"hello").unwrap();
 
-    let mut cfg = Config::default();
-    cfg.templates_dir = tpl.to_string_lossy().into_owned();
-    cfg.output_dir = out.to_string_lossy().into_owned();
+    let cfg = Config {
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        ..Default::default()
+    };
 
     let plans = mirror::plan_templates(&cfg);
     assert_eq!(plans.len(), 1);

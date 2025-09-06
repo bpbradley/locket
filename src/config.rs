@@ -1,9 +1,9 @@
+use crate::logging::{LogFormat, LogLevel};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use crate::logging::{LogFormat, LogLevel};
 
-#[derive(Args, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Args, Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Templates directory
     #[arg(long, env = "TEMPLATES_DIR", default_value = "/templates")]
@@ -14,7 +14,11 @@ pub struct Config {
     pub output_dir: PathBuf,
 
     /// Status file path
-    #[arg(long, env = "STATUS_FILE", default_value = "/tmp/.secret-sidecar/ready")]
+    #[arg(
+        long,
+        env = "STATUS_FILE",
+        default_value = "/tmp/.secret-sidecar/ready"
+    )]
     pub status_file: PathBuf,
 
     /// Watch for changes
