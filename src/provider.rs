@@ -3,7 +3,7 @@
 //! Providers will inject secrets from templates
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use std::process::Command;
+use std::{path::PathBuf,process::Command};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum ProviderSubcommand {
@@ -16,7 +16,7 @@ impl ProviderSubcommand {
     /// Fails if the variable is unset or unsupported.
     pub fn from_env() -> Result<Self> {
         let kind = std::env::var("SECRETS_PROVIDER")
-            .map_err(|_| anyhow::anyhow!("SECRETS_PROVIDER not set and no provider subcommand supplied; set SECRETS_PROVIDER=op or specify with cli"))?;
+            .map_err(|_| anyhow::anyhow!("no provider configured"))?;
         match kind.to_ascii_lowercase().as_str() {
             "op" | "1password" | "1pass" => Ok(ProviderSubcommand::Op(OpProvider::default())),
             other => anyhow::bail!("unsupported SECRETS_PROVIDER '{other}'; supported: op"),
@@ -66,7 +66,7 @@ pub struct OpProvider {
     pub token: Option<String>,
     /// Path to token file (used if --token absent)
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE", value_name = "PATH")]
-    pub token_file: Option<String>,
+    pub token_file: Option<PathBuf>,
 }
 
 impl SecretsProvider for OpProvider {
