@@ -1,19 +1,17 @@
 //! Secrets provider implementation
 //!
 //! Providers will inject secrets from templates
-use anyhow::{Context, Result};
-use clap::{Args, Subcommand};
+use anyhow::{anyhow, Context, Result};
+use clap::{Args, Command as ClapCommand, FromArgMatches, Subcommand};
 use secrecy::{ExposeSecret, SecretString};
-use std::{
-    path::PathBuf,
-    process::{Command, Stdio},
-};
-use strum_macros::{EnumDiscriminants, EnumString, VariantNames};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use strum_macros::{AsRefStr, EnumDiscriminants, EnumString, VariantNames};
 
 #[derive(Subcommand, Debug, Clone, EnumDiscriminants)]
 #[strum_discriminants(
     name(ProviderKind),
-    derive(EnumString, VariantNames),
+    derive(EnumString, VariantNames, AsRefStr),
     strum(serialize_all = "lowercase")
 )]
 pub enum Provider {
@@ -29,19 +27,20 @@ impl Provider {
     }
 
     /// Resolve from SECRETS_PROVIDER (for when no subcommand is provided)
-    pub fn from_env() -> anyhow::Result<Self> {
-        use anyhow::{anyhow, Context};
-
+    pub fn from_env() -> Result<Self> {
         let raw = std::env::var("SECRETS_PROVIDER").context("no provider configured")?;
-
         let kind: ProviderKind = raw.parse().map_err(|_| {
             let variants = <ProviderKind as strum::VariantNames>::VARIANTS;
             anyhow!("unsupported provider '{raw}'; supported: {:?}", variants)
         })?;
 
-        Ok(match kind {
-            ProviderKind::Op => Provider::Op(OpConfig::default()),
-        })
+        let mut cmd = ClapCommand::new(env!("CARGO_PKG_NAME"));
+        cmd = Provider::augment_subcommands(cmd);
+
+        let m = cmd.try_get_matches_from([env!("CARGO_PKG_NAME"), kind.as_ref()])?;
+
+        let prov = Provider::from_arg_matches(&m)?;
+        Ok(prov)
     }
 }
 
@@ -76,8 +75,13 @@ pub trait SecretsProvider {
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConfig {
     /// Service account token (prefer file/env over inline)
-    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
-    pub token: Option<String>,
+    #[arg(
+        long,
+        env = "OP_SERVICE_ACCOUNT_TOKEN",
+        hide_env_values = true,
+        value_parser = parse_secrets
+    )]
+    pub token: Option<SecretString>,
 
     /// Path to token file (used if --token absent)
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
@@ -87,15 +91,15 @@ pub struct OpConfig {
 impl OpConfig {
     fn resolve_token(&self) -> Result<SecretString> {
         if let Some(p) = &self.token_file {
-            let s = std::fs::read_to_string(p)
-                .with_context(|| format!("read token file {}", p.display()))?;
-            let t = s.trim().to_owned();
+            let t = std::fs::read_to_string(p)
+                .with_context(|| format!("read token file {}", p.display()))?
+                .trim()
+                .to_owned();
             anyhow::ensure!(!t.is_empty(), "token file empty");
             return Ok(SecretString::new(t.into()));
         }
         if let Some(t) = &self.token {
-            anyhow::ensure!(!t.is_empty(), "empty --token");
-            return Ok(SecretString::new(t.clone().into()));
+            return Ok(t.clone());
         }
         let t = std::env::var("OP_SERVICE_ACCOUNT_TOKEN")
             .context("OP_SERVICE_ACCOUNT_TOKEN not set")?;
@@ -142,4 +146,9 @@ impl SecretsProvider for OpProvider {
             })
         }
     }
+}
+
+fn parse_secrets(s: &str) -> Result<SecretString, String> {
+    // SecretString::new expects a Box<str>
+    Ok(SecretString::new(s.to_owned().into()))
 }

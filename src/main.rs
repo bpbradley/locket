@@ -25,10 +25,13 @@ pub struct Cli {
 impl Cli {
     /// Return the selected provider or resolve one from environment
     fn provider(&self) -> anyhow::Result<provider::Provider> {
-        self.provider
+        let p = self
+            .provider
             .clone()
             .map(Ok)
-            .unwrap_or_else(provider::Provider::from_env)
+            .unwrap_or_else(provider::Provider::from_env)?;
+        debug!("Provider Config => {:#?}", p);
+        Ok(p)
     }
 }
 
@@ -45,6 +48,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     logging::init(cfg.log_format, cfg.log_level)?;
+
+    debug!("{:#?}", cfg);
 
     let provider = cli.provider()?.build()?;
 
