@@ -1,10 +1,10 @@
 //! 1password (op) based provider implementation
 
+use crate::provider::{ProviderError, SecretsProvider};
 use clap::Args;
 use secrecy::{ExposeSecret, SecretString};
 use std::path::PathBuf;
 use std::process::{Command as ProcCommand, Stdio};
-use crate::provider::{ProviderError, SecretsProvider};
 
 /// 1Password provider configuration
 #[derive(Args, Debug, Clone, Default)]
@@ -28,7 +28,8 @@ impl OpConfig {
                 let trimmed = txt.trim();
                 if trimmed.is_empty() {
                     Err(ProviderError::InvalidConfig(format!(
-                        "token file {} is empty", path.display()
+                        "token file {} is empty",
+                        path.display()
                     )))
                 } else {
                     Ok(SecretString::new(trimmed.to_owned().into()))
