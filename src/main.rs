@@ -18,20 +18,13 @@ pub struct Cli {
     #[command(flatten)]
     pub config: config::Config,
 
-    #[command(subcommand)]
-    provider: Option<provider::Provider>,
+    #[command(flatten, next_help_heading = "Provider Configuration")]
+    provider: provider::Provider,
 }
 
 impl Cli {
-    /// Return the selected provider or resolve one from environment
-    fn provider(&self) -> anyhow::Result<provider::Provider> {
-        let p = self
-            .provider
-            .clone()
-            .map(Ok)
-            .unwrap_or_else(provider::Provider::from_env)?;
-        debug!("Provider Config => {:#?}", p);
-        Ok(p)
+    pub fn provider(&self) -> anyhow::Result<Box<dyn provider::SecretsProvider>> {
+        self.provider.build()
     }
 }
 
@@ -51,7 +44,7 @@ fn main() -> anyhow::Result<()> {
 
     debug!("{:#?}", cfg);
 
-    let provider = cli.provider()?.build()?;
+    let provider = cli.provider()?;
 
     // Plan both sides for conflict detection
     let env_plans = envvars::plan_env_secrets(cfg);

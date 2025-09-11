@@ -1,9 +1,8 @@
 use crate::logging::{LogFormat, LogLevel};
 use clap::Args;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Default, Args, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Args, Debug, Clone)]
 pub struct Config {
     /// Templates directory
     #[arg(long, env = "TEMPLATES_DIR", default_value = "/templates")]

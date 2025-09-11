@@ -1,47 +1,38 @@
 //! Secrets provider implementation
 //!
 //! Providers will inject secrets from templates
-use anyhow::{anyhow, Context, Result};
-use clap::{Args, Command as ClapCommand, FromArgMatches, Subcommand};
+use anyhow::{Context, Result};
+use clap::{Args, ValueEnum};
 use secrecy::{ExposeSecret, SecretString};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use strum_macros::{AsRefStr, EnumDiscriminants, EnumString, VariantNames};
 
-#[derive(Subcommand, Debug, Clone, EnumDiscriminants)]
-#[strum_discriminants(
-    name(ProviderKind),
-    derive(EnumString, VariantNames, AsRefStr),
-    strum(serialize_all = "lowercase")
-)]
-pub enum Provider {
-    /// 1Password
-    Op(OpConfig),
+#[derive(Copy, Clone, Debug, ValueEnum, Default)]
+pub enum ProviderKind {
+    #[default]
+    Op,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct Provider {
+    #[arg(long, env = "SECRETS_PROVIDER", value_enum)]
+    pub provider: ProviderKind,
+    #[command(flatten)]
+    pub config: ProviderConfig,
 }
 
 impl Provider {
-    pub fn build(self) -> Result<Box<dyn SecretsProvider>> {
-        match self {
-            Provider::Op(cfg) => Ok(Box::new(OpProvider::new(cfg)?)),
-        }
+    pub fn build(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
+        Ok(match self.provider {
+            ProviderKind::Op => Box::new(OpProvider::new(self.config.op.clone())?),
+        })
     }
+}
 
-    /// Resolve from SECRETS_PROVIDER (for when no subcommand is provided)
-    pub fn from_env() -> Result<Self> {
-        let raw = std::env::var("SECRETS_PROVIDER").context("no provider configured")?;
-        let kind: ProviderKind = raw.parse().map_err(|_| {
-            let variants = <ProviderKind as strum::VariantNames>::VARIANTS;
-            anyhow!("unsupported provider '{raw}'; supported: {:?}", variants)
-        })?;
-
-        let mut cmd = ClapCommand::new(env!("CARGO_PKG_NAME"));
-        cmd = Provider::augment_subcommands(cmd);
-
-        let m = cmd.try_get_matches_from([env!("CARGO_PKG_NAME"), kind.as_ref()])?;
-
-        let prov = Provider::from_arg_matches(&m)?;
-        Ok(prov)
-    }
+#[derive(Args, Debug, Clone, Default)]
+pub struct ProviderConfig {
+    #[command(flatten, next_help_heading = "1Password (op)")]
+    pub op: OpConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -72,15 +63,11 @@ pub trait SecretsProvider {
 }
 
 /// 1Password `op`-based configuration.
+
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConfig {
     /// Service account token (prefer file/env over inline)
-    #[arg(
-        long,
-        env = "OP_SERVICE_ACCOUNT_TOKEN",
-        hide_env_values = true,
-        value_parser = parse_secrets
-    )]
+    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true, value_parser = parse_secrets)]
     pub token: Option<SecretString>,
 
     /// Path to token file (used if --token absent)
@@ -149,6 +136,5 @@ impl SecretsProvider for OpProvider {
 }
 
 fn parse_secrets(s: &str) -> Result<SecretString, String> {
-    // SecretString::new expects a Box<str>
     Ok(SecretString::new(s.to_owned().into()))
 }
