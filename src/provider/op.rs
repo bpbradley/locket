@@ -1,10 +1,10 @@
 //! 1password (op) based provider implementation
-//!
-use anyhow::{Context, Result};
+
 use clap::Args;
 use secrecy::{ExposeSecret, SecretString};
 use std::path::PathBuf;
 use std::process::{Command as ProcCommand, Stdio};
+use crate::provider::{ProviderError, SecretsProvider};
 
 /// 1Password provider configuration
 #[derive(Args, Debug, Clone, Default)]
@@ -20,22 +20,24 @@ pub struct OpConfig {
 }
 
 impl OpConfig {
-    pub fn resolve_token(&self) -> Result<SecretString> {
-        if let Some(p) = &self.token_file {
-            let t = std::fs::read_to_string(p)
-                .with_context(|| format!("read token file {}", p.display()))?
-                .trim()
-                .to_owned();
-            anyhow::ensure!(!t.is_empty(), "token file empty");
-            return Ok(SecretString::new(t.into()));
+    pub fn resolve_token(&self) -> Result<SecretString, ProviderError> {
+        match (&self.token, &self.token_file) {
+            (Some(tok), None) => Ok(tok.clone()),
+            (None, Some(path)) => {
+                let txt = std::fs::read_to_string(path)?;
+                let trimmed = txt.trim();
+                if trimmed.is_empty() {
+                    Err(ProviderError::InvalidConfig(format!(
+                        "token file {} is empty", path.display()
+                    )))
+                } else {
+                    Ok(SecretString::new(trimmed.to_owned().into()))
+                }
+            }
+            _ => Err(ProviderError::InvalidConfig(
+                "missing credentials for op".into(),
+            )),
         }
-        if let Some(t) = &self.token {
-            return Ok(t.clone());
-        }
-        let t = std::env::var("OP_SERVICE_ACCOUNT_TOKEN")
-            .context("OP_SERVICE_ACCOUNT_TOKEN not set")?;
-        anyhow::ensure!(!t.is_empty(), "OP_SERVICE_ACCOUNT_TOKEN empty");
-        Ok(SecretString::new(t.into()))
     }
 }
 
@@ -45,15 +47,15 @@ pub struct OpProvider {
 }
 
 impl OpProvider {
-    pub fn new(cfg: OpConfig) -> Result<Self> {
+    pub fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
         Ok(Self {
             token: cfg.resolve_token()?,
         })
     }
 }
 
-impl crate::provider::SecretsProvider for OpProvider {
-    fn inject(&self, src: &str, dst: &str) -> Result<(), crate::provider::ProviderError> {
+impl SecretsProvider for OpProvider {
+    fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
         let output = ProcCommand::new("op")
             .arg("inject")
             .arg("-i")
@@ -78,7 +80,7 @@ impl crate::provider::SecretsProvider for OpProvider {
                 stderr.truncate(MAX_ERR);
                 stderr.push_str("…[truncated]");
             }
-            Err(crate::provider::ProviderError::Exec {
+            Err(ProviderError::Exec {
                 program: "op",
                 status: output.status.code(),
                 stderr,

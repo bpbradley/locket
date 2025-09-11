@@ -2,7 +2,6 @@
 //!
 //! Providers will inject secrets from templates
 use crate::provider::op::{OpConfig, OpProvider};
-use anyhow::Result;
 use clap::{Args, ValueEnum};
 
 pub trait SecretsProvider {
@@ -56,7 +55,7 @@ pub struct ProviderConfig {
 
 impl ProviderSelection {
     /// Build a runtime provider from configuration
-    pub fn build(&self) -> Result<Box<dyn SecretsProvider>> {
+    pub fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
         match self.kind {
             ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone())?)),
         }

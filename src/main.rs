@@ -24,7 +24,7 @@ pub struct Cli {
 
 impl Cli {
     pub fn provider(&self) -> anyhow::Result<Box<dyn provider::SecretsProvider>> {
-        self.provider.build()
+        Ok(self.provider.build()?)
     }
 }
 
