@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
 
     logging::init(cfg.log_format, cfg.log_level)?;
 
-    debug!("{:#?}", cfg);
+    debug!("{:#?}", cli);
 
     let provider = cli.provider()?;
 
