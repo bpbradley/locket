@@ -4,13 +4,13 @@ use crate::provider::{ProviderError, SecretsProvider};
 use clap::Args;
 use secrecy::{ExposeSecret, SecretString};
 use std::path::PathBuf;
-use std::process::{Command as ProcCommand, Stdio};
+use std::process::{Command, Stdio};
 
-/// 1Password provider configuration
+/// 1Password (op) based provider configuration
 #[derive(Args, Debug, Clone, Default)]
-#[group(id = "op_token", multiple = false)]
+#[group(id = "op_token", multiple = false, required = true)]
 pub struct OpConfig {
-    /// 1Password service account token
+    /// 1Password (op) service account token
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
     pub token: Option<SecretString>,
 
@@ -56,7 +56,7 @@ impl OpProvider {
 
 impl SecretsProvider for OpProvider {
     fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
-        let output = ProcCommand::new("op")
+        let output = Command::new("op")
             .arg("inject")
             .arg("-i")
             .arg(src)
