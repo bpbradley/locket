@@ -6,15 +6,19 @@ cmd = "cargo build --release"
 
 [once]
 description = "cargo run -- --once"
-cmd = "cargo run -- --once"
+cmd = "cargo run -- run --once"
 
 [help]
 description = "cargo run -- --help"
 cmd = "cargo run -- --help"
 
+[health]
+description = "cargo run -- healthcheck"
+cmd = "cargo run -- healthcheck"
+
 [watch]
 description = "cargo run"
-cmd = "cargo run"
+cmd = "cargo run -- run"
 
 [test]
 description = "cargo test"
@@ -32,6 +36,6 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 description = "docker build dev image"
 cmd = "docker build -t secret-sidecar:dev ."
 
-[docker-run-test]
+[docker-test]
 description = "Run test of docker image"
 cmd = "docker compose -f compose.sample.yaml -p demo up"

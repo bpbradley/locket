@@ -8,7 +8,7 @@ use std::process::{Command as ProcCommand, Stdio};
 
 /// 1Password provider configuration
 #[derive(Args, Debug, Clone, Default)]
-#[group(id = "op_token", multiple = false, required = true)]
+#[group(id = "op_token", multiple = false)]
 pub struct OpConfig {
     /// 1Password service account token
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
@@ -42,7 +42,6 @@ impl OpConfig {
     }
 }
 
-/// Runtime `op` provider.
 pub struct OpProvider {
     token: SecretString,
 }
@@ -75,7 +74,7 @@ impl SecretsProvider for OpProvider {
             Ok(())
         } else {
             let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            // keep logs sane; avoid massive stderr spew
+            // keep logs sane; avoid massive stderr
             const MAX_ERR: usize = 8 * 1024;
             if stderr.len() > MAX_ERR {
                 stderr.truncate(MAX_ERR);
