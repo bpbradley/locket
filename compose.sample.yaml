@@ -2,6 +2,7 @@ name: demo
 services:
   secret-sidecar:
     image: secret-sidecar:dev
+    user: "1000:1000"
     secrets:
       - op_token
     environment:
