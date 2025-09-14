@@ -21,32 +21,44 @@ fn plan_templates_maps_files() {
     std::fs::create_dir_all(tpl.join("a/b")).unwrap();
     std::fs::write(tpl.join("a/b/x.txt"), b"hello").unwrap();
 
-    let mut cfg = Config::default();
-    cfg.templates_dir = tpl.to_string_lossy().into_owned();
-    cfg.output_dir = out.to_string_lossy().into_owned();
+    let cfg = Config {
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        ..Default::default()
+    };
 
     let plans = mirror::plan_templates(&cfg);
     assert_eq!(plans.len(), 1);
     assert!(plans[0].dst.ends_with("a/b/x.txt"));
 }
 
-struct TestEnv { saved: Vec<(String, Option<String>)> }
+struct TestEnv {
+    saved: Vec<(String, Option<String>)>,
+}
 impl TestEnv {
     fn set_vars(vars: Vec<(&str, &str)>) -> Self {
-        let saved = vars.iter().map(|(k, _)| {
-            let key = (*k).to_string();
-            let old = env::var(k).ok();
-            env::set_var(k, "");
-            (key, old)
-        }).collect();
-        for (k, v) in vars { env::set_var(k, v); }
+        let saved = vars
+            .iter()
+            .map(|(k, _)| {
+                let key = (*k).to_string();
+                let old = env::var(k).ok();
+                env::set_var(k, "");
+                (key, old)
+            })
+            .collect();
+        for (k, v) in vars {
+            env::set_var(k, v);
+        }
         Self { saved }
     }
 }
 impl Drop for TestEnv {
     fn drop(&mut self) {
         for (k, v) in self.saved.drain(..) {
-            match v { Some(val) => env::set_var(&k, val), None => env::remove_var(&k) }
+            match v {
+                Some(val) => env::set_var(&k, val),
+                None => env::remove_var(&k),
+            }
         }
     }
 }

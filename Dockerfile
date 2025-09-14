@@ -14,5 +14,5 @@ COPY --from=opstage /usr/local/bin/op /usr/local/bin/op
 VOLUME ["/run/secrets", "/templates"]
 USER nonroot:nonroot
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
-    CMD ["/secret-sidecar","--healthcheck"]
-ENTRYPOINT ["/secret-sidecar"]
+    CMD ["/secret-sidecar","healthcheck"]
+ENTRYPOINT ["/secret-sidecar", "run"]

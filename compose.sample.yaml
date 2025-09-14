@@ -2,12 +2,14 @@ name: demo
 services:
   secret-sidecar:
     image: secret-sidecar:dev
+    secrets:
+      - op_token
     environment:
       # Choose one:
-      # OP_SERVICE_ACCOUNT_TOKEN_FILE: /path/to/file
-      OP_SERVICE_ACCOUNT_TOKEN: $OP_SERVICE_ACCOUNT_TOKEN
+      OP_SERVICE_ACCOUNT_TOKEN_FILE: /run/secrets/op_token
+      #OP_SERVICE_ACCOUNT_TOKEN: $OP_SERVICE_ACCOUNT_TOKEN
       secret_TEST_SECRET: "op://Testing/SecretPassword/password"
-    command: --log-level=debug
+    command: --log-level=debug --provider=op
     volumes:
       - ./secrets/templates:/templates:ro
       - secrets-store:/run/secrets
@@ -20,7 +22,9 @@ services:
         condition: service_healthy
     volumes:
       - secrets-store:/run/secrets
-
+secrets:
+  op_token:
+    file: /home/bbradley/.op/service_account_token
 volumes:
   secrets-store:
     driver: local

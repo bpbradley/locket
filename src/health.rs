@@ -1,15 +1,14 @@
-use std::fs::{self, File};
-use std::io::Write;
+use std::path::Path;
 
-pub fn is_ready(path: &str) -> bool {
-    std::path::Path::new(path).exists()
+pub fn is_ready(path: impl AsRef<Path>) -> bool {
+    path.as_ref().exists()
 }
 
-pub fn mark_ready(path: &str) -> anyhow::Result<()> {
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        fs::create_dir_all(parent)?;
+pub fn mark_ready(path: impl AsRef<Path>) -> anyhow::Result<()> {
+    let p = path.as_ref();
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)?;
     }
-    let mut f = File::create(path)?;
-    f.write_all(b"ready")?;
+    std::fs::write(p, b"ready")?;
     Ok(())
 }
