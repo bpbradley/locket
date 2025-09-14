@@ -1,5 +1,8 @@
+use crate::{
+    config::Config,
+    provider::{Provider, SecretsProvider},
+};
 use clap::{Args, Parser, Subcommand};
-
 #[derive(Parser, Debug)]
 #[command(name = "secret-sidecar")]
 #[command(version, about = "Materialize secrets from environment or templates", long_about = None)]
@@ -25,11 +28,11 @@ pub struct RunArgs {
 
     /// Override config
     #[command(flatten)]
-    pub config: super::config::Config,
+    pub config: Config,
 
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
-    provider: super::provider::Provider,
+    provider: Provider,
 }
 
 #[derive(Args, Debug)]
@@ -44,7 +47,7 @@ pub struct HealthArgs {
 }
 
 impl RunArgs {
-    pub fn provider(&self) -> anyhow::Result<Box<dyn super::provider::SecretsProvider>> {
+    pub fn provider(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
         Ok(self.provider.build()?)
     }
 }
