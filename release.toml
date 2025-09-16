@@ -6,8 +6,4 @@ consolidate-commits = true
 sign-commit = false
 sign-tag = false
 
-pre-release-hook = [
-  "cargo fmt -- --check",
-  "cargo clippy -- -D warnings",
-  "cargo test --locked"
-]
+pre-release-hook = ["sh", "-c", "cargo fmt -- --check && cargo clippy -- -D warnings && cargo test --locked"]
