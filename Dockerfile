@@ -9,7 +9,7 @@ COPY . .
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
  && strip target/x86_64-unknown-linux-musl/release/secret-sidecar
 
-FROM alpine:3.20 AS rootfs
+FROM alpine:3.22 AS rootfs
 RUN addgroup -g 65532 nonroot \
  && adduser -D -H -u 65532 -G nonroot nonroot
 
@@ -49,7 +49,7 @@ HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
   CMD ["/secret-sidecar","healthcheck"]
 ENTRYPOINT ["/secret-sidecar","run"]
 
-FROM alpine:3.20 AS opstage
+FROM alpine:3.22 AS opstage
 ARG OP_VERSION=2.32.0
 RUN set -eux; \
     apk add --no-cache ca-certificates wget; \
