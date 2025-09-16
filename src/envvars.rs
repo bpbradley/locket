@@ -80,6 +80,6 @@ fn tmp_dest_path(dst: &Path) -> PathBuf {
         .map(char::from)
         .collect();
     let mut s = dst.as_os_str().to_owned();
-    s.push(&format!(".tmp.{}", rand));
+    s.push(format!(".tmp.{}", rand));
     PathBuf::from(s)
 }

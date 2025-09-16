@@ -48,9 +48,9 @@ pub fn run_watch(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // On timeout, if we had pending events and the quiet period elapsed, sync.
-                if pending {
-                    if let Some(t) = last_event {
-                        if t.elapsed() >= debounce {
+                if pending
+                    && let Some(t) = last_event
+                        && t.elapsed() >= debounce {
                             pending = false;
                             // Drain and dedup changed paths, then selectively sync
                             dirty_paths.sort();
@@ -63,8 +63,6 @@ pub fn run_watch(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result
                             }
                             info!(ok=?ok_count, errors=?err_count, "selective resync complete after changes");
                         }
-                    }
-                }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 warn!("watcher disconnected; exiting watch loop");
