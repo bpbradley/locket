@@ -1,7 +1,7 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
 use crate::{config::Config, health, mirror, provider::SecretsProvider};
-use notify::{recommended_watcher, Event, RecursiveMode, Result as NotifyResult, Watcher};
+use notify::{Event, RecursiveMode, Result as NotifyResult, Watcher, recommended_watcher};
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
