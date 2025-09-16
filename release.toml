@@ -1,0 +1,8 @@
+tag-name = "v{{version}}"
+push = false
+publish = false
+consolidate-commits = true
+sign-commit = false
+sign-tag = false
+allow-branch = ["main"]
+pre-release-hook = ["sh", "-c", "cargo fmt -- --check && cargo clippy -- -D warnings && cargo test --locked"]

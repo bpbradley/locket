@@ -79,7 +79,7 @@ pub(crate) fn tmp_dest_path(dst: &Path) -> PathBuf {
         .map(char::from)
         .collect();
     let mut s = dst.as_os_str().to_owned();
-    s.push(&format!(".tmp.{}", rand));
+    s.push(format!(".tmp.{}", rand));
     PathBuf::from(s)
 }
 
@@ -138,12 +138,12 @@ pub fn sync_template_path(
 /// Remove the destination file that corresponds to a given source path, if it exists.
 /// Does nothing if the src is outside the templates root or if the destination is absent.
 pub fn remove_dst_for_src(cfg: &Config, src: &Path) -> anyhow::Result<()> {
-    if let Some(dst) = dst_for_src(cfg, src) {
-        if dst.exists() {
-            // Only try to remove files; directories are not managed here.
-            if dst.is_file() {
-                std::fs::remove_file(&dst)?;
-            }
+    if let Some(dst) = dst_for_src(cfg, src)
+        && dst.exists()
+    {
+        // Only try to remove files; directories are not managed here.
+        if dst.is_file() {
+            std::fs::remove_file(&dst)?;
         }
     }
     Ok(())

@@ -34,8 +34,20 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 
 [docker-build]
 description = "docker build dev image"
-cmd = "docker build -t secret-sidecar:dev ."
+cmd = "VERSION=0.0.0-dev docker buildx bake -f docker-bake.hcl release --load"
 
 [docker-test]
 description = "Run test of docker image"
 cmd = "docker compose -f compose.sample.yaml -p demo up"
+
+[release-patch]
+description = "Bump patch version and execute release"
+cmd = "cargo release patch --execute"
+
+[release-minor]
+description = "Bump minor version and execute release"
+cmd = "cargo release minor --execute"
+
+[release-major]
+description = "Bump major version and execute release"
+cmd = "cargo release major --execute"

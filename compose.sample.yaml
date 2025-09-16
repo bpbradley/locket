@@ -1,7 +1,7 @@
 name: demo
 services:
   secret-sidecar:
-    image: secret-sidecar:dev
+    image: ghcr.io/bpbradley/secret-sidecar:op
     secrets:
       - op_token
     environment:
@@ -9,7 +9,7 @@ services:
       OP_SERVICE_ACCOUNT_TOKEN_FILE: /run/secrets/op_token
       #OP_SERVICE_ACCOUNT_TOKEN: $OP_SERVICE_ACCOUNT_TOKEN
       secret_TEST_SECRET: "op://Testing/SecretPassword/password"
-    command: --log-level=debug --provider=op
+    command: --log-level=debug
     volumes:
       - ./secrets/templates:/templates:ro
       - secrets-store:/run/secrets

@@ -1,7 +1,7 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
 use crate::{config::Config, health, mirror, provider::SecretsProvider};
-use notify::{recommended_watcher, Event, RecursiveMode, Result as NotifyResult, Watcher};
+use notify::{Event, RecursiveMode, Result as NotifyResult, Watcher, recommended_watcher};
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -48,22 +48,21 @@ pub fn run_watch(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // On timeout, if we had pending events and the quiet period elapsed, sync.
-                if pending {
-                    if let Some(t) = last_event {
-                        if t.elapsed() >= debounce {
-                            pending = false;
-                            // Drain and dedup changed paths, then selectively sync
-                            dirty_paths.sort();
-                            dirty_paths.dedup();
-                            let (ok_count, err_count) =
-                                process_changed_paths(cfg, provider, dirty_paths.drain(..));
-                            // We reached a consistent state; mark healthy (idempotent)
-                            if let Err(e) = health::mark_ready(&cfg.status_file) {
-                                warn!(error=?e, "failed to update status file after resync");
-                            }
-                            info!(ok=?ok_count, errors=?err_count, "selective resync complete after changes");
-                        }
+                if pending
+                    && let Some(t) = last_event
+                    && t.elapsed() >= debounce
+                {
+                    pending = false;
+                    // Drain and dedup changed paths, then selectively sync
+                    dirty_paths.sort();
+                    dirty_paths.dedup();
+                    let (ok_count, err_count) =
+                        process_changed_paths(cfg, provider, dirty_paths.drain(..));
+                    // We reached a consistent state; mark healthy (idempotent)
+                    if let Err(e) = health::mark_ready(&cfg.status_file) {
+                        warn!(error=?e, "failed to update status file after resync");
                     }
+                    info!(ok=?ok_count, errors=?err_count, "selective resync complete after changes");
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {

@@ -42,12 +42,12 @@ impl TestEnv {
             .map(|(k, _)| {
                 let key = (*k).to_string();
                 let old = env::var(k).ok();
-                env::set_var(k, "");
+                unsafe { env::set_var(k, "") };
                 (key, old)
             })
             .collect();
         for (k, v) in vars {
-            env::set_var(k, v);
+            unsafe { env::set_var(k, v) };
         }
         Self { saved }
     }
@@ -56,8 +56,8 @@ impl Drop for TestEnv {
     fn drop(&mut self) {
         for (k, v) in self.saved.drain(..) {
             match v {
-                Some(val) => env::set_var(&k, val),
-                None => env::remove_var(&k),
+                Some(val) => unsafe { env::set_var(&k, val) },
+                None => unsafe { env::remove_var(&k) },
             }
         }
     }
