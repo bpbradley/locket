@@ -121,12 +121,12 @@ impl TestEnv {
         // clear everything starting with secret_ to avoid interference
         for (k, _) in env::vars() {
             if k.starts_with("secret_") {
-                env::remove_var(k);
+                unsafe { env::remove_var(k) };
             }
         }
         // set requested
         for (k, v) in vars {
-            env::set_var(k, v);
+            unsafe { env::set_var(k, v) };
         }
         Self { saved }
     }
@@ -136,14 +136,14 @@ impl Drop for TestEnv {
         // remove all secret_ vars set during test
         for (k, _) in env::vars() {
             if k.starts_with("secret_") {
-                env::remove_var(k);
+                unsafe { env::remove_var(k) };
             }
         }
         // restore saved
         for (k, v) in self.saved.drain(..) {
             match v {
-                Some(val) => env::set_var(&k, val),
-                None => env::remove_var(&k),
+                Some(val) => unsafe { env::set_var(&k, val) },
+                None => unsafe { env::remove_var(&k) },
             }
         }
     }
