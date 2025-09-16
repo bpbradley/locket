@@ -11,7 +11,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-notify = "6"
+notify = "8"
 tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
