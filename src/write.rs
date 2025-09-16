@@ -16,9 +16,10 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     std::fs::rename(&tmp, path)?;
     // fsync the parent dir for durability where supported
     if let Some(parent) = path.parent()
-        && let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
-        }
+        && let Ok(dir) = File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
     Ok(())
 }
 
@@ -30,9 +31,10 @@ pub fn atomic_move(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)?;
     // fsync the parent dir for durability where supported
     if let Some(parent) = to.parent()
-        && let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
-        }
+        && let Ok(dir) = File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
     Ok(())
 }
 

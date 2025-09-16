@@ -139,11 +139,12 @@ pub fn sync_template_path(
 /// Does nothing if the src is outside the templates root or if the destination is absent.
 pub fn remove_dst_for_src(cfg: &Config, src: &Path) -> anyhow::Result<()> {
     if let Some(dst) = dst_for_src(cfg, src)
-        && dst.exists() {
-            // Only try to remove files; directories are not managed here.
-            if dst.is_file() {
-                std::fs::remove_file(&dst)?;
-            }
+        && dst.exists()
+    {
+        // Only try to remove files; directories are not managed here.
+        if dst.is_file() {
+            std::fs::remove_file(&dst)?;
         }
+    }
     Ok(())
 }

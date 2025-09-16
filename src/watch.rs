@@ -50,19 +50,20 @@ pub fn run_watch(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::Result
                 // On timeout, if we had pending events and the quiet period elapsed, sync.
                 if pending
                     && let Some(t) = last_event
-                        && t.elapsed() >= debounce {
-                            pending = false;
-                            // Drain and dedup changed paths, then selectively sync
-                            dirty_paths.sort();
-                            dirty_paths.dedup();
-                            let (ok_count, err_count) =
-                                process_changed_paths(cfg, provider, dirty_paths.drain(..));
-                            // We reached a consistent state; mark healthy (idempotent)
-                            if let Err(e) = health::mark_ready(&cfg.status_file) {
-                                warn!(error=?e, "failed to update status file after resync");
-                            }
-                            info!(ok=?ok_count, errors=?err_count, "selective resync complete after changes");
-                        }
+                    && t.elapsed() >= debounce
+                {
+                    pending = false;
+                    // Drain and dedup changed paths, then selectively sync
+                    dirty_paths.sort();
+                    dirty_paths.dedup();
+                    let (ok_count, err_count) =
+                        process_changed_paths(cfg, provider, dirty_paths.drain(..));
+                    // We reached a consistent state; mark healthy (idempotent)
+                    if let Err(e) = health::mark_ready(&cfg.status_file) {
+                        warn!(error=?e, "failed to update status file after resync");
+                    }
+                    info!(ok=?ok_count, errors=?err_count, "selective resync complete after changes");
+                }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 warn!("watcher disconnected; exiting watch loop");
