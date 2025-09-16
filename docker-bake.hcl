@@ -1,10 +1,10 @@
+variable "VERSION"   { default = "0.0.0"}
 variable "REGISTRY"  { default = "ghcr.io/bpbradley" }
 variable "IMAGE"     { default = "secret-sidecar" }
-variable "VERSION"   { default = "0.2.0" }
 variable "PLATFORMS" { default = "linux/amd64" }
 
 group "release" {
-  targets = ["base", "op"]
+  targets = ["base", "op", "aio"]
 }
 
 target "_common" {
@@ -36,9 +36,9 @@ target "op" {
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
-target "all" {
+target "aio" {
   inherits = ["_common"]
-  target   = "all"
+  target   = "aio"
   tags = [
     "${REGISTRY}/${IMAGE}:${VERSION}",
     "${REGISTRY}/${IMAGE}:${split(".", VERSION)[0]}.${split(".", VERSION)[1]}",
