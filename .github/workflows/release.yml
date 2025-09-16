@@ -16,7 +16,7 @@ jobs:
     name: Build & push Docker images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Derive VERSION from tag
         run: |
@@ -50,7 +50,7 @@ jobs:
     needs: docker
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Generate notes
         run: |
