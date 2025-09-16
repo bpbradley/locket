@@ -74,8 +74,8 @@ pub fn sanitize_name(raw: &str) -> String {
 }
 
 fn tmp_dest_path(dst: &Path) -> PathBuf {
-    let rand: String = rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
+    let rand: String = rand::rng()
+        .sample_iter(&rand::distr::Alphanumeric)
         .take(8)
         .map(char::from)
         .collect();

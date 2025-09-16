@@ -1,5 +1,5 @@
 //! Atomic file write utilities
-use rand::{Rng, distributions::Alphanumeric};
+use rand::{Rng, distr::Alphanumeric};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -39,7 +39,7 @@ pub fn atomic_move(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 fn tmp_path(path: &Path) -> PathBuf {
-    let suffix: String = rand::thread_rng()
+    let suffix: String = rand::rng()
         .sample_iter(&Alphanumeric)
         .take(8)
         .map(char::from)

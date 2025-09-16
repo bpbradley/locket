@@ -73,8 +73,8 @@ pub fn sync_templates(cfg: &Config, provider: &dyn SecretsProvider) -> anyhow::R
 }
 
 pub(crate) fn tmp_dest_path(dst: &Path) -> PathBuf {
-    let rand: String = rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
+    let rand: String = rand::rng()
+        .sample_iter(&rand::distr::Alphanumeric)
         .take(8)
         .map(char::from)
         .collect();
