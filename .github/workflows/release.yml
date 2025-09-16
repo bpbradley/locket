@@ -15,14 +15,20 @@ jobs:
   docker:
     name: Build & push Docker images
     runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ github.ref_name && startsWith(github.ref_name, 'v') && slice(github.ref_name, 1) || github.ref_name }}
-
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive VERSION from tag
+        run: |
+          REF="${GITHUB_REF_NAME}"
+          if [[ "$REF" == v* ]]; then
+            echo "VERSION=${REF#v}" >> $GITHUB_ENV
+          else
+            echo "VERSION=$REF" >> $GITHUB_ENV
+          fi
+
       - name: Show release version
-        run: echo "Releasing VERSION=$VERSION"
+        run: echo "VERSION=$VERSION"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
