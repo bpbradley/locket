@@ -34,7 +34,7 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 
 [docker-build]
 description = "docker build dev image"
-cmd = "VERSION=0.0.0-dev docker buildx bake -f docker-bake.hcl release --load"
+cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake -f docker-bake.hcl release --load"
 
 [docker-test]
 description = "Run test of docker image"

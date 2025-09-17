@@ -1,4 +1,5 @@
-FROM rust:1.89-alpine3.20 AS build
+ARG RUST_TAG=1.89-alpine3.22
+FROM rust:${RUST_TAG} AS build
 WORKDIR /src
 RUN apk add --no-cache musl-dev build-base pkgconfig \
  && rustup target add x86_64-unknown-linux-musl
