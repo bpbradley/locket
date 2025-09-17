@@ -19,8 +19,7 @@ thiserror = "2"
 rand = "0.9"
 walkdir = "2"
 secrecy = "0.10.3"
-strum = "0.27.2"
-strum_macros = "0.27.2"
+sysexits = "0.7"
 
 [dev-dependencies]
 assert_fs = "1"
