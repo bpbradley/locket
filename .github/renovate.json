@@ -3,10 +3,15 @@
   "extends": [
     "config:recommended"
   ],
-  "regexManagers": [
+  "customManagers": [
     {
-      "fileMatch": ["^Dockerfile$"],
-      "matchStrings": ["ARG\\s+RUST_TAG=(?<currentValue>[^\\s]+)"],
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG\\s+RUST_TAG=(?<currentValue>[^\\s]+)"
+      ],
       "datasourceTemplate": "docker",
       "depNameTemplate": "rust",
       "versioningTemplate": "docker"
