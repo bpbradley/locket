@@ -1,9 +1,10 @@
 use super::HealthArgs;
+use sysexits::ExitCode;
 
-pub fn healthcheck(args: HealthArgs) -> anyhow::Result<i32> {
-    Ok(if crate::health::is_ready(&args.status_file) {
-        0
+pub fn healthcheck(args: HealthArgs) -> ExitCode {
+    if crate::health::is_ready(&args.status_file) {
+        ExitCode::Ok
     } else {
-        1
-    })
+        ExitCode::Unavailable
+    }
 }
