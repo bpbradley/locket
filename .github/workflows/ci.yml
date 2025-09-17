@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
+      contents: read
     outputs:
       rust:   ${{ steps.filter.outputs.rust }}
       docker: ${{ steps.filter.outputs.docker }}
