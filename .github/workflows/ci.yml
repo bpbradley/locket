@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  changes:
+  filter:
     runs-on: ubuntu-latest
     outputs:
       rust:   ${{ steps.filter.outputs.rust }}
@@ -32,11 +32,10 @@ jobs:
               - 'docker-bake.hcl'
               - 'compose*.yml'
               - 'compose*.yaml'
-
-  test:
+  secret-sidecar:
     name: Build, clippy, test
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    needs: filter
+    if: needs.filter.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
@@ -59,10 +58,10 @@ jobs:
       - run: cargo test --locked
       - run: cargo clippy --all-targets
 
-  docker-tests:
+  docker:
     name: Docker build
-    needs: changes
-    if: needs.changes.outputs.docker == 'true'
+    needs: filter
+    if: needs.filter.outputs.docker == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
