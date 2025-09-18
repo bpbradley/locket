@@ -1,4 +1,4 @@
-ARG RUST_TAG=1.89-alpine3.22
+ARG RUST_TAG=1.90-alpine3.22
 FROM rust:${RUST_TAG} AS build
 WORKDIR /src
 RUN apk add --no-cache musl-dev build-base pkgconfig \
