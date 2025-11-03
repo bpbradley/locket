@@ -3,9 +3,17 @@
 //! Providers will inject secrets from templates
 use crate::provider::op::{OpConfig, OpProvider};
 use clap::{Args, ValueEnum};
+use std::io::Write;
+use std::path::Path;
+use tempfile::NamedTempFile;
 
 pub trait SecretsProvider {
-    fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError>;
+    fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError>;
+    fn inject_from_bytes(&self, bytes: &[u8], dst: &Path) -> Result<(), ProviderError> {
+        let mut src_tmp = NamedTempFile::new()?;
+        src_tmp.write_all(bytes)?;
+        self.inject(src_tmp.path(), dst)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

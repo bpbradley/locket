@@ -1,6 +1,5 @@
 use super::RunArgs;
-use crate::{envvars, health, logging, mirror, watch};
-use std::collections::HashSet;
+use crate::{health, logging, secrets::Secrets, watch};
 use sysexits::ExitCode;
 use tracing::{debug, error};
 
@@ -19,22 +18,25 @@ pub fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    let env_plans = envvars::plan_env_secrets(&args.config);
-    let tpl_plans = mirror::plan_templates(&args.config);
-    let env_paths: HashSet<_> = env_plans.iter().map(|e| e.dst.clone()).collect();
-    let tpl_paths: HashSet<_> = tpl_plans.iter().map(|t| t.dst.clone()).collect();
-    let conflicts: Vec<_> = env_paths.intersection(&tpl_paths).cloned().collect();
+    let mut set = match Secrets::from_config(&args.config) {
+        Ok(s) => s,
+        Err(e) => {
+            error!(error=%e, "failed collecting secrets from config");
+            return ExitCode::Config;
+        }
+    };
+
+    let conflicts = set.collisions();
     if !conflicts.is_empty() {
-        error!(?conflicts, "conflict between env secrets and templates");
+        error!(
+            ?conflicts,
+            "duplicate destination paths for secrets (files or values)"
+        );
         return ExitCode::DataErr;
     }
 
-    if let Err(e) = mirror::sync_templates(&args.config, provider.as_ref()) {
-        error!(error=%e, "sync templates failed");
-        return ExitCode::IoErr;
-    }
-    if let Err(e) = envvars::sync_env_secrets(&args.config, provider.as_ref()) {
-        error!(error=%e, "sync env secrets failed");
+    if let Err(e) = set.inject_all(&args.config, provider.as_ref()) {
+        error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
 
@@ -47,7 +49,7 @@ pub fn run(args: RunArgs) -> ExitCode {
     if args.once {
         ExitCode::Ok
     } else if args.config.watch {
-        match watch::run_watch(&args.config, provider.as_ref()) {
+        match watch::run_watch(&args.config, &mut set, provider.as_ref()) {
             Ok(()) => ExitCode::Ok,
             Err(e) => {
                 error!(error=%e, "watch errored");

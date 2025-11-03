@@ -1,23 +1,24 @@
 //! Atomic file write utilities
-use rand::{Rng, distr::Alphanumeric};
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = tmp_path(path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut f = File::create(&tmp)?;
+    let parent = path.parent().ok_or_else(|| io::Error::other("no parent"))?;
+    let tmp = tempfile::Builder::new()
+        .prefix(".tmp.")
+        .tempfile_in(parent)?;
+    let mut f = tmp.reopen()?;
     f.write_all(bytes)?;
     f.sync_all()?;
+    let tmp_path = tmp.into_temp_path();
     // Rename is atomic on the same filesystem
-    std::fs::rename(&tmp, path)?;
+    std::fs::rename(&tmp_path, path)?;
     // fsync the parent dir for durability where supported
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = File::open(parent)
-    {
+    if let Ok(dir) = File::open(parent) {
         let _ = dir.sync_all();
     }
     Ok(())
@@ -26,28 +27,14 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 pub fn atomic_move(from: &Path, to: &Path) -> io::Result<()> {
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent)?;
+        fs::rename(from, to)?;
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
+    } else {
+        Err(io::Error::other("destination has no parent"))
     }
-    // Rename is atomic on the same filesystem
-    std::fs::rename(from, to)?;
-    // fsync the parent dir for durability where supported
-    if let Some(parent) = to.parent()
-        && let Ok(dir) = File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
-    Ok(())
-}
-
-fn tmp_path(path: &Path) -> PathBuf {
-    let suffix: String = rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(8)
-        .map(char::from)
-        .collect();
-    let mut pb = path.as_os_str().to_owned();
-    let s = format!(".tmp.{}", suffix);
-    pb.push(&s);
-    PathBuf::from(pb)
 }
 
 #[cfg(test)]
