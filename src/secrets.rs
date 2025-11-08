@@ -8,75 +8,235 @@ use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
+pub struct FileSource {
+    pub src: PathBuf,
+    pub dst: PathBuf,
+}
+
+impl FileSource {
+    pub fn from_src(templates_root: &Path, output_root: &Path, src: PathBuf) -> Option<Self> {
+        let rel = src.strip_prefix(templates_root).ok()?.to_owned();
+        Some(Self {
+            src,
+            dst: output_root.join(rel),
+        })
+    }
+
+    pub fn rename(&mut self, templates_root: &Path, output_root: &Path, new_src: PathBuf) -> bool {
+        match new_src.strip_prefix(templates_root) {
+            Ok(rel) => {
+                let rel = rel.to_owned();
+                self.src = new_src;
+                self.dst = output_root.join(rel);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub fn inject(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
+        info!(src=?self.src, dst=?self.dst, "injecting file secret");
+        if let Some(parent) = self.dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let parent = self
+            .dst
+            .parent()
+            .ok_or_else(|| anyhow!("dst has no parent"))?;
+        let tmp_out = tempfile::Builder::new()
+            .prefix(".tmp.")
+            .tempfile_in(parent)?
+            .into_temp_path();
+
+        match provider.inject(&self.src, tmp_out.as_ref()) {
+            Ok(()) => {
+                write::atomic_move(tmp_out.as_ref(), &self.dst)?;
+                Ok(())
+            }
+            Err(e) if cfg.inject_fallback_copy => {
+                warn!(src=?self.src, dst=?self.dst, error=?e, "injection failed; falling back to raw copy for file secret");
+                let bytes = fs::read(&self.src)
+                    .with_context(|| format!("read failed for {:?}", self.src))?;
+                write::atomic_write(tmp_out.as_ref(), &bytes)?;
+                write::atomic_move(tmp_out.as_ref(), &self.dst)?;
+                Ok(())
+            }
+            Err(e) => Err(anyhow!("injection failed and fallback disabled: {e}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ValueSource {
     pub dst: PathBuf,
     pub template: String,
     pub label: String,
 }
 
-#[derive(Default, Debug)]
+impl ValueSource {
+    pub fn inject(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
+        info!(dst=?self.dst, label=%self.label, "injecting value secret");
+        if let Some(parent) = self.dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let parent = self
+            .dst
+            .parent()
+            .ok_or_else(|| anyhow!("dst has no parent"))?;
+        let tmp_out = tempfile::Builder::new()
+            .prefix(".tmp.")
+            .tempfile_in(parent)?
+            .into_temp_path();
+
+        match provider.inject_from_bytes(self.template.as_bytes(), tmp_out.as_ref()) {
+            Ok(()) => {
+                write::atomic_move(tmp_out.as_ref(), &self.dst)?;
+                Ok(())
+            }
+            Err(e) if cfg.inject_fallback_copy => {
+                warn!(dst=?self.dst, label=%self.label, error=?e, "injection failed; falling back to raw copy for value secret");
+                write::atomic_write(tmp_out.as_ref(), self.template.as_bytes())?;
+                write::atomic_move(tmp_out.as_ref(), &self.dst)?;
+                Ok(())
+            }
+            Err(e) => Err(anyhow!("injection failed and fallback disabled: {e}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SecretItem {
+    File(FileSource),
+    Value(ValueSource),
+}
+
+impl SecretItem {
+    #[inline]
+    pub fn dst(&self) -> &Path {
+        match self {
+            SecretItem::File(f) => &f.dst,
+            SecretItem::Value(v) => &v.dst,
+        }
+    }
+
+    #[inline]
+    pub fn src_path(&self) -> Option<&Path> {
+        match self {
+            SecretItem::File(f) => Some(&f.src),
+            SecretItem::Value(_) => None,
+        }
+    }
+
+    pub fn inject(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
+        match self {
+            SecretItem::File(f) => f.inject(cfg, provider),
+            SecretItem::Value(v) => v.inject(cfg, provider),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Secrets {
-    /// Mapping of template source -> destination
-    pub files: IndexMap<PathBuf, PathBuf>,
-    /// Value-based secrets (template string -> destination)
-    pub values: Vec<ValueSource>,
+    pub templates_root: PathBuf,
+    pub output_root: PathBuf,
+
+    items: Vec<Option<SecretItem>>,
+    file_index: IndexMap<PathBuf, usize>,
 }
 
 impl Secrets {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(templates_root: PathBuf, output_root: PathBuf) -> Self {
+        Self {
+            templates_root,
+            output_root,
+            items: Vec::new(),
+            file_index: IndexMap::new(),
+        }
     }
 
     pub fn from_config(cfg: &Config) -> Result<Self> {
-        let files = collect_files(&cfg.templates_dir, &cfg.output_dir);
-        let values = collect_value_sources_from_env(&cfg.output_dir, "secret_");
-        Ok(Self { files, values })
+        let mut s = Self::new(cfg.templates_dir.clone(), cfg.output_dir.clone());
+        for fs in collect_files_iter(&s.templates_root.clone(), &s.output_root.clone()) {
+            s.push_file(fs);
+        }
+        s.extend_values_from_env("secret_");
+        Ok(s)
     }
 
-    pub fn add_value(
+    pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
+        self.push_value(value_source(&self.output_root, label, template));
+        self
+    }
+
+    pub fn extend_values(
         &mut self,
-        output_root: &Path,
-        label: &str,
-        template: impl AsRef<str>,
+        pairs: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
     ) -> &mut Self {
-        let vs = value_source(output_root, label, template);
-        self.values.push(vs);
-        self
-    }
-
-    pub fn extend_values_iter<L, T, I>(&mut self, output_root: &Path, pairs: I) -> &mut Self
-    where
-        L: AsRef<str>,
-        T: AsRef<str>,
-        I: IntoIterator<Item = (L, T)>,
-    {
-        for (label, tpl) in pairs.into_iter() {
-            let vs = value_source(output_root, label.as_ref(), tpl);
-            self.values.push(vs);
+        for (label, tpl) in pairs {
+            self.push_value(value_source(
+                &self.output_root,
+                label.as_ref(),
+                tpl.as_ref(),
+            ));
         }
         self
     }
 
-    pub fn extend_values_from_env(&mut self, output_root: &Path, prefix: &str) -> &mut Self {
-        let mut collected = collect_value_sources_from_env(output_root, prefix);
-        self.values.append(&mut collected);
+    pub fn extend_values_from_env(&mut self, prefix: &str) -> &mut Self {
+        for v in collect_value_sources_from_env(&self.output_root, prefix) {
+            self.push_value(v);
+        }
         self
     }
 
-    /// Return destination paths that appear more than once across files + values
-    pub fn collisions(&self) -> Vec<PathBuf> {
-        use std::collections::HashMap;
-        let mut counts: HashMap<PathBuf, usize> = HashMap::new();
-        for dst in self.files.values() {
-            *counts.entry(dst.clone()).or_insert(0) += 1;
+    pub fn upsert_file(&mut self, src: PathBuf) -> bool {
+        if let Some(newf) =
+            FileSource::from_src(&self.templates_root, &self.output_root, src.clone())
+        {
+            if let Some(&idx) = self.file_index.get(&src) {
+                self.items[idx] = Some(SecretItem::File(newf));
+            } else {
+                self.push_file(newf);
+            }
+            true
+        } else {
+            false
         }
-        for v in &self.values {
-            *counts.entry(v.dst.clone()).or_insert(0) += 1;
+    }
+
+    pub fn rename_file(&mut self, old_src: PathBuf, new_src: PathBuf) -> bool {
+        let Some(idx) = self.file_index.swap_remove(&old_src) else {
+            // not tracked; treat as upsert
+            return self.upsert_file(new_src);
+        };
+
+        match self.items.get_mut(idx) {
+            Some(Some(SecretItem::File(f))) => {
+                if f.rename(&self.templates_root, &self.output_root, new_src.clone()) {
+                    self.file_index.insert(new_src, idx);
+                    true
+                } else {
+                    self.items[idx] = None;
+                    false
+                }
+            }
+            _ => {
+                self.items[idx] = None;
+                false
+            }
         }
-        counts
-            .into_iter()
-            .filter_map(|(p, c)| (c > 1).then_some(p))
-            .collect()
+    }
+
+    pub fn remove_file(&mut self, src: &Path) -> Option<PathBuf> {
+        let idx = self.file_index.swap_remove(src)?;
+        if let Some(slot) = self.items.get_mut(idx)
+            && let Some(SecretItem::File(f)) = slot.as_ref()
+        {
+            let dst = f.dst.clone();
+            *slot = None;
+            return Some(dst);
+        }
+        None
     }
 
     pub fn inject_file(
@@ -85,91 +245,68 @@ impl Secrets {
         provider: &dyn SecretsProvider,
         src: &Path,
     ) -> Result<bool> {
-        let Some(dst) = self.files.get(src) else {
-            return Ok(false);
-        };
-
-        info!(src=?src, dst=?dst, "injecting file secret");
-        if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent)?;
+        if let Some(&idx) = self.file_index.get(src)
+            && let Some(Some(item)) = self.items.get(idx)
+        {
+            item.inject(cfg, provider)?;
+            return Ok(true);
         }
-
-        let tmp_out = tempfile::Builder::new()
-            .prefix(".tmp.")
-            .tempfile_in(dst.parent().ok_or_else(|| anyhow!("dst has no parent"))?)?
-            .into_temp_path();
-
-        match provider.inject(src, tmp_out.as_ref()) {
-            Ok(()) => {
-                write::atomic_move(tmp_out.as_ref(), dst)?;
-                Ok(true)
-            }
-            Err(e) => {
-                if cfg.inject_fallback_copy {
-                    warn!(src=?src, dst=?dst, error=?e, "injection failed; falling back to raw copy for file secret");
-                    let bytes =
-                        fs::read(src).with_context(|| format!("read failed for {src:?}"))?;
-                    write::atomic_write(tmp_out.as_ref(), &bytes)?;
-                    write::atomic_move(tmp_out.as_ref(), dst)?;
-                    Ok(true)
-                } else {
-                    Err(anyhow!("injection failed and fallback disabled: {e}"))
-                }
-            }
-        }
+        Ok(false)
     }
 
-    /// Inject all secrets: values first, then files. Fallback copy semantics apply to both kinds.
     pub fn inject_all(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
-        // Values
-        for v in &self.values {
-            info!(dst=?v.dst, label=%v.label, "injecting value secret");
-            if let Some(parent) = v.dst.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let tmp_out = tempfile::Builder::new()
-                .prefix(".tmp.")
-                .tempfile_in(v.dst.parent().unwrap())?
-                .into_temp_path();
-
-            match provider.inject_from_bytes(v.template.as_bytes(), tmp_out.as_ref()) {
-                Ok(()) => write::atomic_move(tmp_out.as_ref(), &v.dst)?,
-                Err(e) if cfg.inject_fallback_copy => {
-                    warn!(dst=?v.dst, label=%v.label, error=?e, "injection failed; falling back to raw copy for value secret");
-                    write::atomic_write(tmp_out.as_ref(), v.template.as_bytes())?;
-                    write::atomic_move(tmp_out.as_ref(), &v.dst)?;
-                }
-                Err(e) => return Err(anyhow!("injection failed and fallback disabled: {e}")),
+        for item in self.items.iter().flatten() {
+            if let SecretItem::Value(v) = item {
+                v.inject(cfg, provider)?;
             }
         }
-
-        for src in self.files.keys() {
-            self.inject_file(cfg, provider, src)?;
+        for item in self.items.iter().flatten() {
+            if let SecretItem::File(f) = item {
+                f.inject(cfg, provider)?;
+            }
         }
-
         Ok(())
+    }
+
+    pub fn collisions(&self) -> Vec<PathBuf> {
+        use std::collections::HashMap;
+        let mut counts: HashMap<PathBuf, usize> = HashMap::new();
+
+        for item in self.items.iter().flatten() {
+            *counts.entry(item.dst().to_path_buf()).or_insert(0) += 1;
+        }
+
+        counts
+            .into_iter()
+            .filter_map(|(p, n)| (n > 1).then_some(p))
+            .collect()
+    }
+
+    fn push_file(&mut self, f: FileSource) {
+        let idx = self.items.len();
+        self.file_index.insert(f.src.clone(), idx);
+        self.items.push(Some(SecretItem::File(f)));
+    }
+
+    fn push_value(&mut self, v: ValueSource) {
+        self.items.push(Some(SecretItem::Value(v)));
     }
 }
 
-pub fn collect_files(templates_root: &Path, output_root: &Path) -> IndexMap<PathBuf, PathBuf> {
-    let mut map = IndexMap::new();
-    if !templates_root.exists() {
-        return map;
-    }
-    for entry in WalkDir::new(templates_root)
+pub fn collect_files_iter<'a>(
+    templates_root: &'a Path,
+    output_root: &'a Path,
+) -> impl Iterator<Item = FileSource> + 'a {
+    WalkDir::new(templates_root)
         .into_iter()
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
-    {
-        let rel = match entry.path().strip_prefix(templates_root) {
-            Ok(r) => r.to_path_buf(),
-            Err(_) => continue,
-        };
-        let dst = output_root.join(rel);
-        map.insert(entry.path().to_path_buf(), dst.clone());
-        debug!(src=?entry.path(), dst=?dst, "collected file secret");
-    }
-    map
+        .filter_map(move |e| {
+            let src = e.path().to_path_buf();
+            FileSource::from_src(templates_root, output_root, src).inspect(|fs| {
+                debug!(src=?fs.src, dst=?fs.dst, "collected file secret");
+            })
+        })
 }
 
 pub fn collect_value_sources<L, T, I>(output_root: &Path, pairs: I) -> Vec<ValueSource>

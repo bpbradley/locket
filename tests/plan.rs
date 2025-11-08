@@ -1,4 +1,4 @@
-use secret_sidecar::secrets::{collect_files, collect_value_sources};
+use secret_sidecar::secrets::{collect_files_iter, collect_value_sources};
 
 #[test]
 fn collect_files_maps_tree() {
@@ -8,10 +8,10 @@ fn collect_files_maps_tree() {
     std::fs::write(tpl.join("a/b/x.txt"), b"hello").unwrap();
     std::fs::write(tpl.join("root.txt"), b"hi").unwrap();
     let out = tmp.path().join("out");
-    let map = collect_files(&tpl, &out);
-    assert_eq!(map.len(), 2);
-    assert!(map.values().any(|d| d.ends_with("a/b/x.txt")));
-    assert!(map.values().any(|d| d.ends_with("root.txt")));
+    let files: Vec<_> = collect_files_iter(&tpl, &out).collect();
+    assert_eq!(files.len(), 2);
+    assert!(files.iter().any(|f| f.dst.ends_with("a/b/x.txt")));
+    assert!(files.iter().any(|f| f.dst.ends_with("root.txt")));
 }
 
 #[test]

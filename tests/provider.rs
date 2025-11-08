@@ -1,7 +1,7 @@
 use secret_sidecar::{
     config::Config,
     provider::{ProviderError, SecretsProvider},
-    secrets::{Secrets, collect_files},
+    secrets::{Secrets, collect_files_iter},
 };
 use std::env;
 use std::path::Path;
@@ -29,11 +29,11 @@ fn inject_all_success_for_files_and_values() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets {
-        files: collect_files(&tpl, &out),
-        values: vec![],
-    };
-    secrets.add_value(&out, "Greeting", "Hi {{name}}");
+    let mut secrets = Secrets::new(tpl.clone(), out.clone());
+    for fs in collect_files_iter(&tpl, &out) {
+        secrets.upsert_file(fs.src.clone());
+    }
+    secrets.add_value("Greeting", "Hi {{name}}");
     let cfg = Config {
         templates_dir: tpl.clone(),
         output_dir: out.clone(),
@@ -55,10 +55,10 @@ fn inject_all_fallback_copy_on_error() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
     let out = tmp.path().join("out");
-    let secrets = Secrets {
-        files: collect_files(&tpl, &out),
-        values: vec![],
-    };
+    let mut secrets = Secrets::new(tpl.clone(), out.clone());
+    for fs in collect_files_iter(&tpl, &out) {
+        secrets.upsert_file(fs.src.clone());
+    }
     let cfg = Config {
         templates_dir: tpl.clone(),
         output_dir: out.clone(),
@@ -80,10 +80,10 @@ fn inject_all_error_without_fallback() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
     let out = tmp.path().join("out");
-    let secrets = Secrets {
-        files: collect_files(&tpl, &out),
-        values: vec![],
-    };
+    let mut secrets = Secrets::new(tpl.clone(), out.clone());
+    for fs in collect_files_iter(&tpl, &out) {
+        secrets.upsert_file(fs.src.clone());
+    }
     let cfg = Config {
         templates_dir: tpl.clone(),
         output_dir: out.clone(),
