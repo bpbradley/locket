@@ -17,7 +17,7 @@ pub fn run_watch(
     secrets: &mut Secrets,
     provider: &dyn SecretsProvider,
 ) -> anyhow::Result<()> {
-    let tpl_dir = Path::new(&cfg.templates_dir);
+    let tpl_dir = Path::new(&cfg.secrets.templates_dir);
     if !tpl_dir.exists() {
         std::fs::create_dir_all(tpl_dir)?;
         info!(path=?tpl_dir, "created missing templates directory for watch");
@@ -69,7 +69,7 @@ pub fn run_watch(
                                 let new_src = ev.paths[1].clone();
                                 // Update mapping to new src/dst
                                 if secrets.rename_file(old_src.clone(), new_src.clone()) {
-                                    match secrets.inject_file(cfg, provider, &new_src) {
+                                    match secrets.inject_file(provider, &new_src) {
                                         Ok(true) => ok += 1,
                                         Ok(false) => debug!(
                                             ?new_src,
@@ -97,7 +97,7 @@ pub fn run_watch(
                     for p in paths {
                         if p.exists() && p.is_file() {
                             if secrets.upsert_file(p.clone()) {
-                                match secrets.inject_file(cfg, provider, &p) {
+                                match secrets.inject_file(provider, &p) {
                                     Ok(true) => ok += 1,
                                     Ok(false) => debug!(?p, "inject skipped; src not tracked"),
                                     Err(e) => {

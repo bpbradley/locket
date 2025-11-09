@@ -1,11 +1,32 @@
-use crate::{config::Config, provider::SecretsProvider, write};
+use crate::{provider::SecretsProvider, write};
 use anyhow::{Context, Result, anyhow};
+use clap::{Args, ValueEnum};
 use indexmap::IndexMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile;
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
+
+#[derive(Copy, Clone, Debug, ValueEnum, Default)]
+pub enum InjectFailurePolicy {
+    Error,
+    #[default]
+    CopyUnmodified,
+    Ignore,
+}
+
+#[derive(Debug, Clone, Args, Default)]
+pub struct SecretsConfig {
+    #[arg(long, env = "TEMPLATES_DIR", default_value = "/templates")]
+    pub templates_dir: PathBuf,
+    #[arg(long, env = "OUTPUT_DIR", default_value = "/run/secrets")]
+    pub output_dir: PathBuf,
+    #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
+    pub env_value_prefix: String,
+    #[arg(long, env = "INJECT_FAILURE_POLICY", value_enum, default_value_t = InjectFailurePolicy::CopyUnmodified)]
+    pub inject_failure_policy: InjectFailurePolicy,
+}
 
 #[derive(Debug, Clone)]
 pub struct FileSource {
@@ -34,7 +55,11 @@ impl FileSource {
         }
     }
 
-    pub fn inject(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
+    pub fn inject(
+        &self,
+        policy: InjectFailurePolicy,
+        provider: &dyn SecretsProvider,
+    ) -> Result<()> {
         info!(src=?self.src, dst=?self.dst, "injecting file secret");
         if let Some(parent) = self.dst.parent() {
             fs::create_dir_all(parent)?;
@@ -53,15 +78,21 @@ impl FileSource {
                 write::atomic_move(tmp_out.as_ref(), &self.dst)?;
                 Ok(())
             }
-            Err(e) if cfg.inject_fallback_copy => {
-                warn!(src=?self.src, dst=?self.dst, error=?e, "injection failed; falling back to raw copy for file secret");
-                let bytes = fs::read(&self.src)
-                    .with_context(|| format!("read failed for {:?}", self.src))?;
-                write::atomic_write(tmp_out.as_ref(), &bytes)?;
-                write::atomic_move(tmp_out.as_ref(), &self.dst)?;
-                Ok(())
-            }
-            Err(e) => Err(anyhow!("injection failed and fallback disabled: {e}")),
+            Err(e) => match policy {
+                InjectFailurePolicy::Error => Err(anyhow!("injection failed: {e}")),
+                InjectFailurePolicy::CopyUnmodified => {
+                    warn!(src=?self.src, dst=?self.dst, error=?e, "injection failed; falling back to raw copy for file secret");
+                    let bytes = fs::read(&self.src)
+                        .with_context(|| format!("read failed for {:?}", self.src))?;
+                    write::atomic_write(tmp_out.as_ref(), &bytes)?;
+                    write::atomic_move(tmp_out.as_ref(), &self.dst)?;
+                    Ok(())
+                }
+                InjectFailurePolicy::Ignore => {
+                    warn!(src=?self.src, dst=?self.dst, error=?e, "injection failed; ignoring");
+                    Ok(())
+                }
+            },
         }
     }
 }
@@ -74,7 +105,11 @@ pub struct ValueSource {
 }
 
 impl ValueSource {
-    pub fn inject(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
+    pub fn inject(
+        &self,
+        policy: InjectFailurePolicy,
+        provider: &dyn SecretsProvider,
+    ) -> Result<()> {
         info!(dst=?self.dst, label=%self.label, "injecting value secret");
         if let Some(parent) = self.dst.parent() {
             fs::create_dir_all(parent)?;
@@ -93,13 +128,19 @@ impl ValueSource {
                 write::atomic_move(tmp_out.as_ref(), &self.dst)?;
                 Ok(())
             }
-            Err(e) if cfg.inject_fallback_copy => {
-                warn!(dst=?self.dst, label=%self.label, error=?e, "injection failed; falling back to raw copy for value secret");
-                write::atomic_write(tmp_out.as_ref(), self.template.as_bytes())?;
-                write::atomic_move(tmp_out.as_ref(), &self.dst)?;
-                Ok(())
-            }
-            Err(e) => Err(anyhow!("injection failed and fallback disabled: {e}")),
+            Err(e) => match policy {
+                InjectFailurePolicy::Error => Err(anyhow!("injection failed: {e}")),
+                InjectFailurePolicy::CopyUnmodified => {
+                    warn!(dst=?self.dst, label=%self.label, error=?e, "injection failed; falling back to raw copy for value secret");
+                    write::atomic_write(tmp_out.as_ref(), self.template.as_bytes())?;
+                    write::atomic_move(tmp_out.as_ref(), &self.dst)?;
+                    Ok(())
+                }
+                InjectFailurePolicy::Ignore => {
+                    warn!(dst=?self.dst, label=%self.label, error=?e, "injection failed; ignoring");
+                    Ok(())
+                }
+            },
         }
     }
 }
@@ -127,10 +168,14 @@ impl SecretItem {
         }
     }
 
-    pub fn inject(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
+    pub fn inject(
+        &self,
+        policy: InjectFailurePolicy,
+        provider: &dyn SecretsProvider,
+    ) -> Result<()> {
         match self {
-            SecretItem::File(f) => f.inject(cfg, provider),
-            SecretItem::Value(v) => v.inject(cfg, provider),
+            SecretItem::File(f) => f.inject(policy, provider),
+            SecretItem::Value(v) => v.inject(policy, provider),
         }
     }
 }
@@ -139,27 +184,29 @@ impl SecretItem {
 pub struct Secrets {
     pub templates_root: PathBuf,
     pub output_root: PathBuf,
+    pub policy: InjectFailurePolicy,
 
     items: Vec<Option<SecretItem>>,
     file_index: IndexMap<PathBuf, usize>,
 }
 
 impl Secrets {
-    pub fn new(templates_root: PathBuf, output_root: PathBuf) -> Self {
+    pub fn new(templates_root: PathBuf, output_root: PathBuf, policy: InjectFailurePolicy) -> Self {
         Self {
             templates_root,
             output_root,
+            policy,
             items: Vec::new(),
             file_index: IndexMap::new(),
         }
     }
 
-    pub fn from_config(cfg: &Config) -> Result<Self> {
-        let mut s = Self::new(cfg.templates_dir.clone(), cfg.output_dir.clone());
+    pub fn from_config(cfg: &SecretsConfig) -> Result<Self> {
+        let mut s = Self::new(cfg.templates_dir.clone(), cfg.output_dir.clone(), cfg.inject_failure_policy);
         for fs in collect_files_iter(&s.templates_root.clone(), &s.output_root.clone()) {
             s.push_file(fs);
         }
-        s.extend_values_from_env("secret_");
+        s.extend_values_from_env(&cfg.env_value_prefix);
         Ok(s)
     }
 
@@ -206,7 +253,6 @@ impl Secrets {
 
     pub fn rename_file(&mut self, old_src: PathBuf, new_src: PathBuf) -> bool {
         let Some(idx) = self.file_index.swap_remove(&old_src) else {
-            // not tracked; treat as upsert
             return self.upsert_file(new_src);
         };
 
@@ -239,30 +285,25 @@ impl Secrets {
         None
     }
 
-    pub fn inject_file(
-        &self,
-        cfg: &Config,
-        provider: &dyn SecretsProvider,
-        src: &Path,
-    ) -> Result<bool> {
+    pub fn inject_file(&self, provider: &dyn SecretsProvider, src: &Path) -> Result<bool> {
         if let Some(&idx) = self.file_index.get(src)
             && let Some(Some(item)) = self.items.get(idx)
         {
-            item.inject(cfg, provider)?;
+            item.inject(self.policy, provider)?;
             return Ok(true);
         }
         Ok(false)
     }
 
-    pub fn inject_all(&self, cfg: &Config, provider: &dyn SecretsProvider) -> Result<()> {
+    pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<()> {
         for item in self.items.iter().flatten() {
             if let SecretItem::Value(v) = item {
-                v.inject(cfg, provider)?;
+                v.inject(self.policy, provider)?;
             }
         }
         for item in self.items.iter().flatten() {
             if let SecretItem::File(f) = item {
-                f.inject(cfg, provider)?;
+                f.inject(self.policy, provider)?;
             }
         }
         Ok(())

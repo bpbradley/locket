@@ -18,7 +18,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    let mut set = match Secrets::from_config(&args.config) {
+    let mut set = match Secrets::from_config(&args.config.secrets) {
         Ok(s) => s,
         Err(e) => {
             error!(error=%e, "failed collecting secrets from config");
@@ -35,7 +35,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         return ExitCode::DataErr;
     }
 
-    if let Err(e) = set.inject_all(&args.config, provider.as_ref()) {
+    if let Err(e) = set.inject_all(provider.as_ref()) {
         error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
