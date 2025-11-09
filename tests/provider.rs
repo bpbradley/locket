@@ -1,6 +1,6 @@
 use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{Secrets, collect_files_iter, SecretsConfig},
+    secrets::{SecretError, Secrets, SecretsConfig, collect_files_iter},
 };
 use std::env;
 use std::path::Path;
@@ -29,10 +29,10 @@ fn inject_all_success_for_files_and_values() {
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
     let out = tmp.path().join("out");
     let cfg = SecretsConfig {
-            templates_dir: tpl.clone(),
-            output_dir: out.clone(),
-            ..Default::default()
-        };
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        ..Default::default()
+    };
     let mut secrets = Secrets::from_config(&cfg).unwrap();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
@@ -92,8 +92,10 @@ fn inject_all_error_without_fallback() {
         inject_should_fail: true,
     };
     let err = secrets.inject_all(&provider).unwrap_err();
-    let msg = format!("{}", err);
-    assert!(msg.contains("injection failed"));
+    match err {
+        SecretError::InjectionFailed { .. } => { /* expected variant */ }
+        other => panic!("expected InjectionFailed, got: {other}"),
+    }
 }
 
 #[test]

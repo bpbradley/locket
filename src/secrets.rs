@@ -1,12 +1,36 @@
 use crate::{provider::SecretsProvider, write};
-use anyhow::{Context, Result, anyhow};
 use clap::{Args, ValueEnum};
 use indexmap::IndexMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile;
+use thiserror::Error;
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
+
+#[derive(Debug, Error)]
+pub enum SecretError {
+    #[error("provider: {0}")]
+    Provider(#[from] crate::provider::ProviderError),
+
+    #[error("injection failed: {source}")]
+    InjectionFailed {
+        #[source]
+        source: crate::provider::ProviderError,
+    },
+
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("dst has no parent: {0}")]
+    NoParent(std::path::PathBuf),
+
+    #[error("injection failed and fallback disabled")]
+    FallbackDisabled {
+        #[source]
+        cause: Box<SecretError>,
+    },
+}
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum InjectFailurePolicy {
@@ -59,7 +83,7 @@ impl FileSource {
         &self,
         policy: InjectFailurePolicy,
         provider: &dyn SecretsProvider,
-    ) -> Result<()> {
+    ) -> Result<(), SecretError> {
         info!(src=?self.src, dst=?self.dst, "injecting file secret");
         if let Some(parent) = self.dst.parent() {
             fs::create_dir_all(parent)?;
@@ -67,7 +91,7 @@ impl FileSource {
         let parent = self
             .dst
             .parent()
-            .ok_or_else(|| anyhow!("dst has no parent"))?;
+            .ok_or_else(|| SecretError::NoParent(self.dst.clone()))?;
         let tmp_out = tempfile::Builder::new()
             .prefix(".tmp.")
             .tempfile_in(parent)?
@@ -79,11 +103,10 @@ impl FileSource {
                 Ok(())
             }
             Err(e) => match policy {
-                InjectFailurePolicy::Error => Err(anyhow!("injection failed: {e}")),
+                InjectFailurePolicy::Error => Err(SecretError::InjectionFailed { source: e }),
                 InjectFailurePolicy::CopyUnmodified => {
                     warn!(src=?self.src, dst=?self.dst, error=?e, "injection failed; falling back to raw copy for file secret");
-                    let bytes = fs::read(&self.src)
-                        .with_context(|| format!("read failed for {:?}", self.src))?;
+                    let bytes = fs::read(&self.src)?;
                     write::atomic_write(tmp_out.as_ref(), &bytes)?;
                     write::atomic_move(tmp_out.as_ref(), &self.dst)?;
                     Ok(())
@@ -109,7 +132,7 @@ impl ValueSource {
         &self,
         policy: InjectFailurePolicy,
         provider: &dyn SecretsProvider,
-    ) -> Result<()> {
+    ) -> Result<(), SecretError> {
         info!(dst=?self.dst, label=%self.label, "injecting value secret");
         if let Some(parent) = self.dst.parent() {
             fs::create_dir_all(parent)?;
@@ -117,7 +140,7 @@ impl ValueSource {
         let parent = self
             .dst
             .parent()
-            .ok_or_else(|| anyhow!("dst has no parent"))?;
+            .ok_or_else(|| SecretError::NoParent(self.dst.clone()))?;
         let tmp_out = tempfile::Builder::new()
             .prefix(".tmp.")
             .tempfile_in(parent)?
@@ -129,7 +152,7 @@ impl ValueSource {
                 Ok(())
             }
             Err(e) => match policy {
-                InjectFailurePolicy::Error => Err(anyhow!("injection failed: {e}")),
+                InjectFailurePolicy::Error => Err(SecretError::InjectionFailed { source: e }),
                 InjectFailurePolicy::CopyUnmodified => {
                     warn!(dst=?self.dst, label=%self.label, error=?e, "injection failed; falling back to raw copy for value secret");
                     write::atomic_write(tmp_out.as_ref(), self.template.as_bytes())?;
@@ -172,7 +195,7 @@ impl SecretItem {
         &self,
         policy: InjectFailurePolicy,
         provider: &dyn SecretsProvider,
-    ) -> Result<()> {
+    ) -> Result<(), SecretError> {
         match self {
             SecretItem::File(f) => f.inject(policy, provider),
             SecretItem::Value(v) => v.inject(policy, provider),
@@ -201,8 +224,12 @@ impl Secrets {
         }
     }
 
-    pub fn from_config(cfg: &SecretsConfig) -> Result<Self> {
-        let mut s = Self::new(cfg.templates_dir.clone(), cfg.output_dir.clone(), cfg.inject_failure_policy);
+    pub fn from_config(cfg: &SecretsConfig) -> Result<Self, SecretError> {
+        let mut s = Self::new(
+            cfg.templates_dir.clone(),
+            cfg.output_dir.clone(),
+            cfg.inject_failure_policy,
+        );
         for fs in collect_files_iter(&s.templates_root.clone(), &s.output_root.clone()) {
             s.push_file(fs);
         }
@@ -285,7 +312,11 @@ impl Secrets {
         None
     }
 
-    pub fn inject_file(&self, provider: &dyn SecretsProvider, src: &Path) -> Result<bool> {
+    pub fn inject_file(
+        &self,
+        provider: &dyn SecretsProvider,
+        src: &Path,
+    ) -> Result<bool, SecretError> {
         if let Some(&idx) = self.file_index.get(src)
             && let Some(Some(item)) = self.items.get(idx)
         {
@@ -295,7 +326,7 @@ impl Secrets {
         Ok(false)
     }
 
-    pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<()> {
+    pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
         for item in self.items.iter().flatten() {
             if let SecretItem::Value(v) = item {
                 v.inject(self.policy, provider)?;
@@ -340,7 +371,7 @@ pub fn collect_files_iter<'a>(
 ) -> impl Iterator<Item = FileSource> + 'a {
     WalkDir::new(templates_root)
         .into_iter()
-        .filter_map(Result::ok)
+        .filter_map(|r| r.ok())
         .filter(|e| e.file_type().is_file())
         .filter_map(move |e| {
             let src = e.path().to_path_buf();
