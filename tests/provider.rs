@@ -1,7 +1,6 @@
 use secret_sidecar::{
-    config::Config,
     provider::{ProviderError, SecretsProvider},
-    secrets::{Secrets, collect_files_iter},
+    secrets::{Secrets, collect_files_iter, SecretsConfig},
 };
 use std::env;
 use std::path::Path;
@@ -29,19 +28,19 @@ fn inject_all_success_for_files_and_values() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::new(tpl.clone(), out.clone());
+    let cfg = SecretsConfig {
+            templates_dir: tpl.clone(),
+            output_dir: out.clone(),
+            ..Default::default()
+        };
+    let mut secrets = Secrets::from_config(&cfg).unwrap();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
     secrets.add_value("Greeting", "Hi {{name}}");
-    let cfg = Config {
-        templates_dir: tpl.clone(),
-        output_dir: out.clone(),
-        inject_fallback_copy: true,
-        ..Default::default()
-    };
+
     let provider = MockProvider::default();
-    secrets.inject_all(&cfg, &provider).unwrap();
+    secrets.inject_all(&provider).unwrap();
     let got_file = std::fs::read(out.join("a.txt")).unwrap();
     assert_eq!(got_file, b"hello");
     let got_value = std::fs::read(out.join("greeting")).unwrap();
@@ -55,20 +54,19 @@ fn inject_all_fallback_copy_on_error() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::new(tpl.clone(), out.clone());
+    let cfg = SecretsConfig {
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        ..Default::default()
+    };
+    let mut secrets = Secrets::from_config(&cfg).unwrap();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
-    let cfg = Config {
-        templates_dir: tpl.clone(),
-        output_dir: out.clone(),
-        inject_fallback_copy: true,
-        ..Default::default()
-    };
     let provider = MockProvider {
         inject_should_fail: true,
     };
-    secrets.inject_all(&cfg, &provider).unwrap();
+    secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("bin.dat")).unwrap();
     assert_eq!(got, b"RAW");
 }
@@ -80,20 +78,19 @@ fn inject_all_error_without_fallback() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::new(tpl.clone(), out.clone());
+    let cfg = SecretsConfig {
+        templates_dir: tpl.clone(),
+        output_dir: out.clone(),
+        ..Default::default()
+    };
+    let mut secrets = Secrets::from_config(&cfg).unwrap();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
-    let cfg = Config {
-        templates_dir: tpl.clone(),
-        output_dir: out.clone(),
-        inject_fallback_copy: false,
-        ..Default::default()
-    };
     let provider = MockProvider {
         inject_should_fail: true,
     };
-    let err = secrets.inject_all(&cfg, &provider).unwrap_err();
+    let err = secrets.inject_all(&provider).unwrap_err();
     let msg = format!("{}", err);
     assert!(msg.contains("fallback disabled"));
 }
@@ -103,13 +100,13 @@ fn inject_all_value_sources() {
     let _g = TestEnv::set_vars(vec![("secret_GREETING", "Hello {{name}}!")]);
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("out");
-    let cfg = Config {
+    let cfg = SecretsConfig {
         output_dir: out.clone(),
         ..Default::default()
     };
     let secrets = Secrets::from_config(&cfg).unwrap();
     let provider = MockProvider::default();
-    secrets.inject_all(&cfg, &provider).unwrap();
+    secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("greeting")).unwrap();
     assert_eq!(got, b"Hello {{name}}!");
 }

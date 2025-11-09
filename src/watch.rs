@@ -106,14 +106,12 @@ pub fn run_watch(
                                     }
                                 }
                             }
-                        } else {
-                            if let Some(dst) = secrets.remove_file(&p) {
-                                if let Err(e) = remove_one(&dst) {
-                                    warn!(error=?e, dst=?dst, "remove error");
-                                    err += 1;
-                                } else {
-                                    ok += 1;
-                                }
+                        } else if let Some(dst) = secrets.remove_file(&p) {
+                            if let Err(e) = remove_one(&dst) {
+                                warn!(error=?e, dst=?dst, "remove error");
+                                err += 1;
+                            } else {
+                                ok += 1;
                             }
                         }
                     }
