@@ -24,12 +24,6 @@ pub enum SecretError {
 
     #[error("dst has no parent: {0}")]
     NoParent(std::path::PathBuf),
-
-    #[error("injection failed and fallback disabled")]
-    FallbackDisabled {
-        #[source]
-        cause: Box<SecretError>,
-    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
