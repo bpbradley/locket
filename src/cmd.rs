@@ -1,6 +1,7 @@
 use crate::{
     config::Config,
     provider::{Provider, SecretsProvider},
+    secrets::Secrets,
 };
 use clap::{Args, Parser, Subcommand};
 #[derive(Parser, Debug)]
@@ -49,6 +50,9 @@ pub struct HealthArgs {
 impl RunArgs {
     pub fn provider(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
         Ok(self.provider.build()?)
+    }
+    pub fn secrets(&self) -> anyhow::Result<crate::secrets::Secrets> {
+        Ok(Secrets::from_config(&self.config.secrets)?)
     }
 }
 

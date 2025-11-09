@@ -177,14 +177,6 @@ impl SecretItem {
         }
     }
 
-    #[inline]
-    pub fn src_path(&self) -> Option<&Path> {
-        match self {
-            SecretItem::File(f) => Some(&f.src),
-            SecretItem::Value(_) => None,
-        }
-    }
-
     pub fn inject(
         &self,
         policy: InjectFailurePolicy,
