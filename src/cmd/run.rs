@@ -19,7 +19,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    let mut set = match args.secrets() {
+    let mut secrets = match args.secrets() {
         Ok(s) => s,
         Err(e) => {
             error!(error=%e, "failed collecting secrets from config");
@@ -27,7 +27,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    let conflicts = set.collisions();
+    let conflicts = secrets.collisions();
     if !conflicts.is_empty() {
         error!(
             ?conflicts,
@@ -36,7 +36,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         return ExitCode::DataErr;
     }
 
-    if let Err(e) = set.inject_all(provider.as_ref()) {
+    if let Err(e) = secrets.inject_all(provider.as_ref()) {
         error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
@@ -50,7 +50,7 @@ pub fn run(args: RunArgs) -> ExitCode {
     if args.once {
         ExitCode::Ok
     } else if args.config.watch {
-        match watch::run_watch(&args.config, &mut set, provider.as_ref()) {
+        match watch::run_watch(&args.config, &mut secrets, provider.as_ref()) {
             Ok(()) => ExitCode::Ok,
             Err(e) => {
                 error!(error=%e, "watch errored");
