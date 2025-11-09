@@ -1,5 +1,6 @@
+// run.rs
 use super::RunArgs;
-use crate::{health, logging, secrets::Secrets, watch};
+use crate::{health, logging, watch};
 use sysexits::ExitCode;
 use tracing::{debug, error};
 
@@ -10,7 +11,7 @@ pub fn run(args: RunArgs) -> ExitCode {
     }
     debug!(?args.config, "effective config");
 
-    let provider = match args.provider.build() {
+    let provider = match args.provider() {
         Ok(p) => p,
         Err(e) => {
             error!(error=%e, "invalid provider configuration");
@@ -18,7 +19,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    let mut set = match Secrets::from_config(&args.config.secrets) {
+    let mut set = match args.secrets() {
         Ok(s) => s,
         Err(e) => {
             error!(error=%e, "failed collecting secrets from config");
