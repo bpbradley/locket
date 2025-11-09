@@ -81,6 +81,7 @@ fn inject_all_error_without_fallback() {
     let cfg = SecretsConfig {
         templates_dir: tpl.clone(),
         output_dir: out.clone(),
+        inject_failure_policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
         ..Default::default()
     };
     let mut secrets = Secrets::from_config(&cfg).unwrap();
@@ -92,7 +93,7 @@ fn inject_all_error_without_fallback() {
     };
     let err = secrets.inject_all(&provider).unwrap_err();
     let msg = format!("{}", err);
-    assert!(msg.contains("fallback disabled"));
+    assert!(msg.contains("injection failed"));
 }
 
 #[test]
@@ -102,6 +103,7 @@ fn inject_all_value_sources() {
     let out = tmp.path().join("out");
     let cfg = SecretsConfig {
         output_dir: out.clone(),
+        env_value_prefix: "secret_".into(),
         ..Default::default()
     };
     let secrets = Secrets::from_config(&cfg).unwrap();
