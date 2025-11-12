@@ -3,7 +3,7 @@
 use crate::provider::{ProviderError, SecretsProvider};
 use clap::Args;
 use secrecy::{ExposeSecret, SecretString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// 1Password (op) based provider configuration
@@ -55,13 +55,14 @@ impl OpProvider {
 }
 
 impl SecretsProvider for OpProvider {
-    fn inject(&self, src: &str, dst: &str) -> Result<(), ProviderError> {
+    fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError> {
         let output = Command::new("op")
             .arg("inject")
             .arg("-i")
             .arg(src)
             .arg("-o")
             .arg(dst)
+            .arg("--force")
             .env_clear()
             .env("OP_SERVICE_ACCOUNT_TOKEN", self.token.expose_secret())
             .env("PATH", std::env::var("PATH").unwrap_or_default())

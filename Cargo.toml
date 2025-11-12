@@ -16,10 +16,10 @@ tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-rand = "0.9"
 walkdir = "2"
 secrecy = "0.10.3"
 sysexits = "0.10"
+indexmap = "2"
 
 [dev-dependencies]
 assert_fs = "1"
