@@ -1,20 +1,21 @@
-use secret_sidecar::secrets::{FileSource, InjectFailurePolicy, Secrets};
+use secret_sidecar::secrets::{FileSource, InjectFailurePolicy, Secrets, SecretsOpts};
 use std::path::PathBuf;
 
 #[test]
 fn collisions_detect_duplicate_dst_across_files_and_values() {
-    let templates_root = PathBuf::from("/templates");
-    let output_root = PathBuf::from("/out");
-    let mut s = Secrets::new(
-        templates_root.clone(),
-        output_root.clone(),
-        InjectFailurePolicy::CopyUnmodified,
-    );
+    let templates = PathBuf::from("/templates");
+    let output = PathBuf::from("/output");
+    let mut s = Secrets::build(SecretsOpts {
+        templates_root: templates.clone(),
+        output_root: output.clone(),
+        policy: InjectFailurePolicy::CopyUnmodified,
+        ..Default::default()
+    }).unwrap();
     // Simulate file mapping: create a FileSource manually (no actual FS needed for collision logic)
-    let src1 = templates_root.join("dup.txt");
-    let file_fs = FileSource::from_src(&templates_root, &output_root, src1.clone()).unwrap();
+    let src1 = templates.join("dup.txt");
+    let file_fs = FileSource::from_src(&templates, &output, src1.clone()).unwrap();
     s.upsert_file(src1.clone());
-    // Add a value that sanitizes to same dst path
+    // Add a value that sanitizes to same dst
     s.add_value("dup.txt", "template");
     let expected_dst = file_fs.dst.clone();
     let cols = s.collisions();

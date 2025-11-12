@@ -1,5 +1,5 @@
 use crate::logging::{LogFormat, LogLevel};
-use crate::secrets::Secrets;
+use crate::secrets::SecretsOpts;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub struct Config {
     /// Secret Management Configuration
     #[command(flatten)]
-    pub secrets: Secrets,
+    pub secrets: SecretsOpts,
 
     /// Status file path
     #[arg(

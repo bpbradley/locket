@@ -35,7 +35,7 @@ pub enum InjectFailurePolicy {
 }
 
 #[derive(Debug, Clone, Args, Default)]
-pub struct Secrets {
+pub struct SecretsOpts {
     #[arg(long, env = "TEMPLATES_ROOT", default_value = "/templates")]
     pub templates_root: PathBuf,
     #[arg(long, env = "OUTPUT_ROOT", default_value = "/run/secrets")]
@@ -44,11 +44,6 @@ pub struct Secrets {
     pub env_value_prefix: String,
     #[arg(long = "inject-policy", env = "INJECT_POLICY", value_enum, default_value_t = InjectFailurePolicy::CopyUnmodified)]
     pub policy: InjectFailurePolicy,
-
-    #[arg(skip)]
-    items: Vec<Option<SecretItem>>,
-    #[arg(skip)]
-    file_index: IndexMap<PathBuf, usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,33 +189,34 @@ impl SecretItem {
     }
 }
 
+pub struct Secrets {
+    options: SecretsOpts,
+    items: Vec<Option<SecretItem>>,
+    file_index: IndexMap<PathBuf, usize>,
+}
+
 impl Secrets {
     pub fn new(
-        templates_root: PathBuf,
-        output_root: PathBuf,
-        env_value_prefix: String,
-        policy: InjectFailurePolicy,
+        options: SecretsOpts
     ) -> Self {
         Self {
-            templates_root,
-            output_root,
-            policy,
-            env_value_prefix,
+            options,
             items: Vec::new(),
             file_index: IndexMap::new(),
         }
     }
 
-    pub fn build(mut self) -> Result<Self, SecretError> {
-        for fs in collect_files_iter(&self.templates_root.clone(), &self.output_root.clone()) {
-            self.push_file(fs);
+    pub fn build(options: SecretsOpts) -> Result<Self, SecretError> {
+        let mut s = Self::new(options);
+        for fs in collect_files_iter(&s.options.templates_root.clone(), &s.options.output_root.clone()) {
+            s.push_file(fs);
         }
-        self.extend_values_from_env(&self.env_value_prefix.clone());
-        Ok(self)
+        s.extend_values_from_env(&s.options.env_value_prefix.clone());
+        Ok(s)
     }
 
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
-        self.push_value(value_source(&self.output_root, label, template));
+        self.push_value(value_source(&self.options.output_root, label, template));
         self
     }
 
@@ -230,7 +226,7 @@ impl Secrets {
     ) -> &mut Self {
         for (label, tpl) in pairs {
             self.push_value(value_source(
-                &self.output_root,
+                &self.options.output_root,
                 label.as_ref(),
                 tpl.as_ref(),
             ));
@@ -239,7 +235,7 @@ impl Secrets {
     }
 
     pub fn extend_values_from_env(&mut self, prefix: &str) -> &mut Self {
-        for v in collect_value_sources_from_env(&self.output_root, prefix) {
+        for v in collect_value_sources_from_env(&self.options.output_root, prefix) {
             self.push_value(v);
         }
         self
@@ -247,7 +243,7 @@ impl Secrets {
 
     pub fn upsert_file(&mut self, src: PathBuf) -> bool {
         if let Some(newf) =
-            FileSource::from_src(&self.templates_root, &self.output_root, src.clone())
+            FileSource::from_src(&self.options.templates_root, &self.options.output_root, src.clone())
         {
             if let Some(&idx) = self.file_index.get(&src) {
                 self.items[idx] = Some(SecretItem::File(newf));
@@ -267,7 +263,7 @@ impl Secrets {
 
         match self.items.get_mut(idx) {
             Some(Some(SecretItem::File(f))) => {
-                if f.rename(&self.templates_root, &self.output_root, new_src.clone()) {
+                if f.rename(&self.options.templates_root, &self.options.output_root, new_src.clone()) {
                     self.file_index.insert(new_src, idx);
                     true
                 } else {
@@ -302,7 +298,7 @@ impl Secrets {
         if let Some(&idx) = self.file_index.get(src)
             && let Some(Some(item)) = self.items.get(idx)
         {
-            item.inject(self.policy, provider)?;
+            item.inject(self.options.policy, provider)?;
             return Ok(true);
         }
         Ok(false)
@@ -311,12 +307,12 @@ impl Secrets {
     pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
         for item in self.items.iter().flatten() {
             if let SecretItem::Value(v) = item {
-                v.inject(self.policy, provider)?;
+                v.inject(self.options.policy, provider)?;
             }
         }
         for item in self.items.iter().flatten() {
             if let SecretItem::File(f) = item {
-                f.inject(self.policy, provider)?;
+                f.inject(self.options.policy, provider)?;
             }
         }
         Ok(())
