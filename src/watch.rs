@@ -17,7 +17,7 @@ pub fn run_watch(
     secrets: &mut Secrets,
     provider: &dyn SecretsProvider,
 ) -> anyhow::Result<()> {
-    let tpl_dir = Path::new(&cfg.secrets.templates_dir);
+    let tpl_dir = Path::new(&cfg.secrets.templates_root);
     if !tpl_dir.exists() {
         std::fs::create_dir_all(tpl_dir)?;
         info!(path=?tpl_dir, "created missing templates directory for watch");

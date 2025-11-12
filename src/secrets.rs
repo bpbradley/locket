@@ -1,8 +1,8 @@
 use crate::{provider::SecretsProvider, write};
 use clap::{Args, ValueEnum};
 use indexmap::IndexMap;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 use tempfile;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -35,15 +35,20 @@ pub enum InjectFailurePolicy {
 }
 
 #[derive(Debug, Clone, Args, Default)]
-pub struct SecretsConfig {
-    #[arg(long, env = "TEMPLATES_DIR", default_value = "/templates")]
-    pub templates_dir: PathBuf,
-    #[arg(long, env = "OUTPUT_DIR", default_value = "/run/secrets")]
-    pub output_dir: PathBuf,
+pub struct Secrets {
+    #[arg(long, env = "TEMPLATES_ROOT", default_value = "/templates")]
+    pub templates_root: PathBuf,
+    #[arg(long, env = "OUTPUT_ROOT", default_value = "/run/secrets")]
+    pub output_root: PathBuf,
     #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
     pub env_value_prefix: String,
-    #[arg(long, env = "INJECT_FAILURE_POLICY", value_enum, default_value_t = InjectFailurePolicy::CopyUnmodified)]
-    pub inject_failure_policy: InjectFailurePolicy,
+    #[arg(long = "inject-policy", env = "INJECT_POLICY", value_enum, default_value_t = InjectFailurePolicy::CopyUnmodified)]
+    pub policy: InjectFailurePolicy,
+
+    #[arg(skip)]
+    items: Vec<Option<SecretItem>>,
+    #[arg(skip)]
+    file_index: IndexMap<PathBuf, usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -189,38 +194,29 @@ impl SecretItem {
     }
 }
 
-#[derive(Debug)]
-pub struct Secrets {
-    pub templates_root: PathBuf,
-    pub output_root: PathBuf,
-    pub policy: InjectFailurePolicy,
-
-    items: Vec<Option<SecretItem>>,
-    file_index: IndexMap<PathBuf, usize>,
-}
-
 impl Secrets {
-    pub fn new(templates_root: PathBuf, output_root: PathBuf, policy: InjectFailurePolicy) -> Self {
+    pub fn new(
+        templates_root: PathBuf,
+        output_root: PathBuf,
+        env_value_prefix: String,
+        policy: InjectFailurePolicy,
+    ) -> Self {
         Self {
             templates_root,
             output_root,
             policy,
+            env_value_prefix,
             items: Vec::new(),
             file_index: IndexMap::new(),
         }
     }
 
-    pub fn from_config(cfg: &SecretsConfig) -> Result<Self, SecretError> {
-        let mut s = Self::new(
-            cfg.templates_dir.clone(),
-            cfg.output_dir.clone(),
-            cfg.inject_failure_policy,
-        );
-        for fs in collect_files_iter(&s.templates_root.clone(), &s.output_root.clone()) {
-            s.push_file(fs);
+    pub fn build(mut self) -> Result<Self, SecretError> {
+        for fs in collect_files_iter(&self.templates_root.clone(), &self.output_root.clone()) {
+            self.push_file(fs);
         }
-        s.extend_values_from_env(&cfg.env_value_prefix);
-        Ok(s)
+        self.extend_values_from_env(&self.env_value_prefix.clone());
+        Ok(self)
     }
 
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
@@ -380,8 +376,8 @@ where
 }
 
 pub fn collect_value_sources_from_env(output_root: &Path, prefix: &str) -> Vec<ValueSource> {
-    let stripped = std::env::vars()
-        .filter_map(|(k, v)| k.strip_prefix(prefix).map(|rest| (rest.to_string(), v)));
+    let stripped =
+        env::vars().filter_map(|(k, v)| k.strip_prefix(prefix).map(|rest| (rest.to_string(), v)));
     collect_value_sources(output_root, stripped)
 }
 

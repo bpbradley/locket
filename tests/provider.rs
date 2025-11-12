@@ -1,6 +1,6 @@
 use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{SecretError, Secrets, SecretsConfig, collect_files_iter},
+    secrets::{SecretError, Secrets, collect_files_iter},
 };
 use std::env;
 use std::path::Path;
@@ -28,12 +28,12 @@ fn inject_all_success_for_files_and_values() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
     let out = tmp.path().join("out");
-    let cfg = SecretsConfig {
-        templates_dir: tpl.clone(),
-        output_dir: out.clone(),
+    let mut secrets = Secrets {
+        templates_root: tpl.clone(),
+        output_root: out.clone(),
         ..Default::default()
     };
-    let mut secrets = Secrets::from_config(&cfg).unwrap();
+    secrets.build().unwrap();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
@@ -54,12 +54,12 @@ fn inject_all_fallback_copy_on_error() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
     let out = tmp.path().join("out");
-    let cfg = SecretsConfig {
-        templates_dir: tpl.clone(),
-        output_dir: out.clone(),
+    let mut secrets = Secrets {
+        templates_root: tpl.clone(),
+        output_root: out.clone(),
         ..Default::default()
     };
-    let mut secrets = Secrets::from_config(&cfg).unwrap();
+    secrets.build().unwrap();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
@@ -78,13 +78,13 @@ fn inject_all_error_without_fallback() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
     let out = tmp.path().join("out");
-    let cfg = SecretsConfig {
-        templates_dir: tpl.clone(),
-        output_dir: out.clone(),
-        inject_failure_policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
+    let mut secrets = Secrets {
+        templates_root: tpl.clone(),
+        output_root: out.clone(),
+        policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
         ..Default::default()
     };
-    let mut secrets = Secrets::from_config(&cfg).unwrap();
+    secrets.build().unwrap();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
@@ -103,12 +103,12 @@ fn inject_all_value_sources() {
     let _g = TestEnv::set_vars(vec![("secret_GREETING", "Hello {{name}}!")]);
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("out");
-    let cfg = SecretsConfig {
-        output_dir: out.clone(),
+    let mut secrets = Secrets {
+        output_root: out.clone(),
         env_value_prefix: "secret_".into(),
         ..Default::default()
     };
-    let secrets = Secrets::from_config(&cfg).unwrap();
+    secrets.build().unwrap();
     let provider = MockProvider::default();
     secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("greeting")).unwrap();

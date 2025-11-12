@@ -51,8 +51,8 @@ impl RunArgs {
     pub fn provider(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
         Ok(self.provider.build()?)
     }
-    pub fn secrets(&self) -> anyhow::Result<crate::secrets::Secrets> {
-        Ok(Secrets::from_config(&self.config.secrets)?)
+    pub fn secrets(&self) -> anyhow::Result<Secrets> {
+        Ok(self.config.secrets.clone().build()?)
     }
 }
 
