@@ -1,3 +1,4 @@
+---
 name: demo
 services:
   secret-sidecar:
@@ -5,9 +6,7 @@ services:
     secrets:
       - op_token
     environment:
-      # Choose one:
       OP_SERVICE_ACCOUNT_TOKEN_FILE: /run/secrets/op_token
-      #OP_SERVICE_ACCOUNT_TOKEN: $OP_SERVICE_ACCOUNT_TOKEN
       secret_TEST_SECRET: "op://Testing/SecretPassword/password"
     command: --log-level=debug
     volumes:
@@ -24,11 +23,10 @@ services:
       - secrets-store:/run/secrets
 secrets:
   op_token:
-    file: /home/bbradley/.op/service_account_token
+    file: ~/.op/service_account_token
 volumes:
   secrets-store:
     driver: local
     driver_opts:
       type: tmpfs
       device: tmpfs
-
