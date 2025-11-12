@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     provider::{Provider, SecretsProvider},
-    secrets:: Secrets,
+    secrets::Secrets,
 };
 use clap::{Args, Parser, Subcommand};
 #[derive(Parser, Debug)]
@@ -52,7 +52,7 @@ impl RunArgs {
         Ok(self.provider.build()?)
     }
     pub fn secrets(&self) -> anyhow::Result<Secrets> {
-        Ok(Secrets::build(self.config.secrets.clone())?)
+        Ok(self.config.secrets.build()?)
     }
 }
 

@@ -28,12 +28,13 @@ fn inject_all_success_for_files_and_values() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::build(SecretsOpts {
+    let mut secrets = Secrets::new(SecretsOpts {
         templates_root: tpl.clone(),
         output_root: out.clone(),
         ..Default::default()
-    }).unwrap();
-    
+    })
+    .collect();
+
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
@@ -54,11 +55,12 @@ fn inject_all_fallback_copy_on_error() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::build(SecretsOpts {
+    let mut secrets = Secrets::new(SecretsOpts {
         templates_root: tpl.clone(),
         output_root: out.clone(),
         ..Default::default()
-    }).unwrap();
+    })
+    .collect();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
@@ -77,12 +79,13 @@ fn inject_all_error_without_fallback() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::build(SecretsOpts {
+    let mut secrets = Secrets::new(SecretsOpts {
         templates_root: tpl.clone(),
         output_root: out.clone(),
         policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
         ..Default::default()
-    }).unwrap();
+    })
+    .collect();
     for fs in collect_files_iter(&tpl, &out) {
         secrets.upsert_file(fs.src.clone());
     }
@@ -101,11 +104,12 @@ fn inject_all_value_sources() {
     let _g = TestEnv::set_vars(vec![("secret_GREETING", "Hello {{name}}!")]);
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("out");
-    let secrets = Secrets::build(SecretsOpts {
+    let secrets = Secrets::new(SecretsOpts {
         output_root: out.clone(),
         env_value_prefix: "secret_".into(),
         ..Default::default()
-    }).unwrap();
+    })
+    .collect();
     let provider = MockProvider::default();
     secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("greeting")).unwrap();

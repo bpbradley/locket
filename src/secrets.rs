@@ -46,6 +46,12 @@ pub struct SecretsOpts {
     pub policy: InjectFailurePolicy,
 }
 
+impl SecretsOpts {
+    pub fn build(&self) -> Result<Secrets, SecretError> {
+        Ok(Secrets::new(self.clone()).collect())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FileSource {
     pub src: PathBuf,
@@ -196,9 +202,7 @@ pub struct Secrets {
 }
 
 impl Secrets {
-    pub fn new(
-        options: SecretsOpts
-    ) -> Self {
+    pub fn new(options: SecretsOpts) -> Self {
         Self {
             options,
             items: Vec::new(),
@@ -206,13 +210,17 @@ impl Secrets {
         }
     }
 
-    pub fn build(options: SecretsOpts) -> Result<Self, SecretError> {
-        let mut s = Self::new(options);
-        for fs in collect_files_iter(&s.options.templates_root.clone(), &s.options.output_root.clone()) {
-            s.push_file(fs);
+    pub fn collect(mut self) -> Self {
+        self.items.clear();
+        self.file_index.clear();
+        for fs in collect_files_iter(
+            &self.options.templates_root.clone(),
+            &self.options.output_root.clone(),
+        ) {
+            self.push_file(fs);
         }
-        s.extend_values_from_env(&s.options.env_value_prefix.clone());
-        Ok(s)
+        self.extend_values_from_env(&self.options.env_value_prefix.clone());
+        self
     }
 
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
@@ -242,9 +250,11 @@ impl Secrets {
     }
 
     pub fn upsert_file(&mut self, src: PathBuf) -> bool {
-        if let Some(newf) =
-            FileSource::from_src(&self.options.templates_root, &self.options.output_root, src.clone())
-        {
+        if let Some(newf) = FileSource::from_src(
+            &self.options.templates_root,
+            &self.options.output_root,
+            src.clone(),
+        ) {
             if let Some(&idx) = self.file_index.get(&src) {
                 self.items[idx] = Some(SecretItem::File(newf));
             } else {
@@ -263,7 +273,11 @@ impl Secrets {
 
         match self.items.get_mut(idx) {
             Some(Some(SecretItem::File(f))) => {
-                if f.rename(&self.options.templates_root, &self.options.output_root, new_src.clone()) {
+                if f.rename(
+                    &self.options.templates_root,
+                    &self.options.output_root,
+                    new_src.clone(),
+                ) {
                     self.file_index.insert(new_src, idx);
                     true
                 } else {
