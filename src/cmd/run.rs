@@ -1,5 +1,5 @@
 // run.rs
-use super::RunArgs;
+use super::{RunArgs, RunMode};
 use crate::watch;
 use sysexits::ExitCode;
 use tracing::{debug, error};
@@ -47,18 +47,18 @@ pub fn run(args: RunArgs) -> ExitCode {
         return ExitCode::IoErr;
     }
 
-    if args.once {
-        ExitCode::Ok
-    } else if args.watch {
-        match watch::run_watch(args, &mut secrets, provider.as_ref()) {
+    match args.mode {
+        RunMode::OneShot => ExitCode::Ok,
+        RunMode::Park => {
+            std::thread::park();
+            ExitCode::Ok
+        }
+        RunMode::Watch => match watch::run_watch(args, &mut secrets, provider.as_ref()) {
             Ok(()) => ExitCode::Ok,
             Err(e) => {
                 error!(error=%e, "watch errored");
                 ExitCode::IoErr
             }
-        }
-    } else {
-        std::thread::park();
-        ExitCode::Ok
+        },
     }
 }

@@ -4,7 +4,7 @@ use crate::{
     provider::{Provider, SecretsProvider},
     secrets::{Secrets, SecretsOpts},
 };
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(name = "secret-sidecar")]
@@ -23,15 +23,22 @@ pub enum Command {
     Healthcheck(HealthArgs),
 }
 
+#[derive(Default, Copy, Clone, Debug, ValueEnum)]
+pub enum RunMode {
+    /// Run once and exit
+    OneShot,
+    /// Watch for changes and re-apply
+    #[default]
+    Watch,
+    /// Run once and then park to keep the process alive
+    Park,
+}
+
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Run a single sync and exit
-    #[arg(long)]
-    pub once: bool,
-
-    /// Watch for changes
-    #[arg(long, env = "WATCH", default_value_t = true)]
-    pub watch: bool,
+    /// Run mode
+    #[arg(long = "mode", env = "RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
+    pub mode: RunMode,
 
     /// Status file path
     #[command(flatten)]

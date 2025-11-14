@@ -5,8 +5,8 @@ description = "cargo build (release)"
 cmd = "cargo build --release"
 
 [once]
-description = "cargo run -- --once"
-cmd = "cargo run -- run --once"
+description = "cargo run -- --mode one-shot"
+cmd = "cargo run -- run --mode one-shot"
 
 [help]
 description = "cargo run -- --help"
