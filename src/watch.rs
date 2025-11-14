@@ -1,6 +1,6 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
-use crate::{config::Config, health, provider::SecretsProvider, secrets::Secrets};
+use crate::{cmd::RunArgs, provider::SecretsProvider, secrets::Secrets};
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
@@ -13,11 +13,11 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 pub fn run_watch(
-    cfg: &Config,
+    args: RunArgs,
     secrets: &mut Secrets,
     provider: &dyn SecretsProvider,
 ) -> anyhow::Result<()> {
-    let tpl_dir = Path::new(&cfg.secrets.templates_root);
+    let tpl_dir = Path::new(&args.secrets.templates_root);
     if !tpl_dir.exists() {
         std::fs::create_dir_all(tpl_dir)?;
         info!(path=?tpl_dir, "created missing templates directory for watch");
@@ -116,7 +116,7 @@ pub fn run_watch(
                         }
                     }
 
-                    if let Err(e) = health::mark_ready(&cfg.status_file) {
+                    if let Err(e) = args.status_file.mark_ready() {
                         warn!(error=?e, "failed to update status file after resync");
                     }
                     info!(ok=?ok, errors=?err, "file watch resync complete");

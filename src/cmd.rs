@@ -1,9 +1,11 @@
 use crate::{
-    config::Config,
+    health::StatusFile,
+    logging::Logger,
     provider::{Provider, SecretsProvider},
-    secrets::Secrets,
+    secrets::{Secrets, SecretsOpts},
 };
 use clap::{Args, Parser, Subcommand};
+
 #[derive(Parser, Debug)]
 #[command(name = "secret-sidecar")]
 #[command(version, about = "Materialize secrets from environment or templates", long_about = None)]
@@ -27,9 +29,21 @@ pub struct RunArgs {
     #[arg(long)]
     pub once: bool,
 
-    /// Override config
+    /// Watch for changes
+    #[arg(long, env = "WATCH", default_value_t = true)]
+    pub watch: bool,
+
+    /// Status file path
     #[command(flatten)]
-    pub config: Config,
+    pub status_file: StatusFile,
+
+    /// Secret Management Configuration
+    #[command(flatten)]
+    pub secrets: SecretsOpts,
+
+    /// Logging configuration
+    #[command(flatten)]
+    pub logger: Logger,
 
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
@@ -39,12 +53,8 @@ pub struct RunArgs {
 #[derive(Args, Debug)]
 pub struct HealthArgs {
     /// Status file path
-    #[arg(
-        long,
-        env = "STATUS_FILE",
-        default_value = "/tmp/.secret-sidecar/ready"
-    )]
-    pub status_file: std::path::PathBuf,
+    #[command(flatten)]
+    pub status_file: StatusFile,
 }
 
 impl RunArgs {
@@ -52,7 +62,7 @@ impl RunArgs {
         Ok(self.provider.build()?)
     }
     pub fn secrets(&self) -> anyhow::Result<Secrets> {
-        Ok(self.config.secrets.build()?)
+        Ok(self.secrets.build()?)
     }
 }
 
