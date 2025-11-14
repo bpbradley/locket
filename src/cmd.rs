@@ -16,10 +16,10 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Run the sidecar
+    /// Run Secret Sidecar
     Run(RunArgs),
 
-    /// Healthcheck: exit 0 if secrets ready, else exit 1
+    /// Healthcheck
     Healthcheck(HealthArgs),
 }
 
