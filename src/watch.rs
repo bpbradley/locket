@@ -100,7 +100,7 @@ impl<'a> FsWatcher<'a> {
 
     fn handle_event(&mut self, event: Event) {
         debug!(?event, "fs event");
-        if !is_relevant_event(&event.kind) {
+        if !Self::is_relevant_event(&event.kind) {
             return;
         }
         self.dirty.push_back(event);
@@ -115,7 +115,7 @@ impl<'a> FsWatcher<'a> {
                     let old_src = ev.paths[0].clone();
                     let new_src = ev.paths[1].clone();
                     if self.secrets.rename_file(old_src.clone(), new_src.clone()) {
-                        self.inject_with_logging(&new_src);
+                        self.inject(&new_src);
                     } else {
                         let _ = self.secrets.remove_file(&old_src);
                     }
@@ -126,21 +126,23 @@ impl<'a> FsWatcher<'a> {
             }
         }
 
+        // Deduplicate paths because multiple events may have occurred on the same file.
+        // Must sort first to use dedup, but relative order doesn't matter so sort_unstable is fine.
         paths.sort_unstable();
         paths.dedup();
 
         for p in paths {
             if p.exists() && p.is_file() {
-                self.inject_with_logging(&p);
+                self.inject(&p);
             } else if let Some(dst) = self.secrets.remove_file(&p)
-                && let Err(e) = remove_one(&dst)
+                && let Err(e) = Self::try_remove_file(&dst)
             {
                 warn!(error=?e, dst=?dst, "remove error");
             }
         }
     }
 
-    fn inject_with_logging(&mut self, p: &Path) {
+    fn inject(&mut self, p: &Path) {
         if self.secrets.upsert_file(p.to_path_buf()) {
             match self.secrets.inject_file(self.provider, p) {
                 Ok(true) => {}
@@ -148,6 +150,26 @@ impl<'a> FsWatcher<'a> {
                 Err(e) => warn!(error=?e, src=?p, "inject error"),
             }
         }
+    }
+
+    #[inline]
+    fn is_relevant_event(kind: &EventKind) -> bool {
+        use EventKind as EK;
+        use ModifyKind as MK;
+        matches!(
+            kind,
+            EK::Create(_)
+                | EK::Remove(_)
+                | EK::Modify(MK::Data(_))
+                | EK::Modify(MK::Name(_))
+                | EK::Modify(MK::Any)
+        )
+    }
+    fn try_remove_file(dst: &Path) -> std::io::Result<()> {
+        if dst.exists() && dst.is_file() {
+            std::fs::remove_file(dst)?;
+        }
+        Ok(())
     }
 }
 
@@ -192,25 +214,4 @@ impl DebounceTimer {
         }
         false
     }
-}
-
-#[inline]
-fn is_relevant_event(kind: &EventKind) -> bool {
-    use EventKind as EK;
-    use ModifyKind as MK;
-    matches!(
-        kind,
-        EK::Create(_)
-            | EK::Remove(_)
-            | EK::Modify(MK::Data(_))
-            | EK::Modify(MK::Name(_))
-            | EK::Modify(MK::Any)
-    )
-}
-
-fn remove_one(dst: &Path) -> std::io::Result<()> {
-    if dst.exists() && dst.is_file() {
-        std::fs::remove_file(dst)?;
-    }
-    Ok(())
 }
