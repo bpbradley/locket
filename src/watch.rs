@@ -16,8 +16,6 @@ pub struct FsWatcher<'a> {
     secrets: &'a mut Secrets,
     provider: &'a dyn SecretsProvider,
     debounce: Duration,
-    last_event: Option<Instant>,
-    pending: bool,
     dirty: VecDeque<Event>,
 }
 
@@ -27,8 +25,6 @@ impl<'a> FsWatcher<'a> {
             secrets,
             provider,
             debounce: Duration::from_millis(200),
-            last_event: None,
-            pending: false,
             dirty: VecDeque::new(),
         }
     }
@@ -43,12 +39,16 @@ impl<'a> FsWatcher<'a> {
         })?;
         watcher.watch(tpl_dir, RecursiveMode::Recursive)?;
         info!(path=?tpl_dir, "watching template files for changes");
+        let mut timer = DebounceTimer::new(self.debounce);
 
         loop {
-            if !self.pending {
-                // Nothing is pending. We can block indefinitely.
+            if !timer.armed() {
+                // Nothing is pending, as the timer isn't armed. We can block indefinitely.
                 match rx.recv() {
-                    Ok(Ok(event)) => self.handle_event(event),
+                    Ok(Ok(event)) => {
+                        self.handle_event(event);
+                        timer.schedule();
+                    },
                     Ok(Err(e)) => warn!(error=?e, "watch error"),
                     Err(mpsc::RecvError) => {
                         warn!("watcher disconnected unexpectedly; terminating");
@@ -59,21 +59,22 @@ impl<'a> FsWatcher<'a> {
                 continue;
             }
 
-            // Something is pending. Make sure the debounce period has elapsed.
-            let elapsed = self.last_event.unwrap().elapsed();
-            if elapsed >= self.debounce {
-                self.pending = false;
+            if timer.try_fire() {
+                // Debounce timer fired. Process pending events.
                 self.process_pending();
                 continue;
             }
 
-            let remaining = self.debounce - elapsed;
+            let remaining = timer.remaining().unwrap_or(Duration::ZERO);
 
             match rx.recv_timeout(remaining) {
-                Ok(Ok(event)) => self.handle_event(event), // extend batch and restart cycle
+                Ok(Ok(event)) => {  
+                    self.handle_event(event);
+                    timer.schedule(); // Reschedule work
+                },
                 Ok(Err(e)) => warn!(error=?e, "watch error"),
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    self.pending = false;
+                    timer.cancel();
                     self.process_pending();
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -89,9 +90,6 @@ impl<'a> FsWatcher<'a> {
         if !is_relevant_event(&event.kind) {
             return;
         }
-
-        self.last_event = Some(Instant::now());
-        self.pending = true;
         self.dirty.push_back(event);
     }
 
@@ -137,6 +135,46 @@ impl<'a> FsWatcher<'a> {
                 Err(e) => warn!(error=?e, src=?p, "inject error"),
             }
         }
+    }
+}
+
+struct DebounceTimer {
+    deadline: Option<Instant>,
+    period: Duration,
+}
+
+impl DebounceTimer {
+    fn new(period: Duration) -> Self {
+        Self { deadline: None, period }
+    }
+
+    fn schedule(&mut self) {
+        self.deadline = Some(Instant::now() + self.period);
+    }
+
+    fn cancel(&mut self) {
+        self.deadline = None;
+    }
+
+    fn remaining(&self) -> Option<Duration> {
+        self.deadline.map(|d| {
+            let now = Instant::now();
+            if d <= now { Duration::ZERO } else { d - now }
+        })
+    }
+
+    fn armed(&self) -> bool {
+        self.deadline.is_some()
+    }
+
+    fn try_fire(&mut self) -> bool {
+        if let Some(d) = self.deadline {
+            if Instant::now() >= d {
+                self.deadline = None;
+                return true;
+            }
+        }
+        false
     }
 }
 
