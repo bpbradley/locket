@@ -45,10 +45,37 @@ impl<'a> FsWatcher<'a> {
         info!(path=?tpl_dir, "watching template files for changes");
 
         loop {
-            match rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(Ok(event)) => self.handle_event(event),
+            if !self.pending {
+                // Nothing is pending. We can block indefinitely.
+                match rx.recv() {
+                    Ok(Ok(event)) => self.handle_event(event),
+                    Ok(Err(e)) => warn!(error=?e, "watch error"),
+                    Err(mpsc::RecvError) => {
+                        warn!("watcher disconnected unexpectedly; terminating");
+                        return Err(anyhow::anyhow!("filesystem watcher disconnected"));
+                    }
+                }
+                // If something is now pending, continue to the next iteration to handle with debounce.
+                continue;
+            }
+
+            // Something is pending. Make sure the debounce period has elapsed.
+            let elapsed = self.last_event.unwrap().elapsed();
+            if elapsed >= self.debounce {
+                self.pending = false;
+                self.process_pending();
+                continue;
+            }
+
+            let remaining = self.debounce - elapsed;
+
+            match rx.recv_timeout(remaining) {
+                Ok(Ok(event)) => self.handle_event(event), // extend batch and restart cycle
                 Ok(Err(e)) => warn!(error=?e, "watch error"),
-                Err(mpsc::RecvTimeoutError::Timeout) => self.maybe_flush(),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    self.pending = false;
+                    self.process_pending();
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     warn!("watcher disconnected unexpectedly; terminating");
                     return Err(anyhow::anyhow!("filesystem watcher disconnected"));
@@ -66,19 +93,6 @@ impl<'a> FsWatcher<'a> {
         self.last_event = Some(Instant::now());
         self.pending = true;
         self.dirty.push_back(event);
-    }
-
-    fn maybe_flush(&mut self) {
-        if !self.pending {
-            return;
-        }
-
-        if let Some(t) = self.last_event {
-            if t.elapsed() >= self.debounce {
-                self.pending = false;
-                self.process_pending();
-            }
-        }
     }
 
     fn process_pending(&mut self) {
