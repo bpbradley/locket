@@ -49,10 +49,9 @@ pub fn run(args: RunArgs) -> ExitCode {
 
     match args.mode {
         RunMode::OneShot => ExitCode::Ok,
-        RunMode::Park => {
+        RunMode::Park => loop {
             std::thread::park();
-            ExitCode::Ok
-        }
+        },
         RunMode::Watch => match watch::run_watch(args, &mut secrets, provider.as_ref()) {
             Ok(()) => ExitCode::Ok,
             Err(e) => {
