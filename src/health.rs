@@ -1,14 +1,28 @@
-use std::path::Path;
-
-pub fn is_ready(path: impl AsRef<Path>) -> bool {
-    path.as_ref().exists()
+use clap::Args;
+use std::path::PathBuf;
+#[derive(Args, Debug)]
+pub struct StatusFile {
+    /// Status file path
+    #[arg(
+        long = "status-file",
+        env = "STATUS_FILE",
+        default_value = "/tmp/.secret-sidecar/ready"
+    )]
+    pub path: PathBuf,
 }
 
-pub fn mark_ready(path: impl AsRef<Path>) -> anyhow::Result<()> {
-    let p = path.as_ref();
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
+impl StatusFile {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
     }
-    std::fs::write(p, b"ready")?;
-    Ok(())
+    pub fn is_ready(&self) -> bool {
+        self.path.exists()
+    }
+    pub fn mark_ready(&self) -> anyhow::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&self.path, b"ready")?;
+        Ok(())
+    }
 }

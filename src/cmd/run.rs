@@ -1,15 +1,15 @@
 // run.rs
-use super::RunArgs;
-use crate::{health, logging, watch};
+use super::{RunArgs, RunMode};
+use crate::watch;
 use sysexits::ExitCode;
 use tracing::{debug, error};
 
 pub fn run(args: RunArgs) -> ExitCode {
-    if let Err(e) = logging::init(args.config.log_format, args.config.log_level) {
+    if let Err(e) = args.logger.init() {
         error!(error=%e, "init logging failed");
         return ExitCode::CantCreat;
     }
-    debug!(?args.config, "effective config");
+    debug!(?args, "effective config");
 
     let provider = match args.provider() {
         Ok(p) => p,
@@ -42,23 +42,22 @@ pub fn run(args: RunArgs) -> ExitCode {
     }
 
     debug!("injection complete; creating status file");
-    if let Err(e) = health::mark_ready(&args.config.status_file) {
+    if let Err(e) = args.status_file.mark_ready() {
         error!(error=%e, "failed to write status file");
         return ExitCode::IoErr;
     }
 
-    if args.once {
-        ExitCode::Ok
-    } else if args.config.watch {
-        match watch::run_watch(&args.config, &mut secrets, provider.as_ref()) {
+    match args.mode {
+        RunMode::OneShot => ExitCode::Ok,
+        RunMode::Park => loop {
+            std::thread::park();
+        },
+        RunMode::Watch => match watch::run_watch(args, &mut secrets, provider.as_ref()) {
             Ok(()) => ExitCode::Ok,
             Err(e) => {
                 error!(error=%e, "watch errored");
                 ExitCode::IoErr
             }
-        }
-    } else {
-        std::thread::park();
-        ExitCode::Ok
+        },
     }
 }

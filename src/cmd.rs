@@ -1,9 +1,11 @@
 use crate::{
-    config::Config,
+    health::StatusFile,
+    logging::Logger,
     provider::{Provider, SecretsProvider},
-    secrets::Secrets,
+    secrets::{Secrets, SecretsOpts},
 };
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
 #[derive(Parser, Debug)]
 #[command(name = "secret-sidecar")]
 #[command(version, about = "Materialize secrets from environment or templates", long_about = None)]
@@ -14,22 +16,41 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Run the sidecar
+    /// Run Secret Sidecar
     Run(RunArgs),
 
-    /// Healthcheck: exit 0 if secrets ready, else exit 1
+    /// Healthcheck
     Healthcheck(HealthArgs),
+}
+
+#[derive(Default, Copy, Clone, Debug, ValueEnum)]
+pub enum RunMode {
+    /// Run once and exit
+    OneShot,
+    /// Watch for changes and re-apply
+    #[default]
+    Watch,
+    /// Run once and then park to keep the process alive
+    Park,
 }
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Run a single sync and exit
-    #[arg(long)]
-    pub once: bool,
+    /// Run mode
+    #[arg(long = "mode", env = "RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
+    pub mode: RunMode,
 
-    /// Override config
+    /// Status file path
     #[command(flatten)]
-    pub config: Config,
+    pub status_file: StatusFile,
+
+    /// Secret Management Configuration
+    #[command(flatten)]
+    pub secrets: SecretsOpts,
+
+    /// Logging configuration
+    #[command(flatten)]
+    pub logger: Logger,
 
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
@@ -39,12 +60,8 @@ pub struct RunArgs {
 #[derive(Args, Debug)]
 pub struct HealthArgs {
     /// Status file path
-    #[arg(
-        long,
-        env = "STATUS_FILE",
-        default_value = "/tmp/.secret-sidecar/ready"
-    )]
-    pub status_file: std::path::PathBuf,
+    #[command(flatten)]
+    pub status_file: StatusFile,
 }
 
 impl RunArgs {
@@ -52,7 +69,7 @@ impl RunArgs {
         Ok(self.provider.build()?)
     }
     pub fn secrets(&self) -> anyhow::Result<Secrets> {
-        Ok(self.config.secrets.build()?)
+        Ok(self.secrets.build()?)
     }
 }
 
