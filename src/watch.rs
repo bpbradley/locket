@@ -98,11 +98,10 @@ pub fn run_watch(secrets: &mut Secrets, provider: &dyn SecretsProvider) -> anyho
                                     }
                                 }
                             }
-                        } else if let Some(dst) = secrets.remove_file(&p) {
-                            if let Err(e) = remove_one(&dst) {
+                        } else if let Some(dst) = secrets.remove_file(&p)
+                            && let Err(e) = remove_one(&dst) {
                                 warn!(error=?e, dst=?dst, "remove error");
                             }
-                        }
                     }
                 }
             }
