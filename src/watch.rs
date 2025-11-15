@@ -48,7 +48,7 @@ impl<'a> FsWatcher<'a> {
                     Ok(Ok(event)) => {
                         self.handle_event(event);
                         timer.schedule();
-                    },
+                    }
                     Ok(Err(e)) => warn!(error=?e, "watch error"),
                     Err(mpsc::RecvError) => {
                         warn!("watcher disconnected unexpectedly; terminating");
@@ -68,10 +68,10 @@ impl<'a> FsWatcher<'a> {
             let remaining = timer.remaining().unwrap_or(Duration::ZERO);
 
             match rx.recv_timeout(remaining) {
-                Ok(Ok(event)) => {  
+                Ok(Ok(event)) => {
                     self.handle_event(event);
                     timer.schedule(); // Reschedule work
-                },
+                }
                 Ok(Err(e)) => warn!(error=?e, "watch error"),
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     timer.cancel();
@@ -145,7 +145,10 @@ struct DebounceTimer {
 
 impl DebounceTimer {
     fn new(period: Duration) -> Self {
-        Self { deadline: None, period }
+        Self {
+            deadline: None,
+            period,
+        }
     }
 
     fn schedule(&mut self) {
@@ -168,11 +171,11 @@ impl DebounceTimer {
     }
 
     fn try_fire(&mut self) -> bool {
-        if let Some(d) = self.deadline {
-            if Instant::now() >= d {
-                self.deadline = None;
-                return true;
-            }
+        if let Some(d) = self.deadline
+            && Instant::now() >= d
+        {
+            self.deadline = None;
+            return true;
         }
         false
     }
