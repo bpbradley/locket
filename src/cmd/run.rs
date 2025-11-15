@@ -1,6 +1,6 @@
 // run.rs
 use super::{RunArgs, RunMode};
-use crate::watch;
+use crate::watch::FsWatcher;
 use sysexits::ExitCode;
 use tracing::{debug, error};
 
@@ -52,10 +52,13 @@ pub fn run(args: RunArgs) -> ExitCode {
         RunMode::Park => loop {
             std::thread::park();
         },
-        RunMode::Watch => match watch::run_watch(&mut secrets, provider.as_ref()) {
-            Ok(()) => ExitCode::Ok,
+        RunMode::Watch => match FsWatcher::new(&mut secrets, provider.as_ref()) {
+            Ok(mut watcher) => {
+                watcher.run();
+                ExitCode::Ok
+            }
             Err(e) => {
-                error!(error=%e, "watch errored");
+                error!(error=%e, "failed to start filesystem watcher");
                 ExitCode::IoErr
             }
         },

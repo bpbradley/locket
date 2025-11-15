@@ -12,107 +12,128 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
-pub fn run_watch(secrets: &mut Secrets, provider: &dyn SecretsProvider) -> anyhow::Result<()> {
-    let tpl_dir = Path::new(&secrets.options().templates_root);
-    if !tpl_dir.exists() {
-        std::fs::create_dir_all(tpl_dir)?;
-        info!(path=?tpl_dir, "created missing templates directory for watch");
+pub struct FsWatcher<'a> {
+    secrets: &'a mut Secrets,
+    provider: &'a dyn SecretsProvider,
+    watcher: notify::RecommendedWatcher,
+    rx: mpsc::Receiver<NotifyResult<Event>>,
+    debounce: Duration,
+    last_event: Option<Instant>,
+    pending: bool,
+    dirty: VecDeque<Event>,
+}
+
+impl<'a> FsWatcher<'a> {
+    pub fn new(
+        secrets: &'a mut Secrets,
+        provider: &'a dyn SecretsProvider,
+    ) -> anyhow::Result<Self> {
+        let tpl_dir = Path::new(&secrets.options().templates_root);
+        if !tpl_dir.exists() {
+            std::fs::create_dir_all(tpl_dir)?;
+            info!(path=?tpl_dir, "created missing templates directory for watch");
+        }
+
+        let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
+        let mut watcher = recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        })?;
+        watcher.watch(tpl_dir, RecursiveMode::Recursive)?;
+        info!(path=?tpl_dir, "watching template files for changes");
+
+        Ok(Self {
+            secrets,
+            provider,
+            watcher,
+            rx,
+            debounce: Duration::from_millis(200),
+            last_event: None,
+            pending: false,
+            dirty: VecDeque::new(),
+        })
     }
 
-    let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
-    let mut watcher = recommended_watcher(move |res| {
-        let _ = tx.send(res);
-    })?;
-    watcher.watch(tpl_dir, RecursiveMode::Recursive)?;
-    info!(path=?tpl_dir, "watching template files for changes");
-
-    // Debounce state
-    let debounce = Duration::from_millis(200);
-    let mut last_event: Option<Instant> = None;
-    let mut pending = false;
-    let mut dirty: VecDeque<Event> = VecDeque::new();
-
-    loop {
-        match rx.recv_timeout(Duration::from_millis(250)) {
-            Ok(Ok(event)) => {
-                debug!(?event, "fs event");
-                if !is_relevant_event(&event.kind) {
-                    continue;
+    pub fn run(&mut self) {
+        loop {
+            match self.rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(Ok(event)) => self.handle_event(event),
+                Ok(Err(e)) => warn!(error=?e, "watch error"),
+                Err(mpsc::RecvTimeoutError::Timeout) => self.maybe_flush(),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    warn!("watcher disconnected; exiting watch loop");
+                    break;
                 }
-                last_event = Some(Instant::now());
-                pending = true;
-                dirty.push_back(event);
-            }
-            Ok(Err(e)) => warn!(error=?e, "watch error"),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if pending
-                    && let Some(t) = last_event
-                    && t.elapsed() >= debounce
-                {
-                    pending = false;
-
-                    // Coalesce and process
-                    let mut paths: Vec<PathBuf> = Vec::new();
-                    while let Some(ev) = dirty.pop_front() {
-                        match ev.kind {
-                            // Handle rename with both paths in one shot if available
-                            EventKind::Modify(ModifyKind::Name(RenameMode::Both))
-                                if ev.paths.len() == 2 =>
-                            {
-                                let old_src = ev.paths[0].clone();
-                                let new_src = ev.paths[1].clone();
-                                // Update mapping to new src/dst
-                                if secrets.rename_file(old_src.clone(), new_src.clone()) {
-                                    match secrets.inject_file(provider, &new_src) {
-                                        Ok(true) => (),
-                                        Ok(false) => debug!(
-                                            ?new_src,
-                                            "rename inject skipped; src not tracked"
-                                        ),
-                                        Err(e) => {
-                                            warn!(error=?e, src=?new_src, "inject error after rename");
-                                        }
-                                    }
-                                } else {
-                                    let _ = secrets.remove_file(&old_src);
-                                }
-                            }
-                            _ => {
-                                // For all other kinds, handle each path independently later
-                                paths.extend(ev.paths.into_iter());
-                            }
-                        }
-                    }
-
-                    paths.sort();
-                    paths.dedup();
-
-                    for p in paths {
-                        if p.exists() && p.is_file() {
-                            if secrets.upsert_file(p.clone()) {
-                                match secrets.inject_file(provider, &p) {
-                                    Ok(true) => (),
-                                    Ok(false) => debug!(?p, "inject skipped; src not tracked"),
-                                    Err(e) => {
-                                        warn!(error=?e, src=?p, "inject error");
-                                    }
-                                }
-                            }
-                        } else if let Some(dst) = secrets.remove_file(&p)
-                            && let Err(e) = remove_one(&dst) {
-                                warn!(error=?e, dst=?dst, "remove error");
-                            }
-                    }
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                warn!("watcher disconnected; exiting watch loop");
-                break;
             }
         }
     }
 
-    Ok(())
+    fn handle_event(&mut self, event: Event) {
+        debug!(?event, "fs event");
+        if !is_relevant_event(&event.kind) {
+            return;
+        }
+
+        self.last_event = Some(Instant::now());
+        self.pending = true;
+        self.dirty.push_back(event);
+    }
+
+    fn maybe_flush(&mut self) {
+        if !self.pending {
+            return;
+        }
+
+        if let Some(t) = self.last_event {
+            if t.elapsed() >= self.debounce {
+                self.pending = false;
+                self.process_pending();
+            }
+        }
+    }
+
+    fn process_pending(&mut self) {
+        let mut paths: Vec<PathBuf> = Vec::new();
+
+        while let Some(ev) = self.dirty.pop_front() {
+            match ev.kind {
+                EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if ev.paths.len() == 2 => {
+                    let old_src = ev.paths[0].clone();
+                    let new_src = ev.paths[1].clone();
+                    if self.secrets.rename_file(old_src.clone(), new_src.clone()) {
+                        self.inject_with_logging(&new_src);
+                    } else {
+                        let _ = self.secrets.remove_file(&old_src);
+                    }
+                }
+                _ => {
+                    paths.extend(ev.paths.into_iter());
+                }
+            }
+        }
+
+        paths.sort_unstable();
+        paths.dedup();
+
+        for p in paths {
+            if p.exists() && p.is_file() {
+                self.inject_with_logging(&p);
+            } else if let Some(dst) = self.secrets.remove_file(&p)
+                && let Err(e) = remove_one(&dst)
+            {
+                warn!(error=?e, dst=?dst, "remove error");
+            }
+        }
+    }
+
+    fn inject_with_logging(&mut self, p: &Path) {
+        if self.secrets.upsert_file(p.to_path_buf()) {
+            match self.secrets.inject_file(self.provider, p) {
+                Ok(true) => {}
+                Ok(false) => debug!(?p, "inject skipped; src not tracked"),
+                Err(e) => warn!(error=?e, src=?p, "inject error"),
+            }
+        }
+    }
 }
 
 #[inline]
