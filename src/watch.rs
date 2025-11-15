@@ -165,7 +165,7 @@ impl<'a> FsWatcher<'a> {
                 | EK::Modify(MK::Any)
         )
     }
-    
+
     #[inline]
     fn try_remove_file(dst: &Path) -> std::io::Result<()> {
         if dst.exists() && dst.is_file() {
