@@ -1,6 +1,6 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
-use crate::{cmd::RunArgs, provider::SecretsProvider, secrets::Secrets};
+use crate::{provider::SecretsProvider, secrets::Secrets};
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
@@ -12,12 +12,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
-pub fn run_watch(
-    args: RunArgs,
-    secrets: &mut Secrets,
-    provider: &dyn SecretsProvider,
-) -> anyhow::Result<()> {
-    let tpl_dir = Path::new(&args.secrets.templates_root);
+pub fn run_watch(secrets: &mut Secrets, provider: &dyn SecretsProvider) -> anyhow::Result<()> {
+    let tpl_dir = Path::new(&secrets.options().templates_root);
     if !tpl_dir.exists() {
         std::fs::create_dir_all(tpl_dir)?;
         info!(path=?tpl_dir, "created missing templates directory for watch");
@@ -54,8 +50,6 @@ pub fn run_watch(
                     && t.elapsed() >= debounce
                 {
                     pending = false;
-                    let mut ok = 0usize;
-                    let mut err = 0usize;
 
                     // Coalesce and process
                     let mut paths: Vec<PathBuf> = Vec::new();
@@ -70,14 +64,13 @@ pub fn run_watch(
                                 // Update mapping to new src/dst
                                 if secrets.rename_file(old_src.clone(), new_src.clone()) {
                                     match secrets.inject_file(provider, &new_src) {
-                                        Ok(true) => ok += 1,
+                                        Ok(true) => (),
                                         Ok(false) => debug!(
                                             ?new_src,
                                             "rename inject skipped; src not tracked"
                                         ),
                                         Err(e) => {
                                             warn!(error=?e, src=?new_src, "inject error after rename");
-                                            err += 1;
                                         }
                                     }
                                 } else {
@@ -98,28 +91,19 @@ pub fn run_watch(
                         if p.exists() && p.is_file() {
                             if secrets.upsert_file(p.clone()) {
                                 match secrets.inject_file(provider, &p) {
-                                    Ok(true) => ok += 1,
+                                    Ok(true) => (),
                                     Ok(false) => debug!(?p, "inject skipped; src not tracked"),
                                     Err(e) => {
                                         warn!(error=?e, src=?p, "inject error");
-                                        err += 1;
                                     }
                                 }
                             }
                         } else if let Some(dst) = secrets.remove_file(&p) {
                             if let Err(e) = remove_one(&dst) {
                                 warn!(error=?e, dst=?dst, "remove error");
-                                err += 1;
-                            } else {
-                                ok += 1;
                             }
                         }
                     }
-
-                    if let Err(e) = args.status_file.mark_ready() {
-                        warn!(error=?e, "failed to update status file after resync");
-                    }
-                    info!(ok=?ok, errors=?err, "file watch resync complete");
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {

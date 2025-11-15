@@ -52,7 +52,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         RunMode::Park => loop {
             std::thread::park();
         },
-        RunMode::Watch => match watch::run_watch(args, &mut secrets, provider.as_ref()) {
+        RunMode::Watch => match watch::run_watch(&mut secrets, provider.as_ref()) {
             Ok(()) => ExitCode::Ok,
             Err(e) => {
                 error!(error=%e, "watch errored");
