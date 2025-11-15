@@ -1,6 +1,6 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
-use crate::{cmd::RunArgs, provider::SecretsProvider, secrets::Secrets};
+use crate::{provider::SecretsProvider, secrets::Secrets};
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
@@ -10,145 +10,210 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use thiserror::Error;
 use tracing::{debug, info, warn};
 
-pub fn run_watch(
-    args: RunArgs,
-    secrets: &mut Secrets,
-    provider: &dyn SecretsProvider,
-) -> anyhow::Result<()> {
-    let tpl_dir = Path::new(&args.secrets.templates_root);
-    if !tpl_dir.exists() {
-        std::fs::create_dir_all(tpl_dir)?;
-        info!(path=?tpl_dir, "created missing templates directory for watch");
+#[derive(Debug, Error)]
+pub enum WatchError {
+    #[error("filesystem watcher disconnected unexpectedly")]
+    Disconnected,
+
+    #[error("notify error: {0}")]
+    Notify(#[from] notify::Error),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+pub struct FsWatcher<'a> {
+    secrets: &'a mut Secrets,
+    provider: &'a dyn SecretsProvider,
+    debounce: Duration,
+    dirty: VecDeque<Event>,
+}
+
+impl<'a> FsWatcher<'a> {
+    pub fn new(secrets: &'a mut Secrets, provider: &'a dyn SecretsProvider) -> Self {
+        Self {
+            secrets,
+            provider,
+            debounce: Duration::from_millis(200),
+            dirty: VecDeque::new(),
+        }
     }
 
-    let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
-    let mut watcher = recommended_watcher(move |res| {
-        let _ = tx.send(res);
-    })?;
-    watcher.watch(tpl_dir, RecursiveMode::Recursive)?;
-    info!(path=?tpl_dir, "watching template files for changes");
+    pub fn run(&mut self) -> Result<(), WatchError> {
+        let tpl_dir = std::path::Path::new(&self.secrets.options().templates_root);
+        std::fs::create_dir_all(tpl_dir)?;
 
-    // Debounce state
-    let debounce = Duration::from_millis(200);
-    let mut last_event: Option<Instant> = None;
-    let mut pending = false;
-    let mut dirty: VecDeque<Event> = VecDeque::new();
+        let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
+        let mut watcher = recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        })?;
+        watcher.watch(tpl_dir, RecursiveMode::Recursive)?;
+        info!(path=?tpl_dir, "watching template files for changes");
+        let mut timer = DebounceTimer::new(self.debounce);
 
-    loop {
-        match rx.recv_timeout(Duration::from_millis(250)) {
-            Ok(Ok(event)) => {
-                debug!(?event, "fs event");
-                if !is_relevant_event(&event.kind) {
-                    continue;
+        loop {
+            if !timer.armed() {
+                // Nothing is pending, as the timer isn't armed. We can block indefinitely.
+                match rx.recv() {
+                    Ok(Ok(event)) => {
+                        self.handle_event(event);
+                        timer.schedule();
+                    }
+                    Ok(Err(e)) => warn!(error=?e, "watch error"),
+                    Err(mpsc::RecvError) => {
+                        warn!("watcher disconnected unexpectedly; terminating");
+                        return Err(WatchError::Disconnected);
+                    }
                 }
-                last_event = Some(Instant::now());
-                pending = true;
-                dirty.push_back(event);
+                // If something is now pending, continue to the next iteration to handle with debounce.
+                continue;
             }
-            Ok(Err(e)) => warn!(error=?e, "watch error"),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if pending
-                    && let Some(t) = last_event
-                    && t.elapsed() >= debounce
-                {
-                    pending = false;
-                    let mut ok = 0usize;
-                    let mut err = 0usize;
 
-                    // Coalesce and process
-                    let mut paths: Vec<PathBuf> = Vec::new();
-                    while let Some(ev) = dirty.pop_front() {
-                        match ev.kind {
-                            // Handle rename with both paths in one shot if available
-                            EventKind::Modify(ModifyKind::Name(RenameMode::Both))
-                                if ev.paths.len() == 2 =>
-                            {
-                                let old_src = ev.paths[0].clone();
-                                let new_src = ev.paths[1].clone();
-                                // Update mapping to new src/dst
-                                if secrets.rename_file(old_src.clone(), new_src.clone()) {
-                                    match secrets.inject_file(provider, &new_src) {
-                                        Ok(true) => ok += 1,
-                                        Ok(false) => debug!(
-                                            ?new_src,
-                                            "rename inject skipped; src not tracked"
-                                        ),
-                                        Err(e) => {
-                                            warn!(error=?e, src=?new_src, "inject error after rename");
-                                            err += 1;
-                                        }
-                                    }
-                                } else {
-                                    let _ = secrets.remove_file(&old_src);
-                                }
-                            }
-                            _ => {
-                                // For all other kinds, handle each path independently later
-                                paths.extend(ev.paths.into_iter());
-                            }
-                        }
-                    }
+            if timer.try_fire() {
+                // Debounce timer fired. Process pending events.
+                self.process_pending();
+                continue;
+            }
 
-                    paths.sort();
-                    paths.dedup();
+            let remaining = timer.remaining().unwrap_or(Duration::ZERO);
 
-                    for p in paths {
-                        if p.exists() && p.is_file() {
-                            if secrets.upsert_file(p.clone()) {
-                                match secrets.inject_file(provider, &p) {
-                                    Ok(true) => ok += 1,
-                                    Ok(false) => debug!(?p, "inject skipped; src not tracked"),
-                                    Err(e) => {
-                                        warn!(error=?e, src=?p, "inject error");
-                                        err += 1;
-                                    }
-                                }
-                            }
-                        } else if let Some(dst) = secrets.remove_file(&p) {
-                            if let Err(e) = remove_one(&dst) {
-                                warn!(error=?e, dst=?dst, "remove error");
-                                err += 1;
-                            } else {
-                                ok += 1;
-                            }
-                        }
-                    }
-
-                    if let Err(e) = args.status_file.mark_ready() {
-                        warn!(error=?e, "failed to update status file after resync");
-                    }
-                    info!(ok=?ok, errors=?err, "file watch resync complete");
+            match rx.recv_timeout(remaining) {
+                Ok(Ok(event)) => {
+                    self.handle_event(event);
+                    timer.schedule(); // Reschedule work
                 }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                warn!("watcher disconnected; exiting watch loop");
-                break;
+                Ok(Err(e)) => warn!(error=?e, "watch error"),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    timer.cancel();
+                    self.process_pending();
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    warn!("watcher disconnected unexpectedly; terminating");
+                    return Err(WatchError::Disconnected);
+                }
             }
         }
     }
 
-    Ok(())
-}
-
-#[inline]
-fn is_relevant_event(kind: &EventKind) -> bool {
-    use EventKind as EK;
-    use ModifyKind as MK;
-    matches!(
-        kind,
-        EK::Create(_)
-            | EK::Remove(_)
-            | EK::Modify(MK::Data(_))
-            | EK::Modify(MK::Name(_))
-            | EK::Modify(MK::Any)
-    )
-}
-
-fn remove_one(dst: &Path) -> anyhow::Result<()> {
-    if dst.exists() && dst.is_file() {
-        std::fs::remove_file(dst)?;
+    fn handle_event(&mut self, event: Event) {
+        debug!(?event, "fs event");
+        if !Self::is_relevant_event(&event.kind) {
+            return;
+        }
+        self.dirty.push_back(event);
     }
-    Ok(())
+
+    fn process_pending(&mut self) {
+        let mut paths: Vec<PathBuf> = Vec::new();
+
+        while let Some(ev) = self.dirty.pop_front() {
+            match ev.kind {
+                EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if ev.paths.len() == 2 => {
+                    let old_src = ev.paths[0].clone();
+                    let new_src = ev.paths[1].clone();
+                    if self.secrets.rename_file(old_src.clone(), new_src.clone()) {
+                        self.inject(&new_src);
+                    } else {
+                        let _ = self.secrets.remove_file(&old_src);
+                    }
+                }
+                _ => {
+                    paths.extend(ev.paths.into_iter());
+                }
+            }
+        }
+
+        // Deduplicate paths because multiple events may have occurred on the same file.
+        // Must sort first to use dedup, but relative order doesn't matter so sort_unstable is fine.
+        paths.sort_unstable();
+        paths.dedup();
+
+        for p in paths {
+            if p.exists() && p.is_file() {
+                self.inject(&p);
+            } else if let Some(dst) = self.secrets.remove_file(&p)
+                && let Err(e) = Self::try_remove_file(&dst)
+            {
+                warn!(error=?e, dst=?dst, "remove error");
+            }
+        }
+    }
+
+    fn inject(&mut self, p: &Path) {
+        if self.secrets.upsert_file(p.to_path_buf()) {
+            match self.secrets.inject_file(self.provider, p) {
+                Ok(true) => {}
+                Ok(false) => debug!(?p, "inject skipped; src not tracked"),
+                Err(e) => warn!(error=?e, src=?p, "inject error"),
+            }
+        }
+    }
+
+    #[inline]
+    fn is_relevant_event(kind: &EventKind) -> bool {
+        use EventKind as EK;
+        use ModifyKind as MK;
+        matches!(
+            kind,
+            EK::Create(_)
+                | EK::Remove(_)
+                | EK::Modify(MK::Data(_))
+                | EK::Modify(MK::Name(_))
+                | EK::Modify(MK::Any)
+        )
+    }
+
+    #[inline]
+    fn try_remove_file(dst: &Path) -> std::io::Result<()> {
+        if dst.exists() && dst.is_file() {
+            std::fs::remove_file(dst)?;
+        }
+        Ok(())
+    }
+}
+
+struct DebounceTimer {
+    deadline: Option<Instant>,
+    period: Duration,
+}
+
+impl DebounceTimer {
+    fn new(period: Duration) -> Self {
+        Self {
+            deadline: None,
+            period,
+        }
+    }
+
+    fn schedule(&mut self) {
+        self.deadline = Some(Instant::now() + self.period);
+    }
+
+    fn cancel(&mut self) {
+        self.deadline = None;
+    }
+
+    fn remaining(&self) -> Option<Duration> {
+        self.deadline.map(|d| {
+            let now = Instant::now();
+            if d <= now { Duration::ZERO } else { d - now }
+        })
+    }
+
+    fn armed(&self) -> bool {
+        self.deadline.is_some()
+    }
+
+    fn try_fire(&mut self) -> bool {
+        if let Some(d) = self.deadline
+            && Instant::now() >= d
+        {
+            self.deadline = None;
+            return true;
+        }
+        false
+    }
 }

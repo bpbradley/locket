@@ -210,6 +210,10 @@ impl Secrets {
         }
     }
 
+    pub fn options(&self) -> &SecretsOpts {
+        &self.options
+    }
+
     pub fn collect(mut self) -> Self {
         self.items.clear();
         self.file_index.clear();
