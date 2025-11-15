@@ -52,15 +52,15 @@ pub fn run(args: RunArgs) -> ExitCode {
         RunMode::Park => loop {
             std::thread::park();
         },
-        RunMode::Watch => match FsWatcher::new(&mut secrets, provider.as_ref()) {
-            Ok(mut watcher) => {
-                watcher.run();
-                ExitCode::Ok
+        RunMode::Watch => {
+            let mut watcher = FsWatcher::new(&mut secrets, provider.as_ref());
+            match watcher.run() {
+                Ok(()) => ExitCode::Ok,
+                Err(e) => {
+                    error!(error=%e, "watch errored");
+                    ExitCode::IoErr
+                }
             }
-            Err(e) => {
-                error!(error=%e, "failed to start filesystem watcher");
-                ExitCode::IoErr
-            }
-        },
+        }
     }
 }

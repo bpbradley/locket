@@ -15,8 +15,6 @@ use tracing::{debug, info, warn};
 pub struct FsWatcher<'a> {
     secrets: &'a mut Secrets,
     provider: &'a dyn SecretsProvider,
-    watcher: notify::RecommendedWatcher,
-    rx: mpsc::Receiver<NotifyResult<Event>>,
     debounce: Duration,
     last_event: Option<Instant>,
     pending: bool,
@@ -24,15 +22,20 @@ pub struct FsWatcher<'a> {
 }
 
 impl<'a> FsWatcher<'a> {
-    pub fn new(
-        secrets: &'a mut Secrets,
-        provider: &'a dyn SecretsProvider,
-    ) -> anyhow::Result<Self> {
-        let tpl_dir = Path::new(&secrets.options().templates_root);
-        if !tpl_dir.exists() {
-            std::fs::create_dir_all(tpl_dir)?;
-            info!(path=?tpl_dir, "created missing templates directory for watch");
+    pub fn new(secrets: &'a mut Secrets, provider: &'a dyn SecretsProvider) -> Self {
+        Self {
+            secrets,
+            provider,
+            debounce: Duration::from_millis(200),
+            last_event: None,
+            pending: false,
+            dirty: VecDeque::new(),
         }
+    }
+
+    pub fn run(&mut self) -> anyhow::Result<()> {
+        let tpl_dir = std::path::Path::new(&self.secrets.options().templates_root);
+        std::fs::create_dir_all(tpl_dir)?;
 
         let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
         let mut watcher = recommended_watcher(move |res| {
@@ -41,27 +44,14 @@ impl<'a> FsWatcher<'a> {
         watcher.watch(tpl_dir, RecursiveMode::Recursive)?;
         info!(path=?tpl_dir, "watching template files for changes");
 
-        Ok(Self {
-            secrets,
-            provider,
-            watcher,
-            rx,
-            debounce: Duration::from_millis(200),
-            last_event: None,
-            pending: false,
-            dirty: VecDeque::new(),
-        })
-    }
-
-    pub fn run(&mut self) {
         loop {
-            match self.rx.recv_timeout(Duration::from_millis(250)) {
+            match rx.recv_timeout(Duration::from_millis(250)) {
                 Ok(Ok(event)) => self.handle_event(event),
                 Ok(Err(e)) => warn!(error=?e, "watch error"),
                 Err(mpsc::RecvTimeoutError::Timeout) => self.maybe_flush(),
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    warn!("watcher disconnected; exiting watch loop");
-                    break;
+                    warn!("watcher disconnected unexpectedly; terminating");
+                    return Err(anyhow::anyhow!("filesystem watcher disconnected"));
                 }
             }
         }
