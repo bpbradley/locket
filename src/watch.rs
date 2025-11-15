@@ -11,6 +11,19 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum WatchError {
+    #[error("filesystem watcher disconnected unexpectedly")]
+    Disconnected,
+
+    #[error("notify error: {0}")]
+    Notify(#[from] notify::Error),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+}
 
 pub struct FsWatcher<'a> {
     secrets: &'a mut Secrets,
@@ -29,7 +42,7 @@ impl<'a> FsWatcher<'a> {
         }
     }
 
-    pub fn run(&mut self) -> anyhow::Result<()> {
+    pub fn run(&mut self) -> Result<(), WatchError> {
         let tpl_dir = std::path::Path::new(&self.secrets.options().templates_root);
         std::fs::create_dir_all(tpl_dir)?;
 
@@ -52,7 +65,7 @@ impl<'a> FsWatcher<'a> {
                     Ok(Err(e)) => warn!(error=?e, "watch error"),
                     Err(mpsc::RecvError) => {
                         warn!("watcher disconnected unexpectedly; terminating");
-                        return Err(anyhow::anyhow!("filesystem watcher disconnected"));
+                        return Err(WatchError::Disconnected);
                     }
                 }
                 // If something is now pending, continue to the next iteration to handle with debounce.
@@ -79,7 +92,7 @@ impl<'a> FsWatcher<'a> {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     warn!("watcher disconnected unexpectedly; terminating");
-                    return Err(anyhow::anyhow!("filesystem watcher disconnected"));
+                    return Err(WatchError::Disconnected);
                 }
             }
         }
@@ -195,7 +208,7 @@ fn is_relevant_event(kind: &EventKind) -> bool {
     )
 }
 
-fn remove_one(dst: &Path) -> anyhow::Result<()> {
+fn remove_one(dst: &Path) -> std::io::Result<()> {
     if dst.exists() && dst.is_file() {
         std::fs::remove_file(dst)?;
     }
