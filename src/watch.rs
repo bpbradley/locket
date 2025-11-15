@@ -10,8 +10,8 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
 use thiserror::Error;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
