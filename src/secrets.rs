@@ -67,11 +67,11 @@ impl FileSource {
         })
     }
 
-    pub fn rename(&mut self, templates_root: &Path, output_root: &Path, new_src: PathBuf) -> bool {
-        match new_src.strip_prefix(templates_root) {
+    pub fn rename(&mut self, templates_root: &Path, output_root: &Path, new: &Path) -> bool {
+        match new.strip_prefix(templates_root) {
             Ok(rel) => {
                 let rel = rel.to_owned();
-                self.src = new_src;
+                self.src = new.to_owned();
                 self.dst = output_root.join(rel);
                 true
             }
@@ -270,9 +270,9 @@ impl Secrets {
         }
     }
 
-    pub fn rename_file(&mut self, old_src: PathBuf, new_src: PathBuf) -> bool {
-        let Some(idx) = self.file_index.swap_remove(&old_src) else {
-            return self.upsert_file(new_src);
+    pub fn rename_file(&mut self, old: &Path, new: &Path) -> bool {
+        let Some(idx) = self.file_index.swap_remove(old) else {
+            return self.upsert_file(new.to_path_buf());
         };
 
         match self.items.get_mut(idx) {
@@ -280,9 +280,9 @@ impl Secrets {
                 if f.rename(
                     &self.options.templates_root,
                     &self.options.output_root,
-                    new_src.clone(),
+                    new,
                 ) {
-                    self.file_index.insert(new_src, idx);
+                    self.file_index.insert(new.to_path_buf(), idx);
                     true
                 } else {
                     self.items[idx] = None;

@@ -112,12 +112,12 @@ impl<'a> FsWatcher<'a> {
         while let Some(ev) = self.dirty.pop_front() {
             match ev.kind {
                 EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if ev.paths.len() == 2 => {
-                    let old_src = ev.paths[0].clone();
-                    let new_src = ev.paths[1].clone();
-                    if self.secrets.rename_file(old_src.clone(), new_src.clone()) {
-                        self.inject(&new_src);
+                    let old = &ev.paths[0];
+                    let new = &ev.paths[1];
+                    if self.secrets.rename_file(old, new) {
+                        self.inject(new);
                     } else {
-                        let _ = self.secrets.remove_file(&old_src);
+                        let _ = self.secrets.remove_file(old);
                     }
                 }
                 _ => {
