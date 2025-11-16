@@ -1,6 +1,6 @@
 use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{SecretError, Secrets, SecretsOpts, collect_files_iter},
+    secrets::{SecretError, Secrets, SecretsOpts},
 };
 use std::env;
 use std::path::Path;
@@ -35,9 +35,6 @@ fn inject_all_success_for_files_and_values() {
     })
     .collect();
 
-    for fs in collect_files_iter(&tpl, &out) {
-        secrets.upsert_file(&fs.src);
-    }
     secrets.add_value("Greeting", "Hi {{name}}");
 
     let provider = MockProvider::default();
@@ -55,15 +52,13 @@ fn inject_all_fallback_copy_on_error() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::new(SecretsOpts {
+    let secrets = Secrets::new(SecretsOpts {
         templates_root: tpl.clone(),
         output_root: out.clone(),
         ..Default::default()
     })
     .collect();
-    for fs in collect_files_iter(&tpl, &out) {
-        secrets.upsert_file(&fs.src);
-    }
+
     let provider = MockProvider {
         inject_should_fail: true,
     };
@@ -79,16 +74,13 @@ fn inject_all_error_without_fallback() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::new(SecretsOpts {
+    let secrets = Secrets::new(SecretsOpts {
         templates_root: tpl.clone(),
         output_root: out.clone(),
         policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
         ..Default::default()
     })
     .collect();
-    for fs in collect_files_iter(&tpl, &out) {
-        secrets.upsert_file(&fs.src);
-    }
     let provider = MockProvider {
         inject_should_fail: true,
     };
