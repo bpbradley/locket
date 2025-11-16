@@ -225,7 +225,14 @@ impl Secrets {
             self.push_file(fs);
         }
 
-        self.extend_values_from_env(&self.options.env_value_prefix.clone());
+        let envs = collect_value_sources_from_env(
+            &self.options.output_root,
+            &self.options.env_value_prefix,
+        );
+        for v in envs {
+            self.push_value(v);
+        }
+
         self
     }
 
@@ -248,19 +255,10 @@ impl Secrets {
         self
     }
 
-    pub fn extend_values_from_env(&mut self, prefix: &str) -> &mut Self {
-        for v in collect_value_sources_from_env(&self.options.output_root, prefix) {
-            self.push_value(v);
-        }
-        self
-    }
-
     pub fn upsert_file(&mut self, src: &Path) -> bool {
-        if let Some(newf) = FileSource::from_src(
-            &self.options.templates_root,
-            &self.options.output_root,
-            src,
-        ) {
+        if let Some(newf) =
+            FileSource::from_src(&self.options.templates_root, &self.options.output_root, src)
+        {
             if let Some(&idx) = self.file_index.get(src) {
                 self.items[idx] = Some(SecretItem::File(newf));
             } else {
