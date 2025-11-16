@@ -217,12 +217,14 @@ impl Secrets {
     pub fn collect(mut self) -> Self {
         self.items.clear();
         self.file_index.clear();
-        for fs in collect_files_iter(
-            &self.options.templates_root.clone(),
-            &self.options.output_root.clone(),
-        ) {
+
+        let templates_root = self.options.templates_root.clone();
+        let output_root = self.options.output_root.clone();
+
+        for fs in collect_files_iter(&templates_root, &output_root) {
             self.push_file(fs);
         }
+
         self.extend_values_from_env(&self.options.env_value_prefix.clone());
         self
     }
@@ -277,11 +279,7 @@ impl Secrets {
 
         match self.items.get_mut(idx) {
             Some(Some(SecretItem::File(f))) => {
-                if f.rename(
-                    &self.options.templates_root,
-                    &self.options.output_root,
-                    new,
-                ) {
+                if f.rename(&self.options.templates_root, &self.options.output_root, new) {
                     self.file_index.insert(new.to_path_buf(), idx);
                     true
                 } else {
