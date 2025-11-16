@@ -134,13 +134,13 @@ impl ValueSource {
         provider: &dyn SecretsProvider,
     ) -> Result<(), SecretError> {
         info!(dst=?self.dst, label=%self.label, "injecting value secret");
-        if let Some(parent) = self.dst.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let parent = self
             .dst
             .parent()
             .ok_or_else(|| SecretError::NoParent(self.dst.clone()))?;
+
+        fs::create_dir_all(parent)?;
+
         let tmp_out = tempfile::Builder::new()
             .prefix(".tmp.")
             .tempfile_in(parent)?
