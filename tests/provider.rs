@@ -36,7 +36,7 @@ fn inject_all_success_for_files_and_values() {
     .collect();
 
     for fs in collect_files_iter(&tpl, &out) {
-        secrets.upsert_file(fs.src.clone());
+        secrets.upsert_file(&fs.src);
     }
     secrets.add_value("Greeting", "Hi {{name}}");
 
@@ -62,7 +62,7 @@ fn inject_all_fallback_copy_on_error() {
     })
     .collect();
     for fs in collect_files_iter(&tpl, &out) {
-        secrets.upsert_file(fs.src.clone());
+        secrets.upsert_file(&fs.src);
     }
     let provider = MockProvider {
         inject_should_fail: true,
@@ -87,7 +87,7 @@ fn inject_all_error_without_fallback() {
     })
     .collect();
     for fs in collect_files_iter(&tpl, &out) {
-        secrets.upsert_file(fs.src.clone());
+        secrets.upsert_file(&fs.src);
     }
     let provider = MockProvider {
         inject_should_fail: true,

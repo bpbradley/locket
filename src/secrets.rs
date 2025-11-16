@@ -59,19 +59,19 @@ pub struct FileSource {
 }
 
 impl FileSource {
-    pub fn from_src(templates_root: &Path, output_root: &Path, src: PathBuf) -> Option<Self> {
+    pub fn from_src(templates_root: &Path, output_root: &Path, src: &Path) -> Option<Self> {
         let rel = src.strip_prefix(templates_root).ok()?.to_owned();
         Some(Self {
-            src,
+            src: src.to_owned(),
             dst: output_root.join(rel),
         })
     }
 
-    pub fn rename(&mut self, templates_root: &Path, output_root: &Path, new_src: PathBuf) -> bool {
-        match new_src.strip_prefix(templates_root) {
+    pub fn rename(&mut self, templates_root: &Path, output_root: &Path, new: &Path) -> bool {
+        match new.strip_prefix(templates_root) {
             Ok(rel) => {
                 let rel = rel.to_owned();
-                self.src = new_src;
+                self.src = new.to_owned();
                 self.dst = output_root.join(rel);
                 true
             }
@@ -85,13 +85,13 @@ impl FileSource {
         provider: &dyn SecretsProvider,
     ) -> Result<(), SecretError> {
         info!(src=?self.src, dst=?self.dst, "injecting file secret");
-        if let Some(parent) = self.dst.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let parent = self
             .dst
             .parent()
             .ok_or_else(|| SecretError::NoParent(self.dst.clone()))?;
+
+        fs::create_dir_all(parent)?;
+
         let tmp_out = tempfile::Builder::new()
             .prefix(".tmp.")
             .tempfile_in(parent)?
@@ -134,13 +134,13 @@ impl ValueSource {
         provider: &dyn SecretsProvider,
     ) -> Result<(), SecretError> {
         info!(dst=?self.dst, label=%self.label, "injecting value secret");
-        if let Some(parent) = self.dst.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let parent = self
             .dst
             .parent()
             .ok_or_else(|| SecretError::NoParent(self.dst.clone()))?;
+
+        fs::create_dir_all(parent)?;
+
         let tmp_out = tempfile::Builder::new()
             .prefix(".tmp.")
             .tempfile_in(parent)?
@@ -217,13 +217,22 @@ impl Secrets {
     pub fn collect(mut self) -> Self {
         self.items.clear();
         self.file_index.clear();
-        for fs in collect_files_iter(
-            &self.options.templates_root.clone(),
-            &self.options.output_root.clone(),
-        ) {
+
+        let templates_root = self.options.templates_root.clone();
+        let output_root = self.options.output_root.clone();
+
+        for fs in collect_files_iter(&templates_root, &output_root) {
             self.push_file(fs);
         }
-        self.extend_values_from_env(&self.options.env_value_prefix.clone());
+
+        let envs = collect_value_sources_from_env(
+            &self.options.output_root,
+            &self.options.env_value_prefix,
+        );
+        for v in envs {
+            self.push_value(v);
+        }
+
         self
     }
 
@@ -246,20 +255,11 @@ impl Secrets {
         self
     }
 
-    pub fn extend_values_from_env(&mut self, prefix: &str) -> &mut Self {
-        for v in collect_value_sources_from_env(&self.options.output_root, prefix) {
-            self.push_value(v);
-        }
-        self
-    }
-
-    pub fn upsert_file(&mut self, src: PathBuf) -> bool {
-        if let Some(newf) = FileSource::from_src(
-            &self.options.templates_root,
-            &self.options.output_root,
-            src.clone(),
-        ) {
-            if let Some(&idx) = self.file_index.get(&src) {
+    pub fn upsert_file(&mut self, src: &Path) -> bool {
+        if let Some(newf) =
+            FileSource::from_src(&self.options.templates_root, &self.options.output_root, src)
+        {
+            if let Some(&idx) = self.file_index.get(src) {
                 self.items[idx] = Some(SecretItem::File(newf));
             } else {
                 self.push_file(newf);
@@ -270,19 +270,15 @@ impl Secrets {
         }
     }
 
-    pub fn rename_file(&mut self, old_src: PathBuf, new_src: PathBuf) -> bool {
-        let Some(idx) = self.file_index.swap_remove(&old_src) else {
-            return self.upsert_file(new_src);
+    pub fn rename_file(&mut self, old: &Path, new: &Path) -> bool {
+        let Some(idx) = self.file_index.swap_remove(old) else {
+            return self.upsert_file(new);
         };
 
         match self.items.get_mut(idx) {
             Some(Some(SecretItem::File(f))) => {
-                if f.rename(
-                    &self.options.templates_root,
-                    &self.options.output_root,
-                    new_src.clone(),
-                ) {
-                    self.file_index.insert(new_src, idx);
+                if f.rename(&self.options.templates_root, &self.options.output_root, new) {
+                    self.file_index.insert(new.to_owned(), idx);
                     true
                 } else {
                     self.items[idx] = None;
@@ -370,7 +366,7 @@ pub fn collect_files_iter<'a>(
         .filter_map(|r| r.ok())
         .filter(|e| e.file_type().is_file())
         .filter_map(move |e| {
-            let src = e.path().to_path_buf();
+            let src = e.path(); // &Path
             FileSource::from_src(templates_root, output_root, src).inspect(|fs| {
                 debug!(src=?fs.src, dst=?fs.dst, "collected file secret");
             })
