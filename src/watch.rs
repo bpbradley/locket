@@ -143,7 +143,7 @@ impl<'a> FsWatcher<'a> {
     }
 
     fn inject(&mut self, p: &Path) {
-        if self.secrets.upsert_file(p.to_path_buf()) {
+        if self.secrets.upsert_file(p) {
             match self.secrets.inject_file(self.provider, p) {
                 Ok(true) => {}
                 Ok(false) => debug!(?p, "inject skipped; src not tracked"),

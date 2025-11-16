@@ -14,8 +14,8 @@ fn collisions_detect_duplicate_dst_across_files_and_values() {
     .collect();
     // Simulate file mapping: create a FileSource manually (no actual FS needed for collision logic)
     let src1 = templates.join("dup.txt");
-    let file_fs = FileSource::from_src(&templates, &output, src1.clone()).unwrap();
-    s.upsert_file(src1.clone());
+    let file_fs = FileSource::from_src(&templates, &output, &src1).unwrap();
+    s.upsert_file(&src1);
     // Add a value that sanitizes to same dst
     s.add_value("dup.txt", "template");
     let expected_dst = file_fs.dst.clone();

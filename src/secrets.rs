@@ -59,10 +59,10 @@ pub struct FileSource {
 }
 
 impl FileSource {
-    pub fn from_src(templates_root: &Path, output_root: &Path, src: PathBuf) -> Option<Self> {
+    pub fn from_src(templates_root: &Path, output_root: &Path, src: &Path) -> Option<Self> {
         let rel = src.strip_prefix(templates_root).ok()?.to_owned();
         Some(Self {
-            src,
+            src: src.to_owned(),
             dst: output_root.join(rel),
         })
     }
@@ -255,13 +255,13 @@ impl Secrets {
         self
     }
 
-    pub fn upsert_file(&mut self, src: PathBuf) -> bool {
+    pub fn upsert_file(&mut self, src: &Path) -> bool {
         if let Some(newf) = FileSource::from_src(
             &self.options.templates_root,
             &self.options.output_root,
-            src.clone(),
+            src,
         ) {
-            if let Some(&idx) = self.file_index.get(&src) {
+            if let Some(&idx) = self.file_index.get(src) {
                 self.items[idx] = Some(SecretItem::File(newf));
             } else {
                 self.push_file(newf);
@@ -274,13 +274,13 @@ impl Secrets {
 
     pub fn rename_file(&mut self, old: &Path, new: &Path) -> bool {
         let Some(idx) = self.file_index.swap_remove(old) else {
-            return self.upsert_file(new.to_path_buf());
+            return self.upsert_file(new);
         };
 
         match self.items.get_mut(idx) {
             Some(Some(SecretItem::File(f))) => {
                 if f.rename(&self.options.templates_root, &self.options.output_root, new) {
-                    self.file_index.insert(new.to_path_buf(), idx);
+                    self.file_index.insert(new.to_owned(), idx);
                     true
                 } else {
                     self.items[idx] = None;
@@ -368,7 +368,7 @@ pub fn collect_files_iter<'a>(
         .filter_map(|r| r.ok())
         .filter(|e| e.file_type().is_file())
         .filter_map(move |e| {
-            let src = e.path().to_path_buf();
+            let src = e.path(); // &Path
             FileSource::from_src(templates_root, output_root, src).inspect(|fs| {
                 debug!(src=?fs.src, dst=?fs.dst, "collected file secret");
             })
