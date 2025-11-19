@@ -1,13 +1,16 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
-use crate::{provider::SecretsProvider, secrets::Secrets};
+use crate::{
+    provider::SecretsProvider,
+    secrets::{FsEvent, Secrets},
+};
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
     recommended_watcher,
 };
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -112,12 +115,13 @@ impl<'a> FsWatcher<'a> {
         while let Some(ev) = self.dirty.pop_front() {
             match ev.kind {
                 EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if ev.paths.len() == 2 => {
-                    let old = &ev.paths[0];
-                    let new = &ev.paths[1];
-                    if self.secrets.rename_file(old, new) {
-                        self.inject(new);
-                    } else {
-                        let _ = self.secrets.remove_file(old);
+                    let watch_ev = FsEvent::Renamed {
+                        old: &ev.paths[0],
+                        new: &ev.paths[1],
+                    };
+
+                    if let Err(e) = self.secrets.handle_fs_event(self.provider, watch_ev) {
+                        warn!(error=?e, old=?ev.paths[0], new=?ev.paths[1], "rename handling error");
                     }
                 }
                 _ => {
@@ -133,21 +137,15 @@ impl<'a> FsWatcher<'a> {
 
         for p in paths {
             if p.exists() && p.is_file() {
-                self.inject(&p);
-            } else if let Some(dst) = self.secrets.remove_file(&p)
-                && let Err(e) = Self::try_remove_file(&dst)
-            {
-                warn!(error=?e, dst=?dst, "remove error");
-            }
-        }
-    }
-
-    fn inject(&mut self, p: &Path) {
-        if self.secrets.upsert_file(p) {
-            match self.secrets.inject_file(self.provider, p) {
-                Ok(true) => {}
-                Ok(false) => debug!(?p, "inject skipped; src not tracked"),
-                Err(e) => warn!(error=?e, src=?p, "inject error"),
+                let ev = FsEvent::CreatedOrModified { src: &p };
+                if let Err(e) = self.secrets.handle_fs_event(self.provider, ev) {
+                    warn!(error=?e, "failed to handle fs created/modified event");
+                }
+            } else {
+                let ev = FsEvent::Removed { src: &p };
+                if let Err(e) = self.secrets.handle_fs_event(self.provider, ev) {
+                    warn!(error=?e, "failed to handle fs removed event");
+                }
             }
         }
     }
@@ -164,14 +162,6 @@ impl<'a> FsWatcher<'a> {
                 | EK::Modify(MK::Name(_))
                 | EK::Modify(MK::Any)
         )
-    }
-
-    #[inline]
-    fn try_remove_file(dst: &Path) -> std::io::Result<()> {
-        if dst.exists() && dst.is_file() {
-            std::fs::remove_file(dst)?;
-        }
-        Ok(())
     }
 }
 

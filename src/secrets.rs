@@ -82,7 +82,7 @@ pub trait Injectable {
 
         match self.injector(provider, tmp_out.as_ref()) {
             Ok(()) => {
-                write::atomic_move(tmp_out.as_ref(), &self.dst())?;
+                write::atomic_move(tmp_out.as_ref(), self.dst())?;
                 Ok(())
             }
             Err(e) => match policy {
@@ -138,8 +138,8 @@ pub struct SecretValue {
 }
 
 impl Injectable for SecretValue {
-    fn label(&self) -> String {
-        self.label.clone()
+    fn label(&self) -> &str {
+        &self.label
     }
     fn dst(&self) -> &Path {
         &self.dst
@@ -169,6 +169,13 @@ pub enum SecretEntry {
     Dir(SecretDir),
     /// Watched explicit file
     File(SecretFile),
+}
+
+#[derive(Debug)]
+pub enum FsEvent<'a> {
+    CreatedOrModified { src: &'a Path },
+    Removed { src: &'a Path },
+    Renamed { old: &'a Path, new: &'a Path },
 }
 
 pub struct Secrets {
@@ -278,51 +285,6 @@ impl Secrets {
         false
     }
 
-    pub fn rename_file(&mut self, old: &Path, new: &Path) -> bool {
-        // Try to find a dir that owns `old`
-        for (root, entry) in self.entries.iter_mut() {
-            if let SecretEntry::Dir(dir) = entry
-                && let Ok(old_rel) = old.strip_prefix(root)
-            {
-                let old_rel = old_rel.to_path_buf();
-                if let Some(mut file) = dir.files.remove(&old_rel) {
-                    // If new still lives under the same dir, keep it, otherwise drop it.
-                    if let Ok(new_rel) = new.strip_prefix(root) {
-                        let new_rel = new_rel.to_path_buf();
-                        let dst = dir.dst_root.join(&new_rel);
-                        file.src = new.to_path_buf();
-                        file.dst = dst;
-                        dir.files.insert(new_rel, file);
-                        return true;
-                    } else {
-                        // renamed out of this dir: treat as removal
-                        return false;
-                    }
-                }
-            }
-        }
-
-        // If we didn't find it, treat as just an upsert of the new path
-        self.upsert_file(new)
-    }
-
-    pub fn remove_file(&mut self, src: &Path) -> Option<PathBuf> {
-        // In the future, explicit File entries could be removed here first.
-
-        // Look inside dirs
-        for (root, entry) in self.entries.iter_mut() {
-            if let SecretEntry::Dir(dir) = entry
-                && let Ok(rel) = src.strip_prefix(root)
-            {
-                let rel = rel.to_path_buf();
-                if let Some(file) = dir.files.remove(&rel) {
-                    return Some(file.dst);
-                }
-            }
-        }
-        None
-    }
-
     /// Inject a single file by its source path
     pub fn inject_file(
         &self,
@@ -351,13 +313,13 @@ impl Secrets {
         }
 
         // file-backed secrets
-        for (_, entry) in &self.entries {
+        for entry in self.entries.values() {
             match entry {
                 SecretEntry::File(file) => {
                     file.inject(self.options.policy, provider)?;
                 }
                 SecretEntry::Dir(dir) => {
-                    for (_, file) in &dir.files {
+                    for file in dir.files.values() {
                         file.inject(self.options.policy, provider)?;
                     }
                 }
@@ -376,13 +338,13 @@ impl Secrets {
         }
 
         // files
-        for (_root, entry) in &self.entries {
+        for entry in self.entries.values() {
             match entry {
                 SecretEntry::File(f) => {
                     *counts.entry(f.dst.clone()).or_insert(0) += 1;
                 }
                 SecretEntry::Dir(dir) => {
-                    for (_rel, f) in &dir.files {
+                    for f in dir.files.values() {
                         *counts.entry(f.dst.clone()).or_insert(0) += 1;
                     }
                 }
@@ -393,6 +355,118 @@ impl Secrets {
             .into_iter()
             .filter_map(|(p, n)| (n > 1).then_some(p))
             .collect()
+    }
+
+    fn take_file(&mut self, src: &Path) -> Option<SecretFile> {
+        for (root, entry) in self.entries.iter_mut() {
+            if let SecretEntry::Dir(dir) = entry
+                && let Ok(rel) = src.strip_prefix(root)
+            {
+                let rel = rel.to_path_buf();
+                if let Some(file) = dir.files.remove(&rel) {
+                    return Some(file);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn rename_file(&mut self, old: &Path, new: &Path) -> Result<bool, SecretError> {
+        for (root, entry) in self.entries.iter_mut() {
+            if let SecretEntry::Dir(dir) = entry
+                && let Ok(old_rel) = old.strip_prefix(root)
+            {
+                let old_rel = old_rel.to_path_buf();
+
+                // Is `new` still under this same root?
+                let Ok(new_rel) = new.strip_prefix(root) else {
+                    // Move out of this dir: delete the dst and forget it
+                    if let Some(file) = dir.files.remove(&old_rel)
+                        && file.dst.exists() {
+                            fs::remove_file(&file.dst)?;
+                        }
+                    return Ok(false);
+                };
+
+                let new_rel = new_rel.to_path_buf();
+
+                if let Some(mut file) = dir.files.remove(&old_rel) {
+                    let old_dst = file.dst.clone();
+                    file.src = new.to_path_buf();
+                    file.dst = dir.dst_root.join(&new_rel);
+                    let new_dst = file.dst.clone();
+
+                    if let Some(parent) = new_dst.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+
+                    // Try to move the actual secret file
+                    fs::rename(&old_dst, &new_dst)?;
+
+                    dir.files.insert(new_rel, file);
+                    return Ok(true);
+                } else {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn on_removed(&mut self, src: &Path) -> Result<(), SecretError> {
+        if let Some(file) = self.take_file(src)
+            && file.dst.exists()
+                && let Err(e) = fs::remove_file(&file.dst) {
+                    warn!(error=?e, dst=?file.dst, "failed to remove destination");
+                    return Err(SecretError::Io(e));
+                }
+        Ok(())
+    }
+
+    fn on_renamed(
+        &mut self,
+        provider: &dyn SecretsProvider,
+        old: &Path,
+        new: &Path,
+    ) -> Result<(), SecretError> {
+        match self.rename_file(old, new)? {
+            true => {
+                // File was renamed within its own managed dir
+                Ok(())
+            }
+            false => {
+                // File was renamed outside of its managed dir and removed.
+                // Reinject it (if possible)
+                if self.upsert_file(new) {
+                    let _ = self.inject_file(provider, new)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn on_created_or_modified(
+        &mut self,
+        provider: &dyn SecretsProvider,
+        src: &Path,
+    ) -> Result<(), SecretError> {
+        // If we accept this src into our model, inject it.
+        if self.upsert_file(src) {
+            self.inject_file(provider, src)?;
+        }
+        Ok(())
+    }
+    pub fn handle_fs_event(
+        &mut self,
+        provider: &dyn SecretsProvider,
+        ev: FsEvent,
+    ) -> Result<(), SecretError> {
+        match ev {
+            FsEvent::CreatedOrModified { src } => self.on_created_or_modified(provider, src),
+            FsEvent::Removed { src } => self.on_removed(src),
+            FsEvent::Renamed { old, new } => self.on_renamed(provider, old, new),
+        }
     }
 }
 
