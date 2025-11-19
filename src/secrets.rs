@@ -1,3 +1,4 @@
+use crate::provider::ProviderError;
 use crate::{provider::SecretsProvider, write};
 use clap::{Args, ValueEnum};
 use std::collections::HashMap;
@@ -57,10 +58,75 @@ impl SecretsOpts {
     }
 }
 
+pub trait Injectable {
+    fn label(&self) -> &str;
+    fn dst(&self) -> &Path;
+    fn copy(&self) -> Result<(), SecretError>;
+    fn inject(
+        &self,
+        policy: InjectFailurePolicy,
+        provider: &dyn SecretsProvider,
+    ) -> Result<(), SecretError> {
+        info!(src=?self.label(), dst=?self.dst(), "injecting secret");
+        let parent = self
+            .dst()
+            .parent()
+            .ok_or_else(|| SecretError::NoParent(self.dst().to_path_buf()))?;
+
+        fs::create_dir_all(parent)?;
+
+        let tmp_out = tempfile::Builder::new()
+            .prefix(".tmp.")
+            .tempfile_in(parent)?
+            .into_temp_path();
+
+        match self.injector(provider, tmp_out.as_ref()) {
+            Ok(()) => {
+                write::atomic_move(tmp_out.as_ref(), &self.dst())?;
+                Ok(())
+            }
+            Err(e) => match policy {
+                InjectFailurePolicy::Error => Err(SecretError::InjectionFailed { source: e }),
+                InjectFailurePolicy::CopyUnmodified => {
+                    warn!(src=?self.label(), dst=?self.dst(), error=?e,
+                        "injection failed; falling back to raw copy for file secret");
+                    self.copy()?;
+                    Ok(())
+                }
+                InjectFailurePolicy::Ignore => {
+                    warn!(src=?self.label(), dst=?self.dst(), error=?e, "injection failed; ignoring");
+                    Ok(())
+                }
+            },
+        }
+    }
+    fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError>;
+}
+
 /// File-backed secret
 #[derive(Debug, Clone)]
 pub struct SecretFile {
+    /// Source template path
+    pub src: PathBuf,
+    /// Destination output path
     pub dst: PathBuf,
+}
+
+impl Injectable for SecretFile {
+    fn label(&self) -> &str {
+        self.src.to_str().unwrap_or("<invalid utf8>")
+    }
+    fn dst(&self) -> &Path {
+        &self.dst
+    }
+    fn copy(&self) -> Result<(), SecretError> {
+        write::atomic_copy(&self.src, &self.dst)?;
+        Ok(())
+    }
+    fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError> {
+        provider.inject(&self.src, dst)?;
+        Ok(())
+    }
 }
 
 /// Value-backed secret
@@ -71,46 +137,20 @@ pub struct SecretValue {
     pub label: String,
 }
 
-impl SecretValue {
-    pub fn inject(
-        &self,
-        policy: InjectFailurePolicy,
-        provider: &dyn SecretsProvider,
-    ) -> Result<(), SecretError> {
-        info!(dst=?self.dst, label=%self.label, "injecting value secret");
-        let parent = self
-            .dst
-            .parent()
-            .ok_or_else(|| SecretError::NoParent(self.dst.clone()))?;
-
-        fs::create_dir_all(parent)?;
-
-        let tmp_out = tempfile::Builder::new()
-            .prefix(".tmp.")
-            .tempfile_in(parent)?
-            .into_temp_path();
-
-        match provider.inject_from_bytes(self.template.as_bytes(), tmp_out.as_ref()) {
-            Ok(()) => {
-                write::atomic_move(tmp_out.as_ref(), &self.dst)?;
-                Ok(())
-            }
-            Err(e) => match policy {
-                InjectFailurePolicy::Error => Err(SecretError::InjectionFailed { source: e }),
-                InjectFailurePolicy::CopyUnmodified => {
-                    warn!(dst=?self.dst, label=%self.label, error=?e,
-                          "injection failed; falling back to raw copy for value secret");
-                    write::atomic_write(tmp_out.as_ref(), self.template.as_bytes())?;
-                    write::atomic_move(tmp_out.as_ref(), &self.dst)?;
-                    Ok(())
-                }
-                InjectFailurePolicy::Ignore => {
-                    warn!(dst=?self.dst, label=%self.label, error=?e,
-                          "injection failed; ignoring");
-                    Ok(())
-                }
-            },
-        }
+impl Injectable for SecretValue {
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+    fn dst(&self) -> &Path {
+        &self.dst
+    }
+    fn copy(&self) -> Result<(), SecretError> {
+        write::atomic_write(&self.dst, self.template.as_bytes())?;
+        Ok(())
+    }
+    fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError> {
+        provider.inject_from_bytes(self.template.as_bytes(), dst)?;
+        Ok(())
     }
 }
 
@@ -173,7 +213,13 @@ impl Secrets {
                 let rel = rel.to_path_buf();
                 let dst = output_root.join(&rel);
                 debug!(src=?src, dst=?dst, "collected file secret");
-                dir.files.insert(rel, SecretFile { dst });
+                dir.files.insert(
+                    rel,
+                    SecretFile {
+                        src: src.to_path_buf(),
+                        dst,
+                    },
+                );
             }
         }
 
@@ -219,7 +265,13 @@ impl Secrets {
             {
                 let rel = rel.to_path_buf();
                 let dst = dir.dst_root.join(&rel);
-                dir.files.insert(rel, SecretFile { dst });
+                dir.files.insert(
+                    rel,
+                    SecretFile {
+                        src: src.to_path_buf(),
+                        dst,
+                    },
+                );
                 return true;
             }
         }
@@ -233,12 +285,14 @@ impl Secrets {
                 && let Ok(old_rel) = old.strip_prefix(root)
             {
                 let old_rel = old_rel.to_path_buf();
-                if dir.files.remove(&old_rel).is_some() {
+                if let Some(mut file) = dir.files.remove(&old_rel) {
                     // If new still lives under the same dir, keep it, otherwise drop it.
                     if let Ok(new_rel) = new.strip_prefix(root) {
                         let new_rel = new_rel.to_path_buf();
                         let dst = dir.dst_root.join(&new_rel);
-                        dir.files.insert(new_rel, SecretFile { dst });
+                        file.src = new.to_path_buf();
+                        file.dst = dst;
+                        dir.files.insert(new_rel, file);
                         return true;
                     } else {
                         // renamed out of this dir: treat as removal
@@ -283,7 +337,7 @@ impl Secrets {
                 && let Ok(rel) = src.strip_prefix(root)
                 && let Some(file) = dir.files.get(rel)
             {
-                inject_file_path(src, &file.dst, self.options.policy, provider)?;
+                file.inject(self.options.policy, provider)?;
                 return Ok(true);
             }
         }
@@ -291,19 +345,20 @@ impl Secrets {
     }
 
     pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
+        // value-backed secrets
         for v in self.values.values() {
             v.inject(self.options.policy, provider)?;
         }
 
-        for (root, entry) in &self.entries {
+        // file-backed secrets
+        for (_, entry) in &self.entries {
             match entry {
                 SecretEntry::File(file) => {
-                    inject_file_path(root, &file.dst, self.options.policy, provider)?;
+                    file.inject(self.options.policy, provider)?;
                 }
                 SecretEntry::Dir(dir) => {
-                    for (rel, file) in &dir.files {
-                        let src = root.join(rel);
-                        inject_file_path(&src, &file.dst, self.options.policy, provider)?;
+                    for (_, file) in &dir.files {
+                        file.inject(self.options.policy, provider)?;
                     }
                 }
             }
@@ -321,14 +376,13 @@ impl Secrets {
         }
 
         // files
-        for (root, entry) in &self.entries {
+        for (_root, entry) in &self.entries {
             match entry {
                 SecretEntry::File(f) => {
                     *counts.entry(f.dst.clone()).or_insert(0) += 1;
                 }
                 SecretEntry::Dir(dir) => {
-                    for (rel, f) in &dir.files {
-                        let _src = root.join(rel); // not used, but available if you log later
+                    for (_rel, f) in &dir.files {
                         *counts.entry(f.dst.clone()).or_insert(0) += 1;
                     }
                 }
@@ -339,47 +393,6 @@ impl Secrets {
             .into_iter()
             .filter_map(|(p, n)| (n > 1).then_some(p))
             .collect()
-    }
-}
-
-fn inject_file_path(
-    src: &Path,
-    dst: &Path,
-    policy: InjectFailurePolicy,
-    provider: &dyn SecretsProvider,
-) -> Result<(), SecretError> {
-    info!(src=?src, dst=?dst, "injecting file secret");
-    let parent = dst
-        .parent()
-        .ok_or_else(|| SecretError::NoParent(dst.to_path_buf()))?;
-
-    fs::create_dir_all(parent)?;
-
-    let tmp_out = tempfile::Builder::new()
-        .prefix(".tmp.")
-        .tempfile_in(parent)?
-        .into_temp_path();
-
-    match provider.inject(src, tmp_out.as_ref()) {
-        Ok(()) => {
-            write::atomic_move(tmp_out.as_ref(), dst)?;
-            Ok(())
-        }
-        Err(e) => match policy {
-            InjectFailurePolicy::Error => Err(SecretError::InjectionFailed { source: e }),
-            InjectFailurePolicy::CopyUnmodified => {
-                warn!(src=?src, dst=?dst, error=?e,
-                      "injection failed; falling back to raw copy for file secret");
-                let bytes = fs::read(src)?;
-                write::atomic_write(tmp_out.as_ref(), &bytes)?;
-                write::atomic_move(tmp_out.as_ref(), dst)?;
-                Ok(())
-            }
-            InjectFailurePolicy::Ignore => {
-                warn!(src=?src, dst=?dst, error=?e, "injection failed; ignoring");
-                Ok(())
-            }
-        },
     }
 }
 

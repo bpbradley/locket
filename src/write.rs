@@ -37,6 +37,16 @@ pub fn atomic_move(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
+pub fn atomic_copy(from: &Path, to: &Path) -> io::Result<()> {
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent)?;
+        let bytes = fs::read(from)?;
+        atomic_write(to, &bytes)
+    } else {
+        Err(io::Error::other("destination has no parent"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
