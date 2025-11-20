@@ -1,4 +1,4 @@
-use secret_sidecar::secrets::sanitize_name;
+use secret_sidecar::secrets::types::sanitize_name;
 
 #[test]
 fn sanitize_basic() {

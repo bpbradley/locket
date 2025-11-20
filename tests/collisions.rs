@@ -1,4 +1,4 @@
-use secret_sidecar::secrets::{InjectFailurePolicy, Secrets, SecretsOpts};
+use secret_sidecar::secrets::{InjectFailurePolicy, Secrets, manager::SecretsOpts};
 use std::fs;
 
 #[test]

@@ -2,7 +2,7 @@
 
 use crate::{
     provider::SecretsProvider,
-    secrets::{FsEvent, Secrets},
+    secrets::{Secrets, manager::FsEvent},
 };
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
