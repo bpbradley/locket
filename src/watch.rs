@@ -4,17 +4,17 @@ use crate::{
     provider::SecretsProvider,
     secrets::{Secrets, manager::FsEvent},
 };
+use indexmap::IndexMap;
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
     recommended_watcher,
 };
-use indexmap::IndexMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -46,15 +46,28 @@ impl<'a> FsWatcher<'a> {
     }
 
     pub fn run(&mut self) -> Result<(), WatchError> {
-        let watched = Path::new(&self.secrets.options().templates_root);
-        std::fs::create_dir_all(watched)?;
-
         let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
         let mut watcher = recommended_watcher(move |res| {
             let _ = tx.send(res);
         })?;
-        watcher.watch(watched, RecursiveMode::Recursive)?;
-        info!(path=?watched, "watching template files for changes");
+        for mapping in &self.secrets.options().mapping {
+            let watched = &mapping.src;
+            if !watched.exists() {
+                if watched.extension().is_none() {
+                    warn!(path=?watched, "watched template does not exist. Will treat as empty directory and try to create");
+                    std::fs::create_dir_all(watched)?;
+                } else {
+                    warn!(path=?watched, "watched template file does not exist yet");
+                    continue;
+                }
+            }
+            let mode = if watched.is_dir() {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+            watcher.watch(watched, mode)?;
+        }
 
         loop {
             debug!("waiting for fs event indefinitely");
@@ -71,13 +84,12 @@ impl<'a> FsWatcher<'a> {
                 continue;
             }
 
-            // Start Debounce
+            debug!("Debouncing events for {:?}", self.debounce);
             let mut deadline = Instant::now() + self.debounce;
-
             loop {
                 let now = Instant::now();
                 if now >= deadline {
-                    break; // Time is up, exit to Flush phase
+                    break;
                 }
 
                 let timeout = deadline - now;
@@ -128,9 +140,7 @@ impl<'a> FsWatcher<'a> {
             EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => {
                 event.paths.first().map(|src| FsEvent::Write(src.clone()))
             }
-            EventKind::Remove(_) => {
-                event.paths.first().map(|src| FsEvent::Remove(src.clone()))
-            }
+            EventKind::Remove(_) => event.paths.first().map(|src| FsEvent::Remove(src.clone())),
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {
                 RenameMode::Both => {
                     if event.paths.len() == 2 {
@@ -143,13 +153,9 @@ impl<'a> FsWatcher<'a> {
                     }
                 }
                 // Renamed to an unknown location == Remove(X)
-                RenameMode::From => {
-                    event.paths.first().map(|src| FsEvent::Remove(src.clone()))
-                }
+                RenameMode::From => event.paths.first().map(|src| FsEvent::Remove(src.clone())),
                 // Renamed from an unknown location == Write(X)
-                RenameMode::To => {
-                    event.paths.first().map(|src| FsEvent::Write(src.clone()))
-                }
+                RenameMode::To => event.paths.first().map(|src| FsEvent::Write(src.clone())),
                 _ => None,
             },
             _ => None,
@@ -206,7 +212,7 @@ impl EventRegistry {
 
         // Clean up the old path (it no longer exists at that location)
         self.map.shift_remove(&from);
-        
+
         // Register the new event at the new location
         self.update(to, event);
     }
@@ -217,7 +223,7 @@ impl EventRegistry {
             (Some(FsEvent::Write(_)), FsEvent::Remove(_)) => {
                 self.map.shift_remove(&path);
             }
-            
+
             // Move -> Remove === Remove(Origin).
             (Some(FsEvent::Move { .. }), FsEvent::Remove(_)) => {
                 self.map.insert(path, new_event);
@@ -241,5 +247,11 @@ impl EventRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+}
+
+impl Default for EventRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }

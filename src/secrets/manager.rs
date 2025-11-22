@@ -9,13 +9,34 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
+#[derive(Debug, Clone)]
+pub struct PathMapping {
+    pub src: PathBuf,
+    pub dst: PathBuf,
+}
+
+impl Default for PathMapping {
+    fn default() -> Self {
+        Self {
+            src: PathBuf::from("/templates"),
+            dst: PathBuf::from("/run/secrets"),
+        }
+    }
+}
+
 /// CLI / config options.
 #[derive(Debug, Clone, Args, Default)]
 pub struct SecretsOpts {
-    #[arg(long, env = "TEMPLATES_ROOT", default_value = "/templates")]
-    pub templates_root: PathBuf,
-    #[arg(long, env = "OUTPUT_ROOT", default_value = "/run/secrets")]
-    pub output_root: PathBuf,
+    #[arg(
+        long = "map", 
+        value_parser = parse_mapping,
+        env = "SECRET_MAP", 
+        value_delimiter = ',',
+        default_value = "/templates:/run/secrets"
+    )]
+    pub mapping: Vec<PathMapping>,
+    #[arg(long = "out", env = "VALUE_OUTPUT_DIR", default_value = "/run/secrets")]
+    pub value_dir: PathBuf,
     #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
     pub env_value_prefix: String,
     #[arg(
@@ -27,18 +48,35 @@ pub struct SecretsOpts {
     pub policy: InjectFailurePolicy,
 }
 
+/// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
+fn parse_mapping(s: &str) -> Result<PathMapping, String> {
+    let (src, dst) = s
+        .split_once(':')
+        .or_else(|| s.split_once('=')) // Allow '=' if there is no ':' or multiple (Windows)
+        .ok_or_else(|| {
+            format!(
+                "Invalid mapping format '{}'. Expected SRC:DST or SRC=DST",
+                s
+            )
+        })?;
+
+    Ok(PathMapping {
+        src: PathBuf::from(src),
+        dst: PathBuf::from(dst),
+    })
+}
+
 impl SecretsOpts {
     pub fn build(&self) -> Result<Secrets, SecretError> {
         Ok(Secrets::new(self.clone()).collect())
     }
 }
 
-
 /// Filesystem events for SecretFs
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum FsEvent {
-    Write (PathBuf),
-    Remove (PathBuf),
+    Write(PathBuf),
+    Remove(PathBuf),
     Move { from: PathBuf, to: PathBuf },
 }
 
@@ -62,11 +100,12 @@ impl Secrets {
     }
 
     pub fn collect(mut self) -> Self {
-        self.fs
-            .collect_from_root(&self.opts.templates_root, &self.opts.output_root);
+        for mapping in &self.opts.mapping {
+            self.fs.collect_from_root(&mapping.src, &mapping.dst);
+        }
 
         let envs =
-            collect_value_sources_from_env(&self.opts.output_root, &self.opts.env_value_prefix);
+            collect_value_sources_from_env(&self.opts.value_dir, &self.opts.env_value_prefix);
         for v in envs {
             self.values.insert(v.label.clone(), v);
         }
@@ -75,7 +114,7 @@ impl Secrets {
     }
 
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
-        let v = value_source(&self.opts.output_root, label, template);
+        let v = value_source(&self.opts.value_dir, label, template);
         self.values.insert(v.label.clone(), v);
         self
     }
@@ -85,7 +124,7 @@ impl Secrets {
         pairs: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
     ) -> &mut Self {
         for (label, tpl) in pairs {
-            let v = value_source(&self.opts.output_root, label.as_ref(), tpl.as_ref());
+            let v = value_source(&self.opts.value_dir, label.as_ref(), tpl.as_ref());
             self.values.insert(v.label.clone(), v);
         }
         self
@@ -185,7 +224,7 @@ impl Secrets {
         match ev {
             FsEvent::Write(src) => self.on_created_or_modified(provider, &src),
             FsEvent::Remove(src) => self.on_removed(&src),
-            FsEvent::Move{ from, to } => self.on_renamed(provider, &from, &to),
+            FsEvent::Move { from, to } => self.on_renamed(provider, &from, &to),
         }
     }
 }

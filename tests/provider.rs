@@ -1,6 +1,6 @@
 use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{SecretError, Secrets, manager::SecretsOpts},
+    secrets::{SecretError, Secrets, manager::{SecretsOpts, PathMapping}},
 };
 use std::env;
 use std::path::Path;
@@ -29,8 +29,7 @@ fn inject_all_success_for_files_and_values() {
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
     let out = tmp.path().join("out");
     let mut secrets = Secrets::new(SecretsOpts {
-        templates_root: tpl.clone(),
-        output_root: out.clone(),
+        mapping: vec![PathMapping{src: tpl.clone(), dst: out.clone()}; 1],
         ..Default::default()
     })
     .collect();
@@ -53,8 +52,7 @@ fn inject_all_fallback_copy_on_error() {
     std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
     let out = tmp.path().join("out");
     let secrets = Secrets::new(SecretsOpts {
-        templates_root: tpl.clone(),
-        output_root: out.clone(),
+        mapping: vec![PathMapping{src: tpl.clone(), dst: out.clone()}; 1],
         ..Default::default()
     })
     .collect();
@@ -75,8 +73,7 @@ fn inject_all_error_without_fallback() {
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
     let out = tmp.path().join("out");
     let secrets = Secrets::new(SecretsOpts {
-        templates_root: tpl.clone(),
-        output_root: out.clone(),
+        mapping: vec![PathMapping{src: tpl.clone(), dst: out.clone()}; 1],
         policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
         ..Default::default()
     })
@@ -97,7 +94,7 @@ fn inject_all_value_sources() {
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("out");
     let secrets = Secrets::new(SecretsOpts {
-        output_root: out.clone(),
+        mapping: vec![PathMapping{src: tmp.path().join("templates"), dst: out.clone()}; 1],
         env_value_prefix: "secret_".into(),
         ..Default::default()
     })
