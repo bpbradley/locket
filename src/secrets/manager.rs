@@ -68,7 +68,7 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
 
 impl SecretsOpts {
     pub fn build(&self) -> Result<Secrets, SecretError> {
-        Ok(Secrets::new(self.clone()).collect())
+        Ok(Secrets::new(self.clone()))
     }
 }
 
@@ -88,45 +88,29 @@ pub struct Secrets {
 
 impl Secrets {
     pub fn new(opts: SecretsOpts) -> Self {
-        Self {
+        let fs = SecretFs::new(opts.mapping.clone());
+        let mut secrets = Self {
             opts,
-            fs: SecretFs::new(),
+            fs,
             values: HashMap::new(),
-        }
+        };
+        let envs = collect_value_sources_from_env(
+             &secrets.opts.value_dir, 
+             &secrets.opts.env_value_prefix
+         );
+         for v in envs {
+             secrets.values.insert(v.label.clone(), v);
+         }
+         secrets
     }
 
     pub fn options(&self) -> &SecretsOpts {
         &self.opts
     }
 
-    pub fn collect(mut self) -> Self {
-        for mapping in &self.opts.mapping {
-            self.fs.add_mapping(mapping);
-        }
-
-        let envs =
-            collect_value_sources_from_env(&self.opts.value_dir, &self.opts.env_value_prefix);
-        for v in envs {
-            self.values.insert(v.label.clone(), v);
-        }
-
-        self
-    }
-
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
         let v = value_source(&self.opts.value_dir, label, template);
         self.values.insert(v.label.clone(), v);
-        self
-    }
-
-    pub fn extend_values(
-        &mut self,
-        pairs: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
-    ) -> &mut Self {
-        for (label, tpl) in pairs {
-            let v = value_source(&self.opts.value_dir, label.as_ref(), tpl.as_ref());
-            self.values.insert(v.label.clone(), v);
-        }
         self
     }
 

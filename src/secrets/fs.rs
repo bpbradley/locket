@@ -11,18 +11,28 @@ pub struct SecretFs {
 }
 
 impl SecretFs {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(mappings: Vec<PathMapping>) -> Self {
+        let mut fs = Self {
+            mappings,
+            files: BTreeMap::new(),
+        };
+        
+        fs.scan();
+        
+        fs
     }
 
-    pub fn add_mapping(&mut self, mapping: &PathMapping) {
-        self.mappings.push(mapping.clone());
-        for entry in WalkDir::new(&mapping.src)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-        {
-            self.upsert(entry.path());
+    fn scan(&mut self) {
+        let roots: Vec<PathBuf> = self.mappings.iter().map(|m| m.src.clone()).collect();
+        
+        for src in roots {
+            for entry in WalkDir::new(&src)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+            {
+                self.upsert(entry.path());
+            }
         }
     }
 

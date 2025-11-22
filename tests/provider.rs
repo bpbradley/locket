@@ -40,8 +40,7 @@ fn inject_all_success_for_files_and_values() {
             1
         ],
         ..Default::default()
-    })
-    .collect();
+    });
 
     secrets.add_value("Greeting", "Hi {{name}}");
 
@@ -69,8 +68,7 @@ fn inject_all_fallback_copy_on_error() {
             1
         ],
         ..Default::default()
-    })
-    .collect();
+    });
 
     let provider = MockProvider {
         inject_should_fail: true,
@@ -97,8 +95,7 @@ fn inject_all_error_without_fallback() {
         ],
         policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
         ..Default::default()
-    })
-    .collect();
+    });
     let provider = MockProvider {
         inject_should_fail: true,
     };
@@ -124,8 +121,7 @@ fn inject_all_value_sources() {
         ],
         env_value_prefix: "secret_".into(),
         ..Default::default()
-    })
-    .collect();
+    });
     let provider = MockProvider::default();
     secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("greeting")).unwrap();

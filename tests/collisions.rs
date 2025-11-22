@@ -22,8 +22,7 @@ fn collisions_detect_duplicate_dst_across_files_and_values() {
         ],
         policy: InjectFailurePolicy::CopyUnmodified,
         ..Default::default()
-    })
-    .collect();
+    });
     // Add a value that sanitizes to same dst path
     s.add_value("dup.txt", "template");
     let expected_dst = output.join("dup.txt");
