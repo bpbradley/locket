@@ -94,14 +94,12 @@ impl Secrets {
             fs,
             values: HashMap::new(),
         };
-        let envs = collect_value_sources_from_env(
-             &secrets.opts.value_dir, 
-             &secrets.opts.env_value_prefix
-         );
-         for v in envs {
-             secrets.values.insert(v.label.clone(), v);
-         }
-         secrets
+        let envs =
+            collect_value_sources_from_env(&secrets.opts.value_dir, &secrets.opts.env_value_prefix);
+        for v in envs {
+            secrets.values.insert(v.label.clone(), v);
+        }
+        secrets
     }
 
     pub fn options(&self) -> &SecretsOpts {
@@ -161,11 +159,56 @@ impl Secrets {
             );
             return Ok(());
         }
-        for file in removed {
+
+        for file in &removed {
             file.remove()?;
-            debug!(?src, "event: removed secret file");
+            debug!(?file.dst, "event: removed secret file");
+        }
+
+        // Attempt to bubble delete empty parent dirs up to the event implied ceiling.
+        if let Some(ceiling) = self.fs.resolve(src) {
+            let mut candidates = std::collections::HashSet::new();
+            for file in &removed {
+                if let Some(parent) = file.dst.parent() {
+                    candidates.insert(parent.to_path_buf());
+                }
+            }
+
+            for dir in candidates {
+                if dir.starts_with(&ceiling) && dir.exists() {
+                    self.bubble_delete(dir, &ceiling);
+                }
+            }
         }
         Ok(())
+    }
+
+    fn bubble_delete(&self, start_dir: PathBuf, ceiling: &Path) {
+        let mut current = start_dir;
+
+        loop {
+            if !current.starts_with(ceiling) {
+                break;
+            }
+            match std::fs::remove_dir(&current) {
+                Ok(_) => {
+                    if current == ceiling {
+                        break;
+                    }
+                    if let Some(parent) = current.parent() {
+                        current = parent.to_path_buf();
+                    } else {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+                    break;
+                }
+                Err(_) => {
+                    break;
+                }
+            }
+        }
     }
 
     fn on_move(

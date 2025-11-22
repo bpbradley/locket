@@ -16,15 +16,15 @@ impl SecretFs {
             mappings,
             files: BTreeMap::new(),
         };
-        
+
         fs.scan();
-        
+
         fs
     }
 
     fn scan(&mut self) {
         let roots: Vec<PathBuf> = self.mappings.iter().map(|m| m.src.clone()).collect();
-        
+
         for src in roots {
             for entry in WalkDir::new(&src)
                 .into_iter()
@@ -36,7 +36,7 @@ impl SecretFs {
         }
     }
 
-    fn resolve_dst(&self, src: &Path) -> Option<PathBuf> {
+    pub fn resolve(&self, src: &Path) -> Option<PathBuf> {
         let mapping = self
             .mappings
             .iter()
@@ -53,7 +53,7 @@ impl SecretFs {
         if self.files.contains_key(src) {
             return self.files.get(src);
         }
-        if let Some(dst) = self.resolve_dst(src) {
+        if let Some(dst) = self.resolve(src) {
             let file = SecretFile {
                 src: src.to_path_buf(),
                 dst,
