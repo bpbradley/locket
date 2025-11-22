@@ -169,18 +169,17 @@ impl Secrets {
     }
 
     fn on_remove(&mut self, src: &Path) -> Result<(), SecretError> {
-        // If src is a directory, we *could* scan children here later.
-        // For now, we only remove exact file matches.
-        if src.is_dir() {
+        let removed = self.fs.remove(src);
+        if removed.is_empty() {
             debug!(
                 ?src,
-                "on_remove: directory removal; currently no subtree cleanup"
+                "event: path removed but no secrets were tracked there"
             );
             return Ok(());
         }
-
-        if let Some(file) = self.fs.remove(src) {
-            file.remove()?
+        for file in removed {
+            file.remove()?;
+            debug!(?src, "event: removed secret file");
         }
         Ok(())
     }
@@ -202,7 +201,7 @@ impl Secrets {
     fn on_write(&mut self, provider: &dyn SecretsProvider, src: &Path) -> Result<(), SecretError> {
         // Only react to files, not directories.
         if src.is_dir() {
-            debug!(?src, "on_write: skipping directory");
+            debug!(?src, "event: skipping directory write");
             return Ok(());
         }
         if let Some(file) = self.fs.upsert(src) {
