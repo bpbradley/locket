@@ -33,15 +33,15 @@ impl SecretsOpts {
     }
 }
 
-/// Filesystem events as seen by Secrets (already normalized by watcher).
-#[derive(Debug)]
-pub enum FsEvent<'a> {
-    CreatedOrModified { src: &'a Path },
-    Removed { src: &'a Path },
-    Renamed { old: &'a Path, new: &'a Path },
+
+/// Filesystem events for SecretFs
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub enum FsEvent {
+    Write (PathBuf),
+    Remove (PathBuf),
+    Move { from: PathBuf, to: PathBuf },
 }
 
-/// Public facade: combines FS structure + values + policy.
 pub struct Secrets {
     opts: SecretsOpts,
     fs: SecretFs,
@@ -183,9 +183,9 @@ impl Secrets {
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::CreatedOrModified { src } => self.on_created_or_modified(provider, src),
-            FsEvent::Removed { src } => self.on_removed(src),
-            FsEvent::Renamed { old, new } => self.on_renamed(provider, old, new),
+            FsEvent::Write(src) => self.on_created_or_modified(provider, &src),
+            FsEvent::Remove(src) => self.on_removed(&src),
+            FsEvent::Move{ from, to } => self.on_renamed(provider, &from, &to),
         }
     }
 }

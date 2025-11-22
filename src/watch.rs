@@ -9,8 +9,8 @@ use notify::{
     event::{EventKind, ModifyKind, RenameMode},
     recommended_watcher,
 };
-use std::collections::VecDeque;
-use std::path::PathBuf;
+use indexmap::IndexMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -32,7 +32,7 @@ pub struct FsWatcher<'a> {
     secrets: &'a mut Secrets,
     provider: &'a dyn SecretsProvider,
     debounce: Duration,
-    dirty: VecDeque<Event>,
+    events: EventRegistry,
 }
 
 impl<'a> FsWatcher<'a> {
@@ -40,170 +40,206 @@ impl<'a> FsWatcher<'a> {
         Self {
             secrets,
             provider,
-            debounce: Duration::from_millis(200),
-            dirty: VecDeque::new(),
+            debounce: Duration::from_millis(500),
+            events: EventRegistry::new(),
         }
     }
 
     pub fn run(&mut self) -> Result<(), WatchError> {
-        let tpl_dir = std::path::Path::new(&self.secrets.options().templates_root);
-        std::fs::create_dir_all(tpl_dir)?;
+        let watched = Path::new(&self.secrets.options().templates_root);
+        std::fs::create_dir_all(watched)?;
 
         let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
         let mut watcher = recommended_watcher(move |res| {
             let _ = tx.send(res);
         })?;
-        watcher.watch(tpl_dir, RecursiveMode::Recursive)?;
-        info!(path=?tpl_dir, "watching template files for changes");
-        let mut timer = DebounceTimer::new(self.debounce);
+        watcher.watch(watched, RecursiveMode::Recursive)?;
+        info!(path=?watched, "watching template files for changes");
 
         loop {
-            if !timer.armed() {
-                // Nothing is pending, as the timer isn't armed. We can block indefinitely.
-                match rx.recv() {
+            debug!("waiting for fs event indefinitely");
+            let event = match rx.recv() {
+                Ok(Ok(event)) => event,
+                Ok(Err(e)) => {
+                    warn!(error=?e, "notify internal error");
+                    continue;
+                }
+                Err(_) => return Err(WatchError::Disconnected),
+            };
+
+            if !self.ingest_event(event) {
+                continue;
+            }
+
+            // Start Debounce
+            let mut deadline = Instant::now() + self.debounce;
+
+            loop {
+                let now = Instant::now();
+                if now >= deadline {
+                    break; // Time is up, exit to Flush phase
+                }
+
+                let timeout = deadline - now;
+                match rx.recv_timeout(timeout) {
                     Ok(Ok(event)) => {
-                        self.handle_event(event);
-                        timer.schedule();
+                        // Only extend the window if the event is relevant
+                        if self.ingest_event(event) {
+                            deadline = Instant::now() + self.debounce;
+                        }
                     }
-                    Ok(Err(e)) => warn!(error=?e, "watch error"),
-                    Err(mpsc::RecvError) => {
-                        warn!("watcher disconnected unexpectedly; terminating");
+                    Ok(Err(e)) => warn!(error=?e, "notify internal error"),
+                    Err(mpsc::RecvTimeoutError::Timeout) => break, // Time is up
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        warn!("watcher disconnected unexpectedly");
                         return Err(WatchError::Disconnected);
                     }
                 }
-                // If something is now pending, continue to the next iteration to handle with debounce.
-                continue;
             }
-
-            if timer.try_fire() {
-                // Debounce timer fired. Process pending events.
-                self.process_pending();
-                continue;
-            }
-
-            let remaining = timer.remaining().unwrap_or(Duration::ZERO);
-
-            match rx.recv_timeout(remaining) {
-                Ok(Ok(event)) => {
-                    self.handle_event(event);
-                    timer.schedule(); // Reschedule work
-                }
-                Ok(Err(e)) => warn!(error=?e, "watch error"),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    timer.cancel();
-                    self.process_pending();
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    warn!("watcher disconnected unexpectedly; terminating");
-                    return Err(WatchError::Disconnected);
-                }
-            }
+            self.flush_events();
         }
     }
 
-    fn handle_event(&mut self, event: Event) {
-        debug!(?event, "fs event");
-        if !Self::is_relevant_event(&event.kind) {
-            return;
-        }
-        self.dirty.push_back(event);
-    }
-
-    fn process_pending(&mut self) {
-        let mut paths: Vec<PathBuf> = Vec::new();
-
-        while let Some(ev) = self.dirty.pop_front() {
-            match ev.kind {
-                EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if ev.paths.len() == 2 => {
-                    let watch_ev = FsEvent::Renamed {
-                        old: &ev.paths[0],
-                        new: &ev.paths[1],
-                    };
-
-                    if let Err(e) = self.secrets.handle_fs_event(self.provider, watch_ev) {
-                        warn!(error=?e, old=?ev.paths[0], new=?ev.paths[1], "rename handling error");
-                    }
-                }
-                _ => {
-                    paths.extend(ev.paths.into_iter());
-                }
-            }
-        }
-
-        // Deduplicate paths because multiple events may have occurred on the same file.
-        // Must sort first to use dedup, but relative order doesn't matter so sort_unstable is fine.
-        paths.sort_unstable();
-        paths.dedup();
-
-        for p in paths {
-            if p.exists() && p.is_file() {
-                let ev = FsEvent::CreatedOrModified { src: &p };
-                if let Err(e) = self.secrets.handle_fs_event(self.provider, ev) {
-                    warn!(error=?e, "failed to handle fs created/modified event");
-                }
-            } else {
-                let ev = FsEvent::Removed { src: &p };
-                if let Err(e) = self.secrets.handle_fs_event(self.provider, ev) {
-                    warn!(error=?e, "failed to handle fs removed event");
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn is_relevant_event(kind: &EventKind) -> bool {
-        use EventKind as EK;
-        use ModifyKind as MK;
-        matches!(
-            kind,
-            EK::Create(_)
-                | EK::Remove(_)
-                | EK::Modify(MK::Data(_))
-                | EK::Modify(MK::Name(_))
-                | EK::Modify(MK::Any)
-        )
-    }
-}
-
-struct DebounceTimer {
-    deadline: Option<Instant>,
-    period: Duration,
-}
-
-impl DebounceTimer {
-    fn new(period: Duration) -> Self {
-        Self {
-            deadline: None,
-            period,
-        }
-    }
-
-    fn schedule(&mut self) {
-        self.deadline = Some(Instant::now() + self.period);
-    }
-
-    fn cancel(&mut self) {
-        self.deadline = None;
-    }
-
-    fn remaining(&self) -> Option<Duration> {
-        self.deadline.map(|d| {
-            let now = Instant::now();
-            if d <= now { Duration::ZERO } else { d - now }
-        })
-    }
-
-    fn armed(&self) -> bool {
-        self.deadline.is_some()
-    }
-
-    fn try_fire(&mut self) -> bool {
-        if let Some(d) = self.deadline
-            && Instant::now() >= d
-        {
-            self.deadline = None;
+    fn ingest_event(&mut self, event: Event) -> bool {
+        if let Some(fs_ev) = Self::map_fs_event(&event) {
+            self.events.register(fs_ev);
             return true;
         }
         false
+    }
+
+    fn flush_events(&mut self) {
+        if self.events.is_empty() {
+            return;
+        }
+
+        let events: Vec<_> = self.events.drain().collect();
+        debug!(count = events.len(), "processing batched fs events");
+
+        for ev in events {
+            if let Err(e) = self.secrets.handle_fs_event(self.provider, ev) {
+                warn!(error=?e, "failed to handle fs event");
+            }
+        }
+    }
+
+    fn map_fs_event(event: &Event) -> Option<FsEvent> {
+        match &event.kind {
+            EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => {
+                event.paths.first().map(|src| FsEvent::Write(src.clone()))
+            }
+            EventKind::Remove(_) => {
+                event.paths.first().map(|src| FsEvent::Remove(src.clone()))
+            }
+            EventKind::Modify(ModifyKind::Name(mode)) => match mode {
+                RenameMode::Both => {
+                    if event.paths.len() == 2 {
+                        Some(FsEvent::Move {
+                            from: event.paths[0].clone(),
+                            to: event.paths[1].clone(),
+                        })
+                    } else {
+                        None
+                    }
+                }
+                // Renamed to an unknown location == Remove(X)
+                RenameMode::From => {
+                    event.paths.first().map(|src| FsEvent::Remove(src.clone()))
+                }
+                // Renamed from an unknown location == Write(X)
+                RenameMode::To => {
+                    event.paths.first().map(|src| FsEvent::Write(src.clone()))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+/// Registry to collect and coalesce filesystem events before processing in batch
+pub struct EventRegistry {
+    map: IndexMap<PathBuf, FsEvent>,
+}
+
+impl EventRegistry {
+    pub fn new() -> Self {
+        Self {
+            map: IndexMap::new(),
+        }
+    }
+
+    /// Update the registry with a new event
+    pub fn register(&mut self, event: FsEvent) {
+        match event {
+            FsEvent::Write(ref path) => {
+                self.update(path.clone(), event);
+            }
+            FsEvent::Remove(ref path) => {
+                self.update(path.clone(), event);
+            }
+            FsEvent::Move { ref from, ref to } => {
+                self.handle_move(from.clone(), to.clone());
+            }
+        }
+    }
+
+    fn handle_move(&mut self, from: PathBuf, to: PathBuf) {
+        // Resolve what the event for 'to' should be, based on the state of 'from'.
+        let event = match self.map.get(&from) {
+            // Write(A) -> Move(A->B) === Write(B).
+            Some(FsEvent::Write(_)) => FsEvent::Write(to.clone()),
+
+            // Move(Origin->A) -> Move(A->B) === Move(Origin->B).
+            Some(FsEvent::Move { from: origin, .. }) => FsEvent::Move {
+                from: origin.clone(),
+                to: to.clone(),
+            },
+
+            // Case 3: File was stable (not in map) or previously removed (rare edge case).
+            // Logic: Standard Move optimization applies.
+            _ => FsEvent::Move {
+                from: from.clone(),
+                to: to.clone(),
+            },
+        };
+
+        // Clean up the old path (it no longer exists at that location)
+        self.map.shift_remove(&from);
+        
+        // Register the new event at the new location
+        self.update(to, event);
+    }
+
+    fn update(&mut self, path: PathBuf, new_event: FsEvent) {
+        match (self.map.get(&path), &new_event) {
+            //  Write -> Remove === Ignore
+            (Some(FsEvent::Write(_)), FsEvent::Remove(_)) => {
+                self.map.shift_remove(&path);
+            }
+            
+            // Move -> Remove === Remove(Origin).
+            (Some(FsEvent::Move { .. }), FsEvent::Remove(_)) => {
+                self.map.insert(path, new_event);
+            }
+
+            // Remove -> Write === Write.
+            (Some(FsEvent::Remove(_)), FsEvent::Write(_)) => {
+                self.map.insert(path, new_event);
+            }
+
+            // Default: The new event overwrites the old state.
+            _ => {
+                self.map.insert(path, new_event);
+            }
+        }
+    }
+
+    pub fn drain(&mut self) -> impl Iterator<Item = FsEvent> + '_ {
+        self.map.drain(..).map(|(_, event)| event)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
     }
 }
