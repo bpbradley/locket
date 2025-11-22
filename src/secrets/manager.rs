@@ -101,7 +101,7 @@ impl Secrets {
 
     pub fn collect(mut self) -> Self {
         for mapping in &self.opts.mapping {
-            self.fs.collect_from_root(&mapping.src, &mapping.dst);
+            self.fs.add_mapping(mapping);
         }
 
         let envs =
@@ -168,13 +168,13 @@ impl Secrets {
             .collect()
     }
 
-    fn on_removed(&mut self, src: &Path) -> Result<(), SecretError> {
+    fn on_remove(&mut self, src: &Path) -> Result<(), SecretError> {
         // If src is a directory, we *could* scan children here later.
         // For now, we only remove exact file matches.
         if src.is_dir() {
             debug!(
                 ?src,
-                "on_removed: directory removal; currently no subtree cleanup"
+                "on_remove: directory removal; currently no subtree cleanup"
             );
             return Ok(());
         }
@@ -185,8 +185,7 @@ impl Secrets {
         Ok(())
     }
 
-    /// Handle “renamed” fs event.
-    fn on_renamed(
+    fn on_move(
         &mut self,
         provider: &dyn SecretsProvider,
         old: &Path,
@@ -194,20 +193,16 @@ impl Secrets {
     ) -> Result<(), SecretError> {
         // Best effort: keep it simple for now.
         // try to drop old dst if we were tracking it.
-        self.on_removed(old)?;
+        self.on_remove(old)?;
 
         // Then treat new as a fresh file.
-        self.on_created_or_modified(provider, new)
+        self.on_write(provider, new)
     }
 
-    fn on_created_or_modified(
-        &mut self,
-        provider: &dyn SecretsProvider,
-        src: &Path,
-    ) -> Result<(), SecretError> {
+    fn on_write(&mut self, provider: &dyn SecretsProvider, src: &Path) -> Result<(), SecretError> {
         // Only react to files, not directories.
         if src.is_dir() {
-            debug!(?src, "on_created_or_modified: skipping directory");
+            debug!(?src, "on_write: skipping directory");
             return Ok(());
         }
         if let Some(file) = self.fs.upsert(src) {
@@ -222,9 +217,9 @@ impl Secrets {
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_created_or_modified(provider, &src),
-            FsEvent::Remove(src) => self.on_removed(&src),
-            FsEvent::Move { from, to } => self.on_renamed(provider, &from, &to),
+            FsEvent::Write(src) => self.on_write(provider, &src),
+            FsEvent::Remove(src) => self.on_remove(&src),
+            FsEvent::Move { from, to } => self.on_move(provider, &from, &to),
         }
     }
 }

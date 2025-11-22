@@ -1,6 +1,6 @@
 use secret_sidecar::secrets::{
-    InjectFailurePolicy, Secrets, 
-    manager::{SecretsOpts, PathMapping}
+    InjectFailurePolicy, Secrets,
+    manager::{PathMapping, SecretsOpts},
 };
 use std::fs;
 
@@ -13,7 +13,13 @@ fn collisions_detect_duplicate_dst_across_files_and_values() {
     // create a template file that will map to out/dup.txt
     fs::write(templates.join("dup.txt"), b"x").unwrap();
     let mut s = Secrets::new(SecretsOpts {
-        mapping: vec![PathMapping{src: templates.clone(), dst: output.clone()}; 1],
+        mapping: vec![
+            PathMapping {
+                src: templates.clone(),
+                dst: output.clone()
+            };
+            1
+        ],
         policy: InjectFailurePolicy::CopyUnmodified,
         ..Default::default()
     })

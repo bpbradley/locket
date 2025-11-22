@@ -1,4 +1,4 @@
-use crate::secrets::types::SecretFile;
+use crate::secrets::{manager::PathMapping, types::SecretFile};
 use std::collections::{HashMap, hash_map::Values};
 use std::iter::Once;
 use std::path::{Path, PathBuf};
@@ -8,10 +8,7 @@ use walkdir::WalkDir;
 /// A directory store of file-backed secrets.
 #[derive(Debug, Clone)]
 pub struct SecretDir {
-    // Absolute path to the root of the source templates
-    pub src_root: PathBuf,
-    // Absolute path to the destination root for injected secrets
-    pub dst_root: PathBuf,
+    pub mapping: PathMapping,
     // Map of relative paths to SecretFile entries
     pub files: HashMap<PathBuf, SecretFile>,
 }
@@ -43,24 +40,28 @@ impl SecretFs {
         &mut self.entries
     }
 
-    /// Recursively collect all file-backed secrets under src_root,
-    pub fn collect_from_root(&mut self, src_root: &Path, dst_root: &Path) {
+    pub fn add_mapping(&mut self, mapping: &PathMapping) {
         let mut dir = SecretDir {
-            src_root: src_root.to_path_buf(),
-            dst_root: dst_root.to_path_buf(),
+            mapping: mapping.clone(),
             files: HashMap::new(),
         };
 
-        for entry in WalkDir::new(src_root)
+        for entry in WalkDir::new(&dir.mapping.src)
             .into_iter()
             .filter_map(|r| r.ok())
             .filter(|e| e.file_type().is_file())
         {
             let src = entry.path();
-            if let Ok(rel) = src.strip_prefix(src_root) {
+
+            // Calculate relative path from the Mapping Source
+            if let Ok(rel) = src.strip_prefix(&dir.mapping.src) {
                 let rel = rel.to_path_buf();
-                let dst = dir.dst_root.join(&rel);
+
+                // Join relative path to the Mapping Destination
+                let dst = dir.mapping.dst.join(&rel);
+
                 debug!(src=?src, dst=?dst, "collected file secret");
+
                 dir.files.insert(
                     rel,
                     SecretFile {
@@ -72,12 +73,12 @@ impl SecretFs {
         }
 
         self.entries
-            .insert(src_root.to_path_buf(), SecretEntry::Dir(dir));
+            .insert(mapping.src.to_path_buf(), SecretEntry::Dir(dir));
     }
 
     fn owning_dir(&mut self, src: &Path) -> Option<&mut SecretDir> {
         self.entries.values_mut().find_map(|entry| match entry {
-            SecretEntry::Dir(dir) if src.starts_with(&dir.src_root) => Some(dir),
+            SecretEntry::Dir(dir) if src.starts_with(&dir.mapping.src) => Some(dir),
             _ => None,
         })
     }
@@ -88,8 +89,8 @@ impl SecretFs {
     pub fn upsert(&mut self, src: &Path) -> Option<&mut SecretFile> {
         let dir = self.owning_dir(src)?;
 
-        let rel = src.strip_prefix(&dir.src_root).ok()?.to_path_buf();
-        let dst = dir.dst_root.join(&rel);
+        let rel = src.strip_prefix(&dir.mapping.src).ok()?.to_path_buf();
+        let dst = dir.mapping.dst.join(&rel);
 
         let file = dir.files.entry(rel.clone()).or_insert_with(|| SecretFile {
             src: src.to_path_buf(),
@@ -109,9 +110,9 @@ impl SecretFs {
 
         for entry in self.entries.values_mut() {
             if let SecretEntry::Dir(dir) = entry
-                && src.starts_with(&dir.src_root)
+                && src.starts_with(&dir.mapping.src)
             {
-                let rel = src.strip_prefix(&dir.src_root).ok()?.to_path_buf();
+                let rel = src.strip_prefix(&dir.mapping.src).ok()?.to_path_buf();
                 if let Some(file) = dir.files.remove(&rel) {
                     return Some(file);
                 }
