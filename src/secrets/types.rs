@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile;
 use thiserror::Error;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum SecretError {
