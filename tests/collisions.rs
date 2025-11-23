@@ -21,6 +21,7 @@ fn collisions_detect_duplicate_dst_across_files_and_values() {
             1
         ],
         policy: InjectFailurePolicy::CopyUnmodified,
+        value_dir: output.clone(),
         ..Default::default()
     });
     // Add a value that sanitizes to same dst path

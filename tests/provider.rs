@@ -39,6 +39,7 @@ fn inject_all_success_for_files_and_values() {
             };
             1
         ],
+        value_dir: out.clone(),
         ..Default::default()
     });
 
@@ -120,6 +121,7 @@ fn inject_all_value_sources() {
             1
         ],
         env_value_prefix: "secret_".into(),
+        value_dir: out.clone(),
         ..Default::default()
     });
     let provider = MockProvider::default();

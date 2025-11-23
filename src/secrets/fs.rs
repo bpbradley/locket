@@ -93,3 +93,125 @@ impl SecretFs {
         self.files.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    // Helper to make paths readable
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s)
+    }
+
+    #[test]
+    fn test_mapping_priority() {
+        let mut fs = SecretFs::default();
+
+        fs.mappings.push(PathMapping {
+            src: p("/templates"),
+            dst: p("/secrets/general"),
+        });
+
+        fs.mappings.push(PathMapping {
+            src: p("/templates/secure"),
+            dst: p("/secrets/specific"),
+        });
+
+        let general = fs.upsert(&p("/templates/common.yaml")).expect("should map");
+        assert_eq!(general.dst, p("/secrets/general/common.yaml"));
+
+        let specific = fs.upsert(&p("/templates/secure/db.yaml")).expect("should map");
+        assert_eq!(specific.dst, p("/secrets/specific/db.yaml"));
+
+        let specific_nested = fs.upsert(&p("/templates/secure/nested/key")).expect("should map");
+        assert_eq!(specific_nested.dst, p("/secrets/specific/nested/key"));
+    }
+
+    #[test]
+    fn test_prefix_collision() {
+        let mut fs = SecretFs::default();
+        fs.mappings.push(PathMapping {
+            src: p("/app"),
+            dst: p("/out"),
+        });
+
+        // Setup state manually
+        let path_dira = p("/app/DIRA/file.txt");
+        let path_diraa = p("/app/DIRAA/file.txt");
+
+        fs.upsert(&path_dira);
+        fs.upsert(&path_diraa);
+
+        assert_eq!(fs.len(), 2);
+
+        let removed = fs.remove(&p("/app/DIRA"));
+
+        // ASSERT: Only DIRA is removed
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].src, path_dira);
+        
+        // Verify DIRAA is still there
+        assert!(fs.files.contains_key(&path_diraa));
+    }
+
+    #[test]
+    fn test_recursive_removal() {
+        let mut fs = SecretFs::default();
+        fs.mappings.push(PathMapping {
+            src: p("/root"),
+            dst: p("/out"),
+        });
+
+        fs.upsert(&p("/root/a.txt"));
+        fs.upsert(&p("/root/sub/b.txt"));
+        fs.upsert(&p("/root/sub/nested/c.txt"));
+        fs.upsert(&p("/root/z.txt"));
+
+        assert_eq!(fs.len(), 4);
+
+        // ACTION: Remove directory "/root/sub"
+        let removed = fs.remove(&p("/root/sub"));
+
+        assert_eq!(removed.len(), 2);
+        
+        // Verify exact matches
+        let src_paths: Vec<_> = removed.iter().map(|f| f.src.clone()).collect();
+        assert!(src_paths.contains(&p("/root/sub/b.txt")));
+        assert!(src_paths.contains(&p("/root/sub/nested/c.txt")));
+
+        // Verify remaining
+        assert_eq!(fs.len(), 2);
+        assert!(fs.files.contains_key(&p("/root/a.txt")));
+        assert!(fs.files.contains_key(&p("/root/z.txt")));
+    }
+
+    #[test]
+    fn test_ignore_unmapped() {
+        let mut fs = SecretFs::default();
+        fs.mappings.push(PathMapping {
+            src: p("/templates"),
+            dst: p("/secrets"),
+        });
+
+        // Upsert file totally outside
+        let res = fs.upsert(&p("/etc/passwd"));
+        assert!(res.is_none());
+        assert_eq!(fs.len(), 0);
+
+        // Upsert file that matches prefix string but not path component
+        let res = fs.upsert(&p("/templates_backup/file"));
+        assert!(res.is_none());
+        assert_eq!(fs.len(), 0);
+    }
+    
+    #[test]
+    fn test_resolve_logic() {
+         let mut fs = SecretFs::default();
+         fs.mappings.push(PathMapping { src: p("/t"), dst: p("/s") });
+         
+         // We can test logic without upserting into state
+         let dst = fs.resolve(&p("/t/subdir/file")).unwrap();
+         assert_eq!(dst, p("/s/subdir/file"));
+    }
+}
