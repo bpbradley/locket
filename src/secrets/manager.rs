@@ -25,7 +25,7 @@ impl Default for PathMapping {
 }
 
 /// CLI / config options.
-#[derive(Debug, Clone, Args, Default)]
+#[derive(Debug, Clone, Args)]
 pub struct SecretsOpts {
     #[arg(
         long = "map", 
@@ -46,6 +46,17 @@ pub struct SecretsOpts {
         default_value_t = InjectFailurePolicy::CopyUnmodified
     )]
     pub policy: InjectFailurePolicy,
+}
+
+impl Default for SecretsOpts {
+    fn default() -> Self {
+        Self {
+            mapping: vec![PathMapping::default()],
+            value_dir: PathBuf::from("/run/secrets"),
+            env_value_prefix: "secret_".into(),
+            policy: InjectFailurePolicy::CopyUnmodified,
+        }
+    }
 }
 
 /// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".

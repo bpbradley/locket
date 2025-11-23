@@ -68,6 +68,7 @@ fn inject_all_fallback_copy_on_error() {
             };
             1
         ],
+        value_dir: out.clone(),
         ..Default::default()
     });
 
@@ -94,6 +95,7 @@ fn inject_all_error_without_fallback() {
             };
             1
         ],
+        value_dir: out.clone(),
         policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
         ..Default::default()
     });
