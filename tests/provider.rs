@@ -31,17 +31,10 @@ fn inject_all_success_for_files_and_values() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
     let out = tmp.path().join("out");
-    let mut secrets = Secrets::new(SecretsOpts {
-        mapping: vec![
-            PathMapping {
-                src: tpl.clone(),
-                dst: out.clone()
-            };
-            1
-        ],
-        value_dir: out.clone(),
-        ..Default::default()
-    });
+    let opts = SecretsOpts::default()
+        .with_value_dir(out.clone())
+        .with_mapping(vec![PathMapping::new(tpl.clone(), out.clone())]);
+    let mut secrets = Secrets::new(opts);
 
     secrets.add_value("Greeting", "Hi {{name}}");
 
@@ -60,17 +53,10 @@ fn inject_all_fallback_copy_on_error() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
     let out = tmp.path().join("out");
-    let secrets = Secrets::new(SecretsOpts {
-        mapping: vec![
-            PathMapping {
-                src: tpl.clone(),
-                dst: out.clone()
-            };
-            1
-        ],
-        value_dir: out.clone(),
-        ..Default::default()
-    });
+    let opts = SecretsOpts::default()
+        .with_value_dir(out.clone())
+        .with_mapping(vec![PathMapping::new(tpl.clone(), out.clone())]);
+    let secrets = Secrets::new(opts);
 
     let provider = MockProvider {
         inject_should_fail: true,
@@ -87,18 +73,11 @@ fn inject_all_error_without_fallback() {
     std::fs::create_dir_all(&tpl).unwrap();
     std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
     let out = tmp.path().join("out");
-    let secrets = Secrets::new(SecretsOpts {
-        mapping: vec![
-            PathMapping {
-                src: tpl.clone(),
-                dst: out.clone()
-            };
-            1
-        ],
-        value_dir: out.clone(),
-        policy: secret_sidecar::secrets::InjectFailurePolicy::Error,
-        ..Default::default()
-    });
+    let opts = SecretsOpts::default()
+        .with_value_dir(out.clone())
+        .with_mapping(vec![PathMapping::new(tpl.clone(), out.clone())])
+        .with_policy(secret_sidecar::secrets::InjectFailurePolicy::Error);
+    let secrets = Secrets::new(opts);
     let provider = MockProvider {
         inject_should_fail: true,
     };
@@ -114,18 +93,11 @@ fn inject_all_value_sources() {
     let _g = TestEnv::set_vars(vec![("secret_GREETING", "Hello {{name}}!")]);
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("out");
-    let secrets = Secrets::new(SecretsOpts {
-        mapping: vec![
-            PathMapping {
-                src: tmp.path().join("templates"),
-                dst: out.clone()
-            };
-            1
-        ],
-        env_value_prefix: "secret_".into(),
-        value_dir: out.clone(),
-        ..Default::default()
-    });
+    let opts = SecretsOpts::default()
+        .with_value_dir(out.clone())
+        .with_mapping(vec![PathMapping::new(tmp.path().join("templates"), out.clone())])
+        .with_env_value_prefix("secret_");
+    let secrets = Secrets::new(opts);
     let provider = MockProvider::default();
     secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("greeting")).unwrap();

@@ -15,12 +15,18 @@ pub struct PathMapping {
     pub dst: PathBuf,
 }
 
+impl PathMapping {
+    pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
+        Self {
+            src: src.as_ref().components().collect(),
+            dst: dst.as_ref().components().collect(),
+        }
+    }
+}
+
 impl Default for PathMapping {
     fn default() -> Self {
-        Self {
-            src: PathBuf::from("/templates"),
-            dst: PathBuf::from("/run/secrets"),
-        }
+        Self::new("/templates", "/run/secrets")
     }
 }
 
@@ -75,6 +81,10 @@ impl SecretsOpts {
         self.policy = policy;
         self
     }
+    pub fn with_env_value_prefix(mut self, prefix: impl AsRef<str>) -> Self {
+        self.env_value_prefix = prefix.as_ref().to_string();
+        self
+    }
     pub fn validate(&self) -> Result<(), SecretError> {
         let mut sources = Vec::new();
         let mut destinations = Vec::new();
@@ -83,6 +93,12 @@ impl SecretsOpts {
             // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
             if !m.src.exists() {
                 return Err(SecretError::Config(format!("Source missing: {:?}", m.src)));
+            }
+            if m.src.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                return Err(SecretError::Config(format!(
+                    "Relative paths forbidden: {:?}",
+                    m.src
+                )));
             }
             sources.push(&m.src);
             destinations.push(&m.dst);
@@ -123,10 +139,7 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
             )
         })?;
 
-    Ok(PathMapping {
-        src: PathBuf::from(src),
-        dst: PathBuf::from(dst),
-    })
+    Ok(PathMapping::new(src, dst))
 }
 
 impl SecretsOpts {

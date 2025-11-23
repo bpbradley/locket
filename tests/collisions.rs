@@ -18,10 +18,7 @@ fn collisions_detect_duplicate_dst_across_files_and_values() {
     initial_values.insert("dup.txt".to_string(), "some template value".to_string());
     let opts = SecretsOpts::new()
         .with_value_dir(output.clone())
-        .with_mapping(vec![PathMapping {
-            src: templates.clone(),
-            dst: output.clone(),
-        }]);
+        .with_mapping(vec![PathMapping::new(templates.clone(), output.clone())]);
 
     let mut secrets = Secrets::new(opts);
     secrets.extend_values(initial_values);
@@ -57,10 +54,7 @@ fn collisions_detect_structure_conflict_file_blocking_dir() {
 
     let opts = SecretsOpts::new()
         .with_value_dir(output.clone())
-        .with_mapping(vec![PathMapping {
-            src: templates.clone(),
-            dst: output.clone(),
-        }]);
+        .with_mapping(vec![PathMapping::new(templates.clone(), output.clone())]);
 
     let mut secrets = Secrets::new(opts);
     secrets.extend_values(initial_values);

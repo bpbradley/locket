@@ -148,15 +148,9 @@ mod tests {
     fn test_mapping_priority() {
         let mut fs = SecretFs::default();
 
-        fs.mappings.push(PathMapping {
-            src: p("/templates"),
-            dst: p("/secrets/general"),
-        });
+        fs.mappings.push(PathMapping::new("/templates", "/secrets/general"));
 
-        fs.mappings.push(PathMapping {
-            src: p("/templates/secure"),
-            dst: p("/secrets/specific"),
-        });
+        fs.mappings.push(PathMapping::new("/templates/secure", "/secrets/specific"));
 
         let general = fs.upsert(&p("/templates/common.yaml")).expect("should map");
         assert_eq!(general.dst, p("/secrets/general/common.yaml"));
@@ -175,10 +169,7 @@ mod tests {
     #[test]
     fn test_prefix_collision() {
         let mut fs = SecretFs::default();
-        fs.mappings.push(PathMapping {
-            src: p("/app"),
-            dst: p("/out"),
-        });
+        fs.mappings.push(PathMapping::new("/app", "/out"));
 
         // Setup state manually
         let path_dira = p("/app/DIRA/file.txt");
@@ -202,10 +193,7 @@ mod tests {
     #[test]
     fn test_recursive_removal() {
         let mut fs = SecretFs::default();
-        fs.mappings.push(PathMapping {
-            src: p("/root"),
-            dst: p("/out"),
-        });
+        fs.mappings.push(PathMapping::new("/root", "/out"));
 
         fs.upsert(&p("/root/a.txt"));
         fs.upsert(&p("/root/sub/b.txt"));
@@ -233,10 +221,7 @@ mod tests {
     #[test]
     fn test_ignore_unmapped() {
         let mut fs = SecretFs::default();
-        fs.mappings.push(PathMapping {
-            src: p("/templates"),
-            dst: p("/secrets"),
-        });
+        fs.mappings.push(PathMapping::new("/templates", "/secrets"));
 
         // Upsert file totally outside
         let res = fs.upsert(&p("/etc/passwd"));
@@ -252,10 +237,7 @@ mod tests {
     #[test]
     fn test_resolve_logic() {
         let mut fs = SecretFs::default();
-        fs.mappings.push(PathMapping {
-            src: p("/t"),
-            dst: p("/s"),
-        });
+        fs.mappings.push(PathMapping::new("/t", "/s"));
 
         // We can test logic without upserting into state
         let dst = fs.resolve(&p("/t/subdir/file")).unwrap();
@@ -265,10 +247,7 @@ mod tests {
     fn test_rebase_dir_intra_mapping() {
         let mut fs = SecretFs::default();
         // Setup: /data -> /output
-        fs.mappings.push(PathMapping {
-            src: p("/data"),
-            dst: p("/output"),
-        });
+        fs.mappings.push(PathMapping::new("/data", "/output"));
 
         // Initial State: /data/old_sub/file.txt
         let p_old = p("/data/old_sub/file.txt");
@@ -298,15 +277,9 @@ mod tests {
     fn test_rebase_dir_inter_mapping() {
         let mut fs = SecretFs::default();
         // Mapping 1: /src_a -> /out_a
-        fs.mappings.push(PathMapping {
-            src: p("/src_a"),
-            dst: p("/out_a"),
-        });
+        fs.mappings.push(PathMapping::new("/src_a", "/out_a"));
         // Mapping 2: /src_b -> /out_b
-        fs.mappings.push(PathMapping {
-            src: p("/src_b"),
-            dst: p("/out_b"),
-        });
+        fs.mappings.push(PathMapping::new("/src_b", "/out_b"));
 
         fs.upsert(&p("/src_a/folder/config.yaml"));
 
@@ -328,14 +301,8 @@ mod tests {
     #[test]
     fn test_rebase_dir_nested_mapping() {
         let mut fs = SecretFs::default();
-        fs.mappings.push(PathMapping {
-            src: p("/templates"),
-            dst: p("/secrets"),
-        });
-        fs.mappings.push(PathMapping {
-            src: p("/templates/secure"),
-            dst: p("/vault_mount"),
-        });
+        fs.mappings.push(PathMapping::new("/templates", "/secrets"));
+        fs.mappings.push(PathMapping::new("/templates/secure", "/vault_mount"));
 
         // Add files
         fs.upsert(&p("/templates/common.yaml"));
