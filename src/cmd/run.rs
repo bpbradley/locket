@@ -27,14 +27,13 @@ pub fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    let conflicts = secrets.collisions();
-    if !conflicts.is_empty() {
-        error!(
-            ?conflicts,
-            "duplicate destination paths for secrets (files or values)"
-        );
-        return ExitCode::DataErr;
-    }
+    match secrets.collisions() {
+        Ok(()) => {}
+        Err(e) => {
+            error!(error=%e, "secret destination collisions detected");
+            return ExitCode::Config;
+        }
+    };
 
     if let Err(e) = secrets.inject_all(provider.as_ref()) {
         error!(error=%e, "inject_all failed");

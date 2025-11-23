@@ -59,6 +59,58 @@ impl Default for SecretsOpts {
     }
 }
 
+impl SecretsOpts {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_mapping(mut self, mapping: Vec<PathMapping>) -> Self {
+        self.mapping = mapping;
+        self
+    }
+    pub fn with_value_dir(mut self, dir: impl AsRef<Path>) -> Self {
+        self.value_dir = dir.as_ref().components().collect();
+        self
+    }
+    pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+    pub fn validate(&self) -> Result<(), SecretError> {
+        let mut sources = Vec::new();
+        let mut destinations = Vec::new();
+
+        for m in &self.mapping {
+            // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
+            if !m.src.exists() {
+                return Err(SecretError::Config(format!("Source missing: {:?}", m.src)));
+            }
+            sources.push(&m.src);
+            destinations.push(&m.dst);
+        }
+        destinations.push(&self.value_dir);
+
+        // Check for feedback loops and self-destruct scenarios
+        for src in &sources {
+            for dst in &destinations {
+                if dst.starts_with(src) {
+                    return Err(SecretError::Config(format!(
+                        "Feedback Loop: Dest {:?} inside Src {:?}",
+                        dst, src
+                    )));
+                }
+                if src.starts_with(dst) {
+                    return Err(SecretError::Config(format!(
+                        "Self-Destruct: Src {:?} inside Dest {:?}",
+                        src, dst
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
 fn parse_mapping(s: &str) -> Result<PathMapping, String> {
     let (src, dst) = s
@@ -79,6 +131,7 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
 
 impl SecretsOpts {
     pub fn build(&self) -> Result<Secrets, SecretError> {
+        self.validate()?;
         Ok(Secrets::new(self.clone()))
     }
 }
@@ -123,6 +176,14 @@ impl Secrets {
         self
     }
 
+    pub fn extend_values(&mut self, values: HashMap<String, impl AsRef<str>>) -> &mut Self {
+        for (label, template) in values {
+            let v = value_source(&self.opts.value_dir, &label, template);
+            self.values.insert(v.label.clone(), v);
+        }
+        self
+    }
+
     /// Inject all known secrets (values + files).
     pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
         let policy = self.opts.policy;
@@ -140,25 +201,48 @@ impl Secrets {
         Ok(())
     }
 
-    /// Find collisions on destination paths.
-    pub fn collisions(&self) -> Vec<PathBuf> {
-        use std::collections::HashMap;
-        let mut counts: HashMap<PathBuf, usize> = HashMap::new();
+    pub fn collisions(&self) -> Result<(), SecretError> {
+        // Collect all secret destinations and label their sources
+        // to report in error messages.
+        let mut entries: Vec<(&Path, String)> = Vec::new();
 
-        // values
-        for v in self.values.values() {
-            *counts.entry(v.dst.clone()).or_insert(0) += 1;
+        for file in self.fs.iter_files() {
+            entries.push((&file.dst, format!("File({:?})", file.src)));
         }
 
-        // files
-        for f in self.fs.iter_files() {
-            *counts.entry(f.dst.clone()).or_insert(0) += 1;
+        for val in self.values.values() {
+            entries.push((&val.dst, format!("Value({})", val.label)));
         }
 
-        counts
-            .into_iter()
-            .filter_map(|(p, n)| (n > 1).then_some(p))
-            .collect()
+        // Sort Lexicographically. This groups collisions and parent/child conflicts together.
+        entries.sort_by_key(|(path, _)| *path);
+
+        // Linear scan
+        for i in 0..entries.len().saturating_sub(1) {
+            let (curr_path, curr_src) = &entries[i];
+            let (next_path, next_src) = &entries[i + 1];
+
+            // Two secrets share a destination
+            if curr_path == next_path {
+                return Err(SecretError::Config(format!(
+                    "Collision: {} and {} both map to the same destination '{:?}'",
+                    curr_src, next_src, curr_path
+                )));
+            }
+
+            // Finds structural conflicts where one secret maps to a path
+            // that is a parent directory of another secret's path.
+            // i.e. /secrets/foo and /secrets/foo/bar.txt
+            if next_path.starts_with(curr_path) {
+                return Err(SecretError::Config(format!(
+                    "Structure Conflict: {} maps to '{:?}', which blocks {} from writing to '{:?}'. \
+                    (Cannot create a file and a directory at the same path node)",
+                    curr_src, curr_path, next_src, next_path
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     fn on_remove(&mut self, src: &Path) -> Result<(), SecretError> {

@@ -9,6 +9,9 @@ use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum SecretError {
+    #[error("config: {0}")]
+    Config(String),
+
     #[error("provider: {0}")]
     Provider(#[from] crate::provider::ProviderError),
 

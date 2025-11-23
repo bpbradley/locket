@@ -26,6 +26,9 @@ pub enum WatchError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("source path missing: {0}")]
+    SourceMissing(PathBuf),
 }
 
 pub struct FsWatcher<'a> {
@@ -53,13 +56,7 @@ impl<'a> FsWatcher<'a> {
         for mapping in &self.secrets.options().mapping {
             let watched = &mapping.src;
             if !watched.exists() {
-                if watched.extension().is_none() {
-                    warn!(path=?watched, "watched template does not exist. Will treat as empty directory and try to create");
-                    std::fs::create_dir_all(watched)?;
-                } else {
-                    warn!(path=?watched, "watched template file does not exist yet");
-                    continue;
-                }
+                return Err(WatchError::SourceMissing(watched.clone()));
             }
             let mode = if watched.is_dir() {
                 RecursiveMode::Recursive
