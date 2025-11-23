@@ -221,7 +221,7 @@ pub fn sanitize_name(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
         let lc = ch.to_ascii_lowercase();
-        if lc.is_ascii_lowercase() || lc.is_ascii_digit() || matches!(lc, '.' | '_' | '-' | '/') {
+        if lc.is_ascii_lowercase() || lc.is_ascii_digit() || matches!(lc, '.' | '_' | '-') {
             out.push(lc);
         } else {
             out.push('_');
