@@ -115,9 +115,8 @@ impl SecretFs {
         // Commit updates
         for (old_k, new_k, new_d) in updates {
             if let Some(mut file) = self.files.remove(&old_k) {
-                file.src = new_k.clone();
-                file.dst = new_d;
-                self.files.insert(new_k, file);
+                file = SecretFile::new(&new_k, &new_d);
+                self.files.insert(file.src.clone(), file);
             }
         }
 
