@@ -265,7 +265,7 @@ mod tests {
         let dst = fs.resolve(&p("/t/subdir/file")).unwrap();
         assert_eq!(dst, p("/s/subdir/file"));
     }
-#[test]
+    #[test]
     fn test_rebase_dir_intra_mapping() {
         let mut fs = SecretFs::default();
         // Setup: /data -> /output
@@ -284,7 +284,7 @@ mod tests {
         // Assert: Rebase permitted
         assert!(res.is_some());
         let (old_dst, new_dst) = res.unwrap();
-        
+
         // Assert: Calculated renaming of the OUTPUT directory
         assert_eq!(old_dst, p("/output/old_sub"));
         assert_eq!(new_dst, p("/output/new_sub"));
@@ -302,9 +302,15 @@ mod tests {
     fn test_rebase_dir_inter_mapping() {
         let mut fs = SecretFs::default();
         // Mapping 1: /src_a -> /out_a
-        fs.mappings.push(PathMapping { src: p("/src_a"), dst: p("/out_a") });
+        fs.mappings.push(PathMapping {
+            src: p("/src_a"),
+            dst: p("/out_a"),
+        });
         // Mapping 2: /src_b -> /out_b
-        fs.mappings.push(PathMapping { src: p("/src_b"), dst: p("/out_b") });
+        fs.mappings.push(PathMapping {
+            src: p("/src_b"),
+            dst: p("/out_b"),
+        });
 
         fs.upsert(&p("/src_a/folder/config.yaml"));
 
@@ -314,11 +320,11 @@ mod tests {
 
         assert!(res.is_some());
         let (old_dst, new_dst) = res.unwrap();
-        
+
         // Verify output paths jump correctly
         assert_eq!(old_dst, p("/out_a/folder"));
         assert_eq!(new_dst, p("/out_b/moved_folder"));
-        
+
         // Verify state
         assert!(fs.files.contains_key(&p("/src_b/moved_folder/config.yaml")));
     }
@@ -326,8 +332,14 @@ mod tests {
     #[test]
     fn test_rebase_dir_nested_mapping() {
         let mut fs = SecretFs::default();
-        fs.mappings.push(PathMapping { src: p("/templates"), dst: p("/secrets") });
-        fs.mappings.push(PathMapping { src: p("/templates/secure"), dst: p("/vault_mount") });
+        fs.mappings.push(PathMapping {
+            src: p("/templates"),
+            dst: p("/secrets"),
+        });
+        fs.mappings.push(PathMapping {
+            src: p("/templates/secure"),
+            dst: p("/vault_mount"),
+        });
 
         // Add files
         fs.upsert(&p("/templates/common.yaml"));
@@ -339,7 +351,10 @@ mod tests {
         // "db_pass" lives in "/vault_mount", which is somewhere else entirely.
         let res = fs.try_rebase(&p("/templates"), &p("/templates_new"));
 
-        assert!(res.is_none(), "Should reject rebase because of heterogeneous children");
+        assert!(
+            res.is_none(),
+            "Should reject rebase because of heterogeneous children"
+        );
 
         // Verify state is untouched
         assert!(fs.files.contains_key(&p("/templates/common.yaml")));

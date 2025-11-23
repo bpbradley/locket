@@ -7,7 +7,7 @@ use crate::secrets::types::{
 use clap::Args;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone)]
 pub struct PathMapping {
@@ -229,9 +229,8 @@ impl Secrets {
         new: &Path,
     ) -> Result<(), SecretError> {
         if let Some((from, to)) = self.fs.try_rebase(old, new) {
-            debug!(?from, ?to, "attempting directory rename");
+            debug!(?from, ?to, "attempting rename");
 
-            // Prepare parent
             if let Some(p) = to.parent() {
                 std::fs::create_dir_all(p)?;
             }
@@ -240,11 +239,14 @@ impl Secrets {
                 Ok(_) => {
                     debug!(?old, ?new, "moved");
                     if let Some(parent) = from.parent() {
+                        // We calculate the ceiling based on the OLD source path
                         if let Some(ceiling) = self.fs.resolve(old) {
-                            if let Some(ceil_parent) = ceiling.parent() {
-                                if parent.starts_with(ceil_parent) {
-                                    self.bubble_delete(parent.to_path_buf(), ceil_parent);
-                                }
+                            // If the old file/dir was inside the ceiling, we bubble up
+                            // We start vacuuming at 'parent', stopping at 'ceiling's parent
+                            if let Some(ceil_parent) = ceiling.parent()
+                                && parent.starts_with(ceil_parent)
+                            {
+                                self.bubble_delete(parent.to_path_buf(), ceil_parent);
                             }
                         }
                     }
@@ -252,12 +254,20 @@ impl Secrets {
                 }
                 Err(e) => {
                     warn!(error=?e, "move failed; falling back to reinjection");
+                    // Rollback memory state so we can start fresh
                     self.fs.remove(new);
                 }
             }
         }
+
         self.on_remove(old)?;
 
+        // new.is_dir() here is a small race condition. If new is removed before we can process it, we will
+        // treat it as a file and fail to inject anything.
+        // However, this will still lead to eventual consistency, as the next write event
+        // should show that the file was removed. In order to fix this, I could
+        // add context to the FsEvent to indicate that the file is a directory at event-time.
+        // This will still require graceful handling, but at least it would be correct.
         if new.is_dir() {
             debug!(?new, "scanning new directory location");
             for entry in walkdir::WalkDir::new(new)
@@ -268,7 +278,6 @@ impl Secrets {
                 self.on_write(provider, entry.path())?;
             }
         } else {
-            // Just a file
             self.on_write(provider, new)?;
         }
 
