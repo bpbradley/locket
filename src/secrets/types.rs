@@ -94,17 +94,10 @@ pub trait Injectable {
     }
     /// Remove the secret from disk.
     fn remove(&self) -> Result<(), SecretError> {
-        let dst: PathBuf = self.dst().components().collect();
-        match std::fs::remove_file(&dst) {
-            Ok(_) => {
-                debug!(dst=?dst, "deleted secret file");
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                debug!(dst=?dst, "file already removed");
-            }
-            Err(e) => {
-                return Err(SecretError::Io(e));
-            }
+        let dst = self.dst();
+        debug!(dst=?dst, exists=?dst.exists(), "removing secret");
+        if dst.exists() {
+            fs::remove_file(dst)?;
         }
         Ok(())
     }
@@ -117,6 +110,15 @@ pub struct SecretFile {
     pub src: PathBuf,
     /// Destination path for injected secret
     pub dst: PathBuf,
+}
+
+impl SecretFile {
+    pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
+        Self {
+            src: src.as_ref().components().collect(),
+            dst: dst.as_ref().components().collect(),
+        }
+    }
 }
 
 impl Injectable for SecretFile {
@@ -142,6 +144,16 @@ pub struct SecretValue {
     pub dst: PathBuf,
     pub template: String,
     pub label: String,
+}
+
+impl SecretValue {
+    pub fn new(dst: impl AsRef<Path>, template: impl AsRef<str>, label: impl AsRef<str>) -> Self {
+        Self {
+            dst: dst.as_ref().components().collect(),
+            template: template.as_ref().to_string(),
+            label: label.as_ref().to_string(),
+        }
+    }
 }
 
 impl Injectable for SecretValue {
@@ -179,11 +191,7 @@ pub fn sanitize_name(raw: &str) -> String {
 pub fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
     let sanitized = sanitize_name(label);
     let dst = output_root.join(&sanitized);
-    SecretValue {
-        dst,
-        template: template.as_ref().to_string(),
-        label: sanitized,
-    }
+    SecretValue::new(dst, template, sanitized)
 }
 
 pub fn collect_value_sources<L, T, I>(output_root: &Path, pairs: I) -> Vec<SecretValue>

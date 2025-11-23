@@ -193,7 +193,11 @@ impl Secrets {
         }
         Ok(())
     }
-
+    /// TODO: There are some edges with how we bubble delete here.
+    /// For example, since we traverse bottom up, if there are empty
+    /// sibling directories, we wont remove_dir won't remove them
+    /// and we will exit with DirectoryNotEmpty. We could do a more thorough
+    /// traversal to catch these, but overkill for an edge.
     fn bubble_delete(&self, start_dir: PathBuf, ceiling: &Path) {
         let mut current = start_dir;
 
@@ -300,9 +304,13 @@ impl Secrets {
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_write(provider, &src),
-            FsEvent::Remove(src) => self.on_remove(&src),
-            FsEvent::Move { from, to } => self.on_move(provider, &from, &to),
+            FsEvent::Write(src) => self.on_write(provider, &normalize(src)),
+            FsEvent::Remove(src) => self.on_remove(&normalize(src)),
+            FsEvent::Move { from, to } => self.on_move(provider, &normalize(from), &normalize(to)),
         }
     }
+}
+
+fn normalize(path: impl AsRef<Path>) -> PathBuf {
+    path.as_ref().components().collect()
 }

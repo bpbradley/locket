@@ -51,10 +51,7 @@ impl SecretFs {
             return self.files.get(src);
         }
         if let Some(dst) = self.resolve(src) {
-            let file = SecretFile {
-                src: src.to_path_buf(),
-                dst,
-            };
+            let file = SecretFile::new(src, dst);
             self.files.insert(src.to_path_buf(), file);
             debug!("Added secret file: {:?}", src);
             return self.files.get(src);
