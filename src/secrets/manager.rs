@@ -286,7 +286,9 @@ impl Secrets {
         // Tiny race condition here, if file is removed while we are processing it..
         // Only a possible issue with inject failure policy of Error.
         // Otherwise, this will lead to eventual consistency on the next processing event
-        if src.exists() && let Some(file) = self.fs.upsert(src) {
+        if src.exists()
+            && let Some(file) = self.fs.upsert(src)
+        {
             file.inject(self.opts.policy, provider)?;
         }
         Ok(())
