@@ -260,37 +260,33 @@ impl Secrets {
             }
         }
 
+        // Fallback to remove + write
+        debug!(?old, ?new, "fallback move via remove + write");
         self.on_remove(old)?;
-
-        // new.is_dir() here is a small race condition. If new is removed before we can process it, we will
-        // treat it as a file and fail to inject anything.
-        // However, this will still lead to eventual consistency, as the next write event
-        // should show that the file was removed. In order to fix this, I could
-        // add context to the FsEvent to indicate that the file is a directory at event-time.
-        // This will still require graceful handling, but at least it would be correct.
-        if new.is_dir() {
-            debug!(?new, "scanning new directory location");
-            for entry in walkdir::WalkDir::new(new)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-            {
-                self.on_write(provider, entry.path())?;
-            }
-        } else {
-            self.on_write(provider, new)?;
-        }
+        self.on_write(provider, new)?;
 
         Ok(())
     }
 
     fn on_write(&mut self, provider: &dyn SecretsProvider, src: &Path) -> Result<(), SecretError> {
-        // Only react to files, not directories.
         if src.is_dir() {
-            debug!(?src, "event: skipping directory write");
+            debug!(?src, "directory write event; scanning for children");
+            for entry in walkdir::WalkDir::new(src)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+            {
+                // Recursion.. Treat every child file as its own Write event.
+                // Should only ever be one level deep here, since we are already
+                // inside a directory write event.
+                self.on_write(provider, entry.path())?;
+            }
             return Ok(());
         }
-        if let Some(file) = self.fs.upsert(src) {
+        // Tiny race condition here, if file is removed while we are processing it..
+        // Only a possible issue with inject failure policy of Error.
+        // Otherwise, this will lead to eventual consistency on the next processing event
+        if src.exists() && let Some(file) = self.fs.upsert(src) {
             file.inject(self.opts.policy, provider)?;
         }
         Ok(())
