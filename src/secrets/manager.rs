@@ -7,7 +7,7 @@ use crate::secrets::types::{
 use clap::Args;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct PathMapping {
@@ -228,12 +228,51 @@ impl Secrets {
         old: &Path,
         new: &Path,
     ) -> Result<(), SecretError> {
-        // Best effort: keep it simple for now.
-        // try to drop old dst if we were tracking it.
+        if let Some((from, to)) = self.fs.try_rebase(old, new) {
+            debug!(?from, ?to, "attempting directory rename");
+
+            // Prepare parent
+            if let Some(p) = to.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+
+            match std::fs::rename(&from, &to) {
+                Ok(_) => {
+                    debug!(?old, ?new, "moved");
+                    if let Some(parent) = from.parent() {
+                        if let Some(ceiling) = self.fs.resolve(old) {
+                            if let Some(ceil_parent) = ceiling.parent() {
+                                if parent.starts_with(ceil_parent) {
+                                    self.bubble_delete(parent.to_path_buf(), ceil_parent);
+                                }
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(error=?e, "move failed; falling back to reinjection");
+                    self.fs.remove(new);
+                }
+            }
+        }
         self.on_remove(old)?;
 
-        // Then treat new as a fresh file.
-        self.on_write(provider, new)
+        if new.is_dir() {
+            debug!(?new, "scanning new directory location");
+            for entry in walkdir::WalkDir::new(new)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+            {
+                self.on_write(provider, entry.path())?;
+            }
+        } else {
+            // Just a file
+            self.on_write(provider, new)?;
+        }
+
+        Ok(())
     }
 
     fn on_write(&mut self, provider: &dyn SecretsProvider, src: &Path) -> Result<(), SecretError> {

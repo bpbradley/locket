@@ -46,9 +46,6 @@ impl SecretFs {
         Some(mapping.dst.join(rel))
     }
 
-    /// Structural upsert: ensure a SecretFile exists for this src.
-    ///
-    /// Returns an immutable reference to the stored SecretFile if it’s in a managed dir.
     pub fn upsert(&mut self, src: &Path) -> Option<&SecretFile> {
         if self.files.contains_key(src) {
             return self.files.get(src);
@@ -81,6 +78,53 @@ impl SecretFs {
             }
         }
         results
+    }
+
+    pub fn try_rebase(&mut self, from: &Path, to: &Path) -> Option<(PathBuf, PathBuf)> {
+        let from_root = self.resolve(from)?;
+        let to_root = self.resolve(to)?;
+
+        // Find rebase candidates
+        let keys: Vec<PathBuf> = self
+            .files
+            .range(from.to_path_buf()..)
+            .take_while(|(k, _)| k.starts_with(from))
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        if keys.is_empty() {
+            return None;
+        }
+
+        // Check homogeneity.
+        // Verify that EVERY file currently inside `from` would map to the expected new location.
+        // This catches cases where a subdirectory might have a different mapping rule.
+        let mut updates = Vec::with_capacity(keys.len());
+
+        for k in &keys {
+            let file = self.files.get(k)?;
+            let rel = k.strip_prefix(from).ok()?;
+            if file.dst != from_root.join(rel) {
+                // We must fall back to individual file processing.
+                return None;
+            }
+
+            // Calculate new state
+            let new_k = to.join(rel);
+            let new_d = to_root.join(rel);
+            updates.push((k.clone(), new_k, new_d));
+        }
+
+        // Commit updates
+        for (old_k, new_k, new_d) in updates {
+            if let Some(mut file) = self.files.remove(&old_k) {
+                file.src = new_k.clone();
+                file.dst = new_d;
+                self.files.insert(new_k, file);
+            }
+        }
+
+        Some((from_root, to_root))
     }
 
     pub fn iter_files(&self) -> impl Iterator<Item = &SecretFile> {
@@ -121,10 +165,14 @@ mod tests {
         let general = fs.upsert(&p("/templates/common.yaml")).expect("should map");
         assert_eq!(general.dst, p("/secrets/general/common.yaml"));
 
-        let specific = fs.upsert(&p("/templates/secure/db.yaml")).expect("should map");
+        let specific = fs
+            .upsert(&p("/templates/secure/db.yaml"))
+            .expect("should map");
         assert_eq!(specific.dst, p("/secrets/specific/db.yaml"));
 
-        let specific_nested = fs.upsert(&p("/templates/secure/nested/key")).expect("should map");
+        let specific_nested = fs
+            .upsert(&p("/templates/secure/nested/key"))
+            .expect("should map");
         assert_eq!(specific_nested.dst, p("/secrets/specific/nested/key"));
     }
 
@@ -150,7 +198,7 @@ mod tests {
         // ASSERT: Only DIRA is removed
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].src, path_dira);
-        
+
         // Verify DIRAA is still there
         assert!(fs.files.contains_key(&path_diraa));
     }
@@ -174,7 +222,7 @@ mod tests {
         let removed = fs.remove(&p("/root/sub"));
 
         assert_eq!(removed.len(), 2);
-        
+
         // Verify exact matches
         let src_paths: Vec<_> = removed.iter().map(|f| f.src.clone()).collect();
         assert!(src_paths.contains(&p("/root/sub/b.txt")));
@@ -204,14 +252,97 @@ mod tests {
         assert!(res.is_none());
         assert_eq!(fs.len(), 0);
     }
-    
+
     #[test]
     fn test_resolve_logic() {
-         let mut fs = SecretFs::default();
-         fs.mappings.push(PathMapping { src: p("/t"), dst: p("/s") });
-         
-         // We can test logic without upserting into state
-         let dst = fs.resolve(&p("/t/subdir/file")).unwrap();
-         assert_eq!(dst, p("/s/subdir/file"));
+        let mut fs = SecretFs::default();
+        fs.mappings.push(PathMapping {
+            src: p("/t"),
+            dst: p("/s"),
+        });
+
+        // We can test logic without upserting into state
+        let dst = fs.resolve(&p("/t/subdir/file")).unwrap();
+        assert_eq!(dst, p("/s/subdir/file"));
+    }
+#[test]
+    fn test_rebase_dir_intra_mapping() {
+        let mut fs = SecretFs::default();
+        // Setup: /data -> /output
+        fs.mappings.push(PathMapping {
+            src: p("/data"),
+            dst: p("/output"),
+        });
+
+        // Initial State: /data/old_sub/file.txt
+        let p_old = p("/data/old_sub/file.txt");
+        fs.upsert(&p_old);
+
+        // Action: Move "/data/old_sub" -> "/data/new_sub"
+        let res = fs.try_rebase(&p("/data/old_sub"), &p("/data/new_sub"));
+
+        // Assert: Rebase permitted
+        assert!(res.is_some());
+        let (old_dst, new_dst) = res.unwrap();
+        
+        // Assert: Calculated renaming of the OUTPUT directory
+        assert_eq!(old_dst, p("/output/old_sub"));
+        assert_eq!(new_dst, p("/output/new_sub"));
+
+        // Assert: Internal state updated
+        // Old key gone
+        assert!(!fs.files.contains_key(&p_old));
+        // New key present
+        let p_new = p("/data/new_sub/file.txt");
+        let new_entry = fs.files.get(&p_new).expect("new file should exist");
+        assert_eq!(new_entry.dst, p("/output/new_sub/file.txt"));
+    }
+
+    #[test]
+    fn test_rebase_dir_inter_mapping() {
+        let mut fs = SecretFs::default();
+        // Mapping 1: /src_a -> /out_a
+        fs.mappings.push(PathMapping { src: p("/src_a"), dst: p("/out_a") });
+        // Mapping 2: /src_b -> /out_b
+        fs.mappings.push(PathMapping { src: p("/src_b"), dst: p("/out_b") });
+
+        fs.upsert(&p("/src_a/folder/config.yaml"));
+
+        // Action: Move "/src_a/folder" -> "/src_b/moved_folder"
+        // This is a move between two totally different mappings.
+        let res = fs.try_rebase(&p("/src_a/folder"), &p("/src_b/moved_folder"));
+
+        assert!(res.is_some());
+        let (old_dst, new_dst) = res.unwrap();
+        
+        // Verify output paths jump correctly
+        assert_eq!(old_dst, p("/out_a/folder"));
+        assert_eq!(new_dst, p("/out_b/moved_folder"));
+        
+        // Verify state
+        assert!(fs.files.contains_key(&p("/src_b/moved_folder/config.yaml")));
+    }
+
+    #[test]
+    fn test_rebase_dir_nested_mapping() {
+        let mut fs = SecretFs::default();
+        fs.mappings.push(PathMapping { src: p("/templates"), dst: p("/secrets") });
+        fs.mappings.push(PathMapping { src: p("/templates/secure"), dst: p("/vault_mount") });
+
+        // Add files
+        fs.upsert(&p("/templates/common.yaml"));
+        fs.upsert(&p("/templates/secure/db_pass"));
+
+        // Action: Move "/templates" -> "/templates_new"
+        // This SHOULD FAIL because we cannot linearly rename the output.
+        // "/secrets" cannot be renamed to "/secrets_new" because "/secrets" does NOT contain "db_pass".
+        // "db_pass" lives in "/vault_mount", which is somewhere else entirely.
+        let res = fs.try_rebase(&p("/templates"), &p("/templates_new"));
+
+        assert!(res.is_none(), "Should reject rebase because of heterogeneous children");
+
+        // Verify state is untouched
+        assert!(fs.files.contains_key(&p("/templates/common.yaml")));
+        assert!(fs.files.contains_key(&p("/templates/secure/db_pass")));
     }
 }
