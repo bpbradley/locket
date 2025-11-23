@@ -1,6 +1,6 @@
 [package]
 name = "secret-sidecar"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
