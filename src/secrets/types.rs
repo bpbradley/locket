@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -94,9 +94,17 @@ pub trait Injectable {
     }
     /// Remove the secret from disk.
     fn remove(&self) -> Result<(), SecretError> {
-        let dst = self.dst();
-        if dst.exists() {
-            fs::remove_file(dst)?;
+        let dst: PathBuf = self.dst().components().collect();
+        match std::fs::remove_file(&dst) {
+            Ok(_) => {
+                debug!(dst=?dst, "deleted secret file");
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                debug!(dst=?dst, "file already removed");
+            }
+            Err(e) => {
+                return Err(SecretError::Io(e));
+            }
         }
         Ok(())
     }
