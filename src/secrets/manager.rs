@@ -90,15 +90,15 @@ impl SecretsOpts {
         let mut destinations = Vec::new();
 
         for m in &self.mapping {
+            if m.src
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err(SecretError::Forbidden(m.src.clone()));
+            }
             // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
             if !m.src.exists() {
-                return Err(SecretError::Config(format!("Source missing: {:?}", m.src)));
-            }
-            if m.src.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-                return Err(SecretError::Config(format!(
-                    "Relative paths forbidden: {:?}",
-                    m.src
-                )));
+                return Err(SecretError::SourceMissing(m.src.clone()));
             }
             sources.push(&m.src);
             destinations.push(&m.dst);
@@ -109,16 +109,16 @@ impl SecretsOpts {
         for src in &sources {
             for dst in &destinations {
                 if dst.starts_with(src) {
-                    return Err(SecretError::Config(format!(
-                        "Feedback Loop: Dest {:?} inside Src {:?}",
-                        dst, src
-                    )));
+                    return Err(SecretError::Loop {
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                    });
                 }
                 if src.starts_with(dst) {
-                    return Err(SecretError::Config(format!(
-                        "Self-Destruct: Src {:?} inside Dest {:?}",
-                        src, dst
-                    )));
+                    return Err(SecretError::Destructive {
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                    });
                 }
             }
         }
@@ -237,21 +237,23 @@ impl Secrets {
 
             // Two secrets share a destination
             if curr_path == next_path {
-                return Err(SecretError::Config(format!(
-                    "Collision: {} and {} both map to the same destination '{:?}'",
-                    curr_src, next_src, curr_path
-                )));
+                return Err(SecretError::Collision {
+                    first: curr_src.clone(),
+                    second: next_src.clone(),
+                    dst: curr_path.to_path_buf(),
+                });
             }
 
             // Finds structural conflicts where one secret maps to a path
             // that is a parent directory of another secret's path.
             // i.e. /secrets/foo and /secrets/foo/bar.txt
             if next_path.starts_with(curr_path) {
-                return Err(SecretError::Config(format!(
-                    "Structure Conflict: {} maps to '{:?}', which blocks {} from writing to '{:?}'. \
-                    (Cannot create a file and a directory at the same path node)",
-                    curr_src, curr_path, next_src, next_path
-                )));
+                return Err(SecretError::StructureConflict {
+                    blocker: curr_src.clone(),
+                    blocker_path: curr_path.to_path_buf(),
+                    blocked: next_src.clone(),
+                    blocked_path: next_path.to_path_buf(),
+                });
             }
         }
 
@@ -410,4 +412,101 @@ impl Secrets {
 
 fn normalize(path: impl AsRef<Path>) -> PathBuf {
     path.as_ref().components().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn validate_fails_source_missing() {
+        let tmp = tempdir().unwrap();
+        let missing_src = tmp.path().join("ghost");
+        let dst = tmp.path().join("out");
+
+        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&missing_src, &dst)]);
+        assert!(matches!(
+            opts.validate(),
+            Err(SecretError::SourceMissing(p)) if p == missing_src
+        ));
+    }
+
+    #[test]
+    fn validate_fails_forbidden_relative_path() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("templates");
+        std::fs::create_dir_all(&src).unwrap();
+        let bad_src = src.join("..").join("passwd");
+
+        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&bad_src, "out")]);
+        assert!(matches!(
+            opts.validate(),
+            Err(SecretError::Forbidden(p)) if p == bad_src
+        ));
+    }
+
+    #[test]
+    fn validate_fails_loop_dst_inside_src() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("templates");
+        let dst = src.join("nested_out");
+
+        std::fs::create_dir_all(&src).unwrap();
+
+        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
+
+        assert!(matches!(
+            opts.validate(),
+            Err(SecretError::Loop { src: s, dst: d }) if s == src && d == dst
+        ));
+    }
+
+    #[test]
+    fn validate_fails_destructive() {
+        let tmp = tempdir().unwrap();
+        let dst = tmp.path().join("out");
+        let src = dst.join("templates");
+
+        std::fs::create_dir_all(&src).unwrap();
+
+        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
+
+        assert!(matches!(
+            opts.validate(),
+            Err(SecretError::Destructive { src: s, dst: d }) if s == src && d == dst
+        ));
+    }
+
+    #[test]
+    fn validate_fails_value_dir_loop() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("templates");
+        std::fs::create_dir_all(&src).unwrap();
+
+        let dst = tmp.path().join("safe_out");
+        let bad_value_dir = src.join("values");
+
+        let opts = SecretsOpts::default()
+            .with_mapping(vec![PathMapping::new(&src, &dst)])
+            .with_value_dir(bad_value_dir.clone());
+
+        assert!(matches!(
+            opts.validate(),
+            Err(SecretError::Loop { src: s, dst: d }) if s == src && d == bad_value_dir
+        ));
+    }
+
+    #[test]
+    fn validate_succeeds_valid_config() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("templates");
+        let dst = tmp.path().join("out");
+
+        std::fs::create_dir_all(&src).unwrap();
+
+        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
+
+        assert!(opts.validate().is_ok());
+    }
 }

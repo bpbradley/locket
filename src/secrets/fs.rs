@@ -148,9 +148,11 @@ mod tests {
     fn test_mapping_priority() {
         let mut fs = SecretFs::default();
 
-        fs.mappings.push(PathMapping::new("/templates", "/secrets/general"));
+        fs.mappings
+            .push(PathMapping::new("/templates", "/secrets/general"));
 
-        fs.mappings.push(PathMapping::new("/templates/secure", "/secrets/specific"));
+        fs.mappings
+            .push(PathMapping::new("/templates/secure", "/secrets/specific"));
 
         let general = fs.upsert(&p("/templates/common.yaml")).expect("should map");
         assert_eq!(general.dst, p("/secrets/general/common.yaml"));
@@ -302,7 +304,8 @@ mod tests {
     fn test_rebase_dir_nested_mapping() {
         let mut fs = SecretFs::default();
         fs.mappings.push(PathMapping::new("/templates", "/secrets"));
-        fs.mappings.push(PathMapping::new("/templates/secure", "/vault_mount"));
+        fs.mappings
+            .push(PathMapping::new("/templates/secure", "/vault_mount"));
 
         // Add files
         fs.upsert(&p("/templates/common.yaml"));

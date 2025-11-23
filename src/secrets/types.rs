@@ -9,23 +9,52 @@ use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum SecretError {
-    #[error("config: {0}")]
-    Config(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 
-    #[error("provider: {0}")]
+    #[error("provider error: {0}")]
     Provider(#[from] crate::provider::ProviderError),
 
+    #[error("source path missing: {0:?}")]
+    SourceMissing(PathBuf),
+
+    #[error("destination {dst:?} is inside source {src:?}")]
+    Loop { src: PathBuf, dst: PathBuf },
+
+    #[error("source {src:?} is inside destination {dst:?}")]
+    Destructive { src: PathBuf, dst: PathBuf },
+
+    #[error("Path is forbidden in source: {0:?}")]
+    Forbidden(PathBuf),
+
+    #[error(
+        "collision detected: '{dst:?}' is targeted by multiple sources: '{first:?}' and '{second:?}'"
+    )]
+    Collision {
+        first: String,
+        second: String,
+        dst: PathBuf,
+    },
+
+    #[error(
+        "structure conflict: {blocker:?} maps to '{blocker_path:?}', which blocks {blocked:?} from writing to '{blocked_path:?}'"
+    )]
+    StructureConflict {
+        blocker: String,
+        blocker_path: PathBuf,
+        blocked: String,
+        blocked_path: PathBuf,
+    },
+
+    // Fallback for generic injection errors
     #[error("injection failed: {source}")]
     InjectionFailed {
         #[source]
         source: crate::provider::ProviderError,
     },
 
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
-
     #[error("dst has no parent: {0}")]
-    NoParent(std::path::PathBuf),
+    NoParent(PathBuf),
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
@@ -103,6 +132,17 @@ pub trait Injectable {
             fs::remove_file(dst)?;
         }
         Ok(())
+    }
+}
+
+impl std::fmt::Display for dyn Injectable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Injectable(src='{}', dst='{}')",
+            self.label(),
+            self.dst().display()
+        )
     }
 }
 

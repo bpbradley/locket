@@ -3,20 +3,23 @@ use secret_sidecar::secrets::{
     manager::{PathMapping, SecretsOpts},
     types::SecretError,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 #[test]
-fn collisions_detect_duplicate_dst_across_files_and_values() {
+fn collisions_structure_conflict() {
     let tmp = tempfile::tempdir().unwrap();
     let templates = tmp.path().join("templates");
     let output = tmp.path().join("out");
-
     std::fs::create_dir_all(&templates).unwrap();
-    std::fs::write(templates.join("dup.txt"), b"x").unwrap();
 
+    let blocker_src = templates.join("config");
+    std::fs::write(&blocker_src, "parent").unwrap();
+
+    let blocked_label = "config/db_pass";
     let mut initial_values = HashMap::new();
-    initial_values.insert("dup.txt".to_string(), "some template value".to_string());
-    let opts = SecretsOpts::new()
+    initial_values.insert(blocked_label.to_string(), "child".to_string());
+
+    let opts = SecretsOpts::default()
         .with_value_dir(output.clone())
         .with_mapping(vec![PathMapping::new(templates.clone(), output.clone())]);
 
@@ -25,52 +28,37 @@ fn collisions_detect_duplicate_dst_across_files_and_values() {
 
     let result = secrets.collisions();
 
-    assert!(
-        result.is_err(),
-        "Should detect collision between file 'dup.txt' and value 'dup.txt'"
-    );
+    assert!(result.is_err());
 
-    match result.unwrap_err() {
-        SecretError::Config(msg) => {
-            assert!(msg.contains("Collision"));
-            assert!(msg.contains("dup.txt"));
-        }
-        _ => panic!("Expected Config error"),
-    }
+    assert!(matches!(
+        result.unwrap_err(),
+        SecretError::StructureConflict { .. }
+    ));
 }
 
 #[test]
-fn collisions_detect_structure_conflict_file_blocking_dir() {
+fn collisions_report_rich_exact_collision() {
     let tmp = tempfile::tempdir().unwrap();
-    let templates = tmp.path().join("templates");
-    let output = tmp.path().join("out");
+    let src_dir = tmp.path().join("src");
+    let out_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&src_dir).unwrap();
 
-    std::fs::create_dir_all(&templates).unwrap();
+    let file_src = src_dir.join("dup");
+    std::fs::write(&file_src, "x").unwrap();
 
-    std::fs::write(templates.join("app_config"), b"file content").unwrap();
+    let mut values = HashMap::new();
+    values.insert("dup".to_string(), "y".to_string());
 
-    let mut initial_values = HashMap::new();
-    initial_values.insert("app_config/db_pass".to_string(), "secret".to_string());
-
-    let opts = SecretsOpts::new()
-        .with_value_dir(output.clone())
-        .with_mapping(vec![PathMapping::new(templates.clone(), output.clone())]);
+    let opts = SecretsOpts::default()
+        .with_value_dir(out_dir.clone())
+        .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())]);
 
     let mut secrets = Secrets::new(opts);
-    secrets.extend_values(initial_values);
+    secrets.extend_values(values);
 
-    // 3. Validate
     let result = secrets.collisions();
 
-    // 4. Assert
-    assert!(result.is_err(), "Should detect structure conflict");
+    assert!(result.is_err());
 
-    match result.unwrap_err() {
-        SecretError::Config(msg) => {
-            // Check that the error message explains the hierarchy issue
-            assert!(msg.contains("Structure Conflict"));
-            assert!(msg.contains("app_config"));
-        }
-        _ => panic!("Expected Config error"),
-    }
+    assert!(matches!(result.unwrap_err(), SecretError::Collision { .. }));
 }

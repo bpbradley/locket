@@ -95,7 +95,10 @@ fn inject_all_value_sources() {
     let out = tmp.path().join("out");
     let opts = SecretsOpts::default()
         .with_value_dir(out.clone())
-        .with_mapping(vec![PathMapping::new(tmp.path().join("templates"), out.clone())])
+        .with_mapping(vec![PathMapping::new(
+            tmp.path().join("templates"),
+            out.clone(),
+        )])
         .with_env_value_prefix("secret_");
     let secrets = Secrets::new(opts);
     let provider = MockProvider::default();
