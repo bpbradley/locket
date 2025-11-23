@@ -23,8 +23,7 @@ fn collisions_structure_conflict() {
         .with_value_dir(output.clone())
         .with_mapping(vec![PathMapping::new(templates.clone(), output.clone())]);
 
-    let mut secrets = Secrets::new(opts);
-    secrets.extend_values(initial_values);
+    let secrets = Secrets::new(opts).with_values(initial_values);
 
     let result = secrets.collisions();
 
@@ -53,8 +52,7 @@ fn collisions_report_rich_exact_collision() {
         .with_value_dir(out_dir.clone())
         .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())]);
 
-    let mut secrets = Secrets::new(opts);
-    secrets.extend_values(values);
+    let secrets = Secrets::new(opts).with_values(values);
 
     let result = secrets.collisions();
 

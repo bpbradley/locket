@@ -236,21 +236,3 @@ pub fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) 
     let dst = output_root.join(&sanitized);
     SecretValue::new(dst, template, sanitized)
 }
-
-pub fn collect_value_sources<L, T, I>(output_root: &Path, pairs: I) -> Vec<SecretValue>
-where
-    I: IntoIterator<Item = (L, T)>,
-    L: AsRef<str>,
-    T: AsRef<str>,
-{
-    pairs
-        .into_iter()
-        .map(|(label, template)| value_source(output_root, label.as_ref(), template))
-        .collect()
-}
-
-pub fn collect_value_sources_from_env(output_root: &Path, prefix: &str) -> Vec<SecretValue> {
-    let stripped = std::env::vars()
-        .filter_map(|(k, v)| k.strip_prefix(prefix).map(|rest| (rest.to_string(), v)));
-    collect_value_sources(output_root, stripped)
-}

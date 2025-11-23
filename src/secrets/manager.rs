@@ -1,7 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::types::{
-    InjectFailurePolicy, Injectable, SecretError, SecretValue, collect_value_sources_from_env,
+    InjectFailurePolicy, Injectable, SecretError, SecretValue,
     value_source,
 };
 use clap::Args;
@@ -43,8 +43,6 @@ pub struct SecretsOpts {
     pub mapping: Vec<PathMapping>,
     #[arg(long = "out", env = "VALUE_OUTPUT_DIR", default_value = "/run/secrets")]
     pub value_dir: PathBuf,
-    #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
-    pub env_value_prefix: String,
     #[arg(
         long = "inject-policy",
         env = "INJECT_POLICY",
@@ -59,9 +57,54 @@ impl Default for SecretsOpts {
         Self {
             mapping: vec![PathMapping::default()],
             value_dir: PathBuf::from("/run/secrets"),
-            env_value_prefix: "secret_".into(),
             policy: InjectFailurePolicy::CopyUnmodified,
         }
+    }
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SecretSources {
+    #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
+    pub env_value_prefix: String,
+
+    #[arg(long = "secret", value_name = "KEY=TEMPLATE")]
+    pub values: Vec<String>,
+}
+
+impl Default for SecretSources {
+    fn default() -> Self {
+        Self {
+            env_value_prefix: "secret_".to_string(),
+            values: Vec::new(),
+        }
+    }
+}
+
+impl SecretSources {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn load(&self) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+
+        for (k, v) in std::env::vars() {
+            if let Some(label) = k.strip_prefix(&self.env_value_prefix) {
+                map.insert(label.to_string(), v);
+            }
+        }
+
+        for s in &self.values {
+            match s.split_once('=') {
+                Some((k, v)) => {
+                    map.insert(k.to_string(), v.to_string());
+                }
+                None => {
+                    tracing::warn!("Ignoring malformed secret argument: '{}'", s);
+                }
+            }
+        }
+
+        map
     }
 }
 
@@ -79,10 +122,6 @@ impl SecretsOpts {
     }
     pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
         self.policy = policy;
-        self
-    }
-    pub fn with_env_value_prefix(mut self, prefix: impl AsRef<str>) -> Self {
-        self.env_value_prefix = prefix.as_ref().to_string();
         self
     }
     pub fn validate(&self) -> Result<(), SecretError> {
@@ -142,13 +181,6 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
     Ok(PathMapping::new(src, dst))
 }
 
-impl SecretsOpts {
-    pub fn build(&self) -> Result<Secrets, SecretError> {
-        self.validate()?;
-        Ok(Secrets::new(self.clone()))
-    }
-}
-
 /// Filesystem events for SecretFs
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum FsEvent {
@@ -166,17 +198,19 @@ pub struct Secrets {
 impl Secrets {
     pub fn new(opts: SecretsOpts) -> Self {
         let fs = SecretFs::new(opts.mapping.clone());
-        let mut secrets = Self {
+        Self {
             opts,
             fs,
             values: HashMap::new(),
-        };
-        let envs =
-            collect_value_sources_from_env(&secrets.opts.value_dir, &secrets.opts.env_value_prefix);
-        for v in envs {
-            secrets.values.insert(v.label.clone(), v);
         }
-        secrets
+    }
+
+    pub fn with_values(mut self, values: HashMap<String, impl AsRef<str>>) -> Self {
+        for (label, template) in values {
+            let v = value_source(&self.opts.value_dir, &label, template);
+            self.values.insert(v.label.clone(), v);
+        }
+        self
     }
 
     pub fn options(&self) -> &SecretsOpts {
@@ -186,14 +220,6 @@ impl Secrets {
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
         let v = value_source(&self.opts.value_dir, label, template);
         self.values.insert(v.label.clone(), v);
-        self
-    }
-
-    pub fn extend_values(&mut self, values: HashMap<String, impl AsRef<str>>) -> &mut Self {
-        for (label, template) in values {
-            let v = value_source(&self.opts.value_dir, &label, template);
-            self.values.insert(v.label.clone(), v);
-        }
         self
     }
 

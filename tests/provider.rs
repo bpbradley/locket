@@ -2,7 +2,7 @@ use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
     secrets::{
         SecretError, Secrets,
-        manager::{PathMapping, SecretsOpts},
+        manager::{PathMapping, SecretsOpts, SecretSources},
     },
 };
 use std::env;
@@ -98,9 +98,8 @@ fn inject_all_value_sources() {
         .with_mapping(vec![PathMapping::new(
             tmp.path().join("templates"),
             out.clone(),
-        )])
-        .with_env_value_prefix("secret_");
-    let secrets = Secrets::new(opts);
+        )]);
+    let secrets = Secrets::new(opts).with_values(SecretSources::default().load());
     let provider = MockProvider::default();
     secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("greeting")).unwrap();

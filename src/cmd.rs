@@ -2,7 +2,7 @@ use crate::{
     health::StatusFile,
     logging::Logger,
     provider::{Provider, SecretsProvider},
-    secrets::{Secrets, manager::SecretsOpts},
+    secrets::{Secrets, manager::{SecretsOpts, SecretSources}},
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -48,6 +48,10 @@ pub struct RunArgs {
     #[command(flatten)]
     pub secrets: SecretsOpts,
 
+    /// Secret Sources
+    #[command(flatten)]
+    pub values: SecretSources,
+
     /// Logging configuration
     #[command(flatten)]
     pub logger: Logger,
@@ -69,7 +73,8 @@ impl RunArgs {
         Ok(self.provider.build()?)
     }
     pub fn secrets(&self) -> anyhow::Result<Secrets> {
-        Ok(self.secrets.build()?)
+        self.secrets.validate()?;
+        Ok(Secrets::new(self.secrets.clone()).with_values(self.values.load()))
     }
 }
 
