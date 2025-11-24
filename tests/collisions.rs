@@ -1,6 +1,6 @@
 use secret_sidecar::secrets::{
     Secrets,SecretError,SecretsOpts,
-    manager::PathMapping
+    PathMapping
 };
 use std::{collections::HashMap, vec};
 

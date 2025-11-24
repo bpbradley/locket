@@ -2,7 +2,7 @@ use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
     secrets::{
         SecretError, Secrets, SecretsOpts, SecretSources,
-        manager::PathMapping
+        PathMapping
     },
 };
 use std::env;
