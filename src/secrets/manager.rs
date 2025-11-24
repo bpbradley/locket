@@ -142,7 +142,13 @@ pub struct SecretValues {
     #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
     pub env_value_prefix: String,
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
-    #[arg(long = "secret", env = "SECRET_VALUE", value_name = "label={{template}}", value_delimiter = ';', hide_env_values = true)]
+    #[arg(
+        long = "secret",
+        env = "SECRET_VALUE",
+        value_name = "label={{template}}",
+        value_delimiter = ';',
+        hide_env_values = true
+    )]
     pub values: Vec<String>,
 }
 
