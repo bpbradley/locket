@@ -61,13 +61,6 @@ pub struct RunArgs {
     provider: Provider,
 }
 
-#[derive(Args, Debug)]
-pub struct HealthArgs {
-    /// Status file path
-    #[command(flatten)]
-    pub status_file: StatusFile,
-}
-
 impl RunArgs {
     pub fn provider(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
         Ok(self.provider.build()?)
@@ -76,6 +69,13 @@ impl RunArgs {
         self.secrets.validate()?;
         Ok(Secrets::new(self.secrets.clone()).with_values(self.values.load()))
     }
+}
+
+#[derive(Args, Debug)]
+pub struct HealthArgs {
+    /// Status file path
+    #[command(flatten)]
+    pub status_file: StatusFile,
 }
 
 pub mod healthcheck;
