@@ -1,6 +1,6 @@
 use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{PathMapping, SecretError, SecretSources, Secrets, SecretsOpts},
+    secrets::{PathMapping, SecretError, SecretValues, Secrets, SecretsOpts},
 };
 use std::env;
 use std::path::Path;
@@ -96,7 +96,7 @@ fn inject_all_value_sources() {
             tmp.path().join("templates"),
             out.clone(),
         )]);
-    let secrets = Secrets::new(opts).with_values(SecretSources::default().load());
+    let secrets = Secrets::new(opts).with_values(SecretValues::default().load());
     let provider = MockProvider::default();
     secrets.inject_all(&provider).unwrap();
     let got = std::fs::read(out.join("greeting")).unwrap();

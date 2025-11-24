@@ -8,6 +8,8 @@ use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretsOpts {
+    // Mapping of source paths (holding secret templates)
+    // to destination paths (where secrets are materialized and reflected)
     #[arg(
         long = "map", 
         value_parser = parse_mapping,
@@ -16,6 +18,7 @@ pub struct SecretsOpts {
         default_value = "/templates:/run/secrets"
     )]
     pub mapping: Vec<PathMapping>,
+    // Directory where secret values (literals) are materialized
     #[arg(long = "out", env = "VALUE_OUTPUT_DIR", default_value = "/run/secrets")]
     pub value_dir: PathBuf,
     #[arg(
@@ -24,6 +27,7 @@ pub struct SecretsOpts {
         value_enum,
         default_value_t = InjectFailurePolicy::CopyUnmodified
     )]
+    // Policy for handling injection failures
     pub policy: InjectFailurePolicy,
 }
 
@@ -35,6 +39,7 @@ pub enum FsEvent {
     Move { from: PathBuf, to: PathBuf },
 }
 
+/// Mapping of source path to destination path for secret files
 #[derive(Debug, Clone)]
 pub struct PathMapping {
     src: PathBuf,
@@ -131,15 +136,16 @@ impl Default for SecretsOpts {
 }
 
 #[derive(Debug, Clone, Args)]
-pub struct SecretSources {
+pub struct SecretValues {
+    // Environment variables prefixed with this string will be treated as secret values
     #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
     pub env_value_prefix: String,
-
-    #[arg(long = "secret", value_name = "KEY=TEMPLATE")]
+    // Additional secret values specified as LABEL=SECRET_TEMPLATE
+    #[arg(long = "secret", value_name = "LABEL=SECRET_TEMPLATE")]
     pub values: Vec<String>,
 }
 
-impl SecretSources {
+impl SecretValues {
     pub fn new() -> Self {
         Self::default()
     }
@@ -167,7 +173,7 @@ impl SecretSources {
     }
 }
 
-impl Default for SecretSources {
+impl Default for SecretValues {
     fn default() -> Self {
         Self {
             env_value_prefix: "secret_".to_string(),

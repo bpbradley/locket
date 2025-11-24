@@ -2,7 +2,7 @@ use crate::{
     health::StatusFile,
     logging::Logger,
     provider::{Provider, SecretsProvider},
-    secrets::{SecretSources, Secrets, SecretsOpts},
+    secrets::{SecretValues, Secrets, SecretsOpts},
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -50,7 +50,7 @@ pub struct RunArgs {
 
     /// Secret Sources
     #[command(flatten)]
-    pub values: SecretSources,
+    pub values: SecretValues,
 
     /// Logging configuration
     #[command(flatten)]
