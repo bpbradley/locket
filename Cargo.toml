@@ -2,7 +2,7 @@
 name = "secret-sidecar"
 version = "0.8.0"
 edition = "2024"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
 description = "Helper tool for secret injection from templates and env vars to be used as sidecar for docker compose"
 
