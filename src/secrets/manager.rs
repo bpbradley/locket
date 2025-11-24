@@ -360,7 +360,11 @@ impl Secrets {
             if let Some(p) = to.parent() {
                 std::fs::create_dir_all(p)?;
             }
-
+            // TODO: I think this is overly conservative and will leave behind
+            // empty dirs in some cases. I think parent and ceil_parent end up
+            // being the same with this logic, so kind of pointless. I probably
+            // need to slightly refactor bubble_delete idea, or I need to bubble
+            // up to SecretFs root.
             match std::fs::rename(&from, &to) {
                 Ok(_) => {
                     debug!(?old, ?new, "moved");
