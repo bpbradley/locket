@@ -8,17 +8,18 @@ use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretsOpts {
-    // Mapping of source paths (holding secret templates)
-    // to destination paths (where secrets are materialized and reflected)
+    /// Mapping of source paths (holding secret templates)
+    /// to destination paths (where secrets are materialized and reflected)
     #[arg(
         long = "map", 
         value_parser = parse_mapping,
         env = "SECRET_MAP", 
         value_delimiter = ',',
-        default_value = "/templates:/run/secrets"
+        default_value = "/templates:/run/secrets",
+        hide_env_values = true
     )]
     pub mapping: Vec<PathMapping>,
-    // Directory where secret values (literals) are materialized
+    /// Directory where secret values (literals) are materialized
     #[arg(long = "out", env = "VALUE_OUTPUT_DIR", default_value = "/run/secrets")]
     pub value_dir: PathBuf,
     #[arg(
@@ -27,7 +28,7 @@ pub struct SecretsOpts {
         value_enum,
         default_value_t = InjectFailurePolicy::CopyUnmodified
     )]
-    // Policy for handling injection failures
+    /// Policy for handling injection failures
     pub policy: InjectFailurePolicy,
 }
 
@@ -137,11 +138,11 @@ impl Default for SecretsOpts {
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretValues {
-    // Environment variables prefixed with this string will be treated as secret values
+    /// Environment variables prefixed with this string will be treated as secret values
     #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
     pub env_value_prefix: String,
-    // Additional secret values specified as LABEL=SECRET_TEMPLATE
-    #[arg(long = "secret", value_name = "LABEL=SECRET_TEMPLATE")]
+    /// Additional secret values specified as LABEL=SECRET_TEMPLATE
+    #[arg(long = "secret", env = "SECRET_VALUE", value_name = "label={{template}}", value_delimiter = ';', hide_env_values = true)]
     pub values: Vec<String>,
 }
 
