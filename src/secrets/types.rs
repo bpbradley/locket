@@ -150,9 +150,9 @@ impl std::fmt::Display for dyn Injectable {
 #[derive(Debug, Clone)]
 pub struct SecretFile {
     /// Source path for template file
-    pub src: PathBuf,
+    src: PathBuf,
     /// Destination path for injected secret
-    pub dst: PathBuf,
+    dst: PathBuf,
 }
 
 impl SecretFile {
@@ -161,6 +161,9 @@ impl SecretFile {
             src: src.as_ref().components().collect(),
             dst: dst.as_ref().components().collect(),
         }
+    }
+    pub fn src(&self) -> &Path {
+        &self.src
     }
 }
 
@@ -184,7 +187,7 @@ impl Injectable for SecretFile {
 /// Template string-backed secret
 #[derive(Debug, Clone)]
 pub struct SecretValue {
-    pub dst: PathBuf,
+    dst: PathBuf,
     pub template: String,
     pub label: String,
 }
@@ -216,23 +219,3 @@ impl Injectable for SecretValue {
     }
 }
 
-/// Helper: sanitize label into a safe/consistent filename
-pub fn sanitize_name(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for ch in raw.chars() {
-        let lc = ch.to_ascii_lowercase();
-        if lc.is_ascii_lowercase() || lc.is_ascii_digit() || matches!(lc, '.' | '_' | '-') {
-            out.push(lc);
-        } else {
-            out.push('_');
-        }
-    }
-    out
-}
-
-/// Construct a SecretValue from label + template.
-pub fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
-    let sanitized = sanitize_name(label);
-    let dst = output_root.join(&sanitized);
-    SecretValue::new(dst, template, sanitized)
-}

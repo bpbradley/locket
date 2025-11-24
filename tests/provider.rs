@@ -1,8 +1,8 @@
 use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
     secrets::{
-        SecretError, Secrets,
-        manager::{PathMapping, SecretsOpts, SecretSources},
+        SecretError, Secrets, SecretsOpts, SecretSources,
+        manager::PathMapping
     },
 };
 use std::env;

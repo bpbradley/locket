@@ -2,7 +2,7 @@ use crate::{
     health::StatusFile,
     logging::Logger,
     provider::{Provider, SecretsProvider},
-    secrets::{Secrets, manager::{SecretsOpts, SecretSources}},
+    secrets::{Secrets, SecretsOpts, SecretSources},
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
