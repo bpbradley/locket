@@ -1,35 +1,36 @@
-use secret_sidecar::secrets::{
-    Secrets,
-    manager::{PathMapping, SecretsOpts},
-    types::SecretError,
-};
+use secret_sidecar::secrets::{PathMapping, SecretError, Secrets, SecretsOpts};
 use std::{collections::HashMap, vec};
 
 #[test]
 fn collisions_structure_conflict() {
     let tmp = tempfile::tempdir().unwrap();
-    let templates = tmp.path().join("templates");
+
+    // Create distinct source directories so we don't conflict on the input side
+    let src_a = tmp.path().join("src_a");
+    let src_b = tmp.path().join("src_b");
     let output = tmp.path().join("out");
-    std::fs::create_dir_all(&templates).unwrap();
 
-    let blocker_src = templates.join("config");
-    std::fs::write(&blocker_src, "parent").unwrap();
+    std::fs::create_dir_all(&src_a).unwrap();
+    std::fs::create_dir_all(&src_b).unwrap();
 
-    let blocked_label = "config/db_pass";
-    let mut initial_values = HashMap::new();
-    initial_values.insert(blocked_label.to_string(), "child".to_string());
+    // Maps to "/out/config" (File `config`)
+    let blocker_src = src_a.join("config");
+    std::fs::write(&blocker_src, "I am a file").unwrap();
 
-    let opts = SecretsOpts::default()
-        .with_value_dir(output.clone())
-        .with_mapping(vec![PathMapping::new(templates.clone(), output.clone())]);
+    // Maps to "/out/config/nested" (Ambiguous directory `config`)
+    let blocked_src = src_b.join("nested");
+    std::fs::write(&blocked_src, "I am inside a dir").unwrap();
 
-    let mut secrets = Secrets::new(opts);
-    secrets.extend_values(initial_values);
+    let opts = SecretsOpts::default().with_mapping(vec![
+        PathMapping::new(blocker_src.clone(), output.join("config")),
+        PathMapping::new(blocked_src.clone(), output.join("config/nested")),
+    ]);
+
+    let secrets = Secrets::new(opts);
 
     let result = secrets.collisions();
 
-    assert!(result.is_err());
-
+    assert!(result.is_err(), "Should detect structure conflict");
     assert!(matches!(
         result.unwrap_err(),
         SecretError::StructureConflict { .. }
@@ -37,7 +38,7 @@ fn collisions_structure_conflict() {
 }
 
 #[test]
-fn collisions_report_rich_exact_collision() {
+fn collisions_on_output_dst() {
     let tmp = tempfile::tempdir().unwrap();
     let src_dir = tmp.path().join("src");
     let out_dir = tmp.path().join("out");
@@ -53,8 +54,7 @@ fn collisions_report_rich_exact_collision() {
         .with_value_dir(out_dir.clone())
         .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())]);
 
-    let mut secrets = Secrets::new(opts);
-    secrets.extend_values(values);
+    let secrets = Secrets::new(opts).with_values(values);
 
     let result = secrets.collisions();
 

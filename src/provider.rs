@@ -7,15 +7,6 @@ use std::io::Write;
 use std::path::Path;
 use tempfile::NamedTempFile;
 
-pub trait SecretsProvider {
-    fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError>;
-    fn inject_from_bytes(&self, bytes: &[u8], dst: &Path) -> Result<(), ProviderError> {
-        let mut src_tmp = NamedTempFile::new()?;
-        src_tmp.write_all(bytes)?;
-        self.inject(src_tmp.path(), dst)
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     /// File/FS/process spawning errors
@@ -39,6 +30,15 @@ pub enum ProviderError {
     Other(String),
 }
 
+pub trait SecretsProvider {
+    fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError>;
+    fn inject_from_bytes(&self, bytes: &[u8], dst: &Path) -> Result<(), ProviderError> {
+        let mut src_tmp = NamedTempFile::new()?;
+        src_tmp.write_all(bytes)?;
+        self.inject(src_tmp.path(), dst)
+    }
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum ProviderKind {
     Op,
@@ -55,12 +55,6 @@ pub struct ProviderSelection {
     pub cfg: ProviderConfig,
 }
 
-#[derive(Args, Debug, Clone, Default)]
-pub struct ProviderConfig {
-    #[command(flatten, next_help_heading = "1Password (op)")]
-    pub op: OpConfig,
-}
-
 impl ProviderSelection {
     /// Build a runtime provider from configuration
     pub fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
@@ -68,6 +62,12 @@ impl ProviderSelection {
             ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone())?)),
         }
     }
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct ProviderConfig {
+    #[command(flatten, next_help_heading = "1Password (op)")]
+    pub op: OpConfig,
 }
 
 // Re-export alias that is more expressive while internally remaining descriptive

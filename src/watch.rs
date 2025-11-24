@@ -2,7 +2,7 @@
 
 use crate::{
     provider::SecretsProvider,
-    secrets::{Secrets, manager::FsEvent},
+    secrets::{FsEvent, Secrets},
 };
 use indexmap::IndexMap;
 use notify::{
@@ -54,9 +54,9 @@ impl<'a> FsWatcher<'a> {
             let _ = tx.send(res);
         })?;
         for mapping in &self.secrets.options().mapping {
-            let watched = &mapping.src;
+            let watched = &mapping.src();
             if !watched.exists() {
-                return Err(WatchError::SourceMissing(watched.clone()));
+                return Err(WatchError::SourceMissing(watched.to_path_buf()));
             }
             let mode = if watched.is_dir() {
                 RecursiveMode::Recursive

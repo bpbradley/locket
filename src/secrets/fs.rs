@@ -1,4 +1,7 @@
-use crate::secrets::{manager::PathMapping, types::SecretFile};
+use crate::secrets::{
+    manager::PathMapping,
+    types::{Injectable, SecretFile},
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tracing::debug;
@@ -23,7 +26,11 @@ impl SecretFs {
     }
 
     fn scan(&mut self) {
-        let roots: Vec<PathBuf> = self.mappings.iter().map(|m| m.src.clone()).collect();
+        let roots: Vec<PathBuf> = self
+            .mappings
+            .iter()
+            .map(|m| m.src().to_path_buf())
+            .collect();
 
         for src in roots {
             for entry in WalkDir::new(&src)
@@ -40,10 +47,10 @@ impl SecretFs {
         let mapping = self
             .mappings
             .iter()
-            .filter(|m| src.starts_with(&m.src))
-            .max_by_key(|m| m.src.as_os_str().len())?;
-        let rel = src.strip_prefix(&mapping.src).ok()?;
-        Some(mapping.dst.join(rel))
+            .filter(|m| src.starts_with(m.src()))
+            .max_by_key(|m| m.src().as_os_str().len())?;
+        let rel = src.strip_prefix(mapping.src()).ok()?;
+        Some(mapping.dst().join(rel))
     }
 
     pub fn upsert(&mut self, src: &Path) -> Option<&SecretFile> {
@@ -101,7 +108,7 @@ impl SecretFs {
         for k in &keys {
             let file = self.files.get(k)?;
             let rel = k.strip_prefix(from).ok()?;
-            if file.dst != from_root.join(rel) {
+            if file.dst() != from_root.join(rel) {
                 // We must fall back to individual file processing.
                 return None;
             }
@@ -116,7 +123,7 @@ impl SecretFs {
         for (old_k, new_k, new_d) in updates {
             if let Some(mut file) = self.files.remove(&old_k) {
                 file = SecretFile::new(&new_k, &new_d);
-                self.files.insert(file.src.clone(), file);
+                self.files.insert(file.src().to_path_buf(), file);
             }
         }
 
@@ -125,12 +132,6 @@ impl SecretFs {
 
     pub fn iter_files(&self) -> impl Iterator<Item = &SecretFile> {
         self.files.values()
-    }
-    pub fn len(&self) -> usize {
-        self.files.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
     }
 }
 
@@ -155,17 +156,17 @@ mod tests {
             .push(PathMapping::new("/templates/secure", "/secrets/specific"));
 
         let general = fs.upsert(&p("/templates/common.yaml")).expect("should map");
-        assert_eq!(general.dst, p("/secrets/general/common.yaml"));
+        assert_eq!(general.dst(), p("/secrets/general/common.yaml"));
 
         let specific = fs
             .upsert(&p("/templates/secure/db.yaml"))
             .expect("should map");
-        assert_eq!(specific.dst, p("/secrets/specific/db.yaml"));
+        assert_eq!(specific.dst(), p("/secrets/specific/db.yaml"));
 
         let specific_nested = fs
             .upsert(&p("/templates/secure/nested/key"))
             .expect("should map");
-        assert_eq!(specific_nested.dst, p("/secrets/specific/nested/key"));
+        assert_eq!(specific_nested.dst(), p("/secrets/specific/nested/key"));
     }
 
     #[test]
@@ -180,13 +181,13 @@ mod tests {
         fs.upsert(&path_dira);
         fs.upsert(&path_diraa);
 
-        assert_eq!(fs.len(), 2);
+        assert_eq!(fs.files.len(), 2);
 
         let removed = fs.remove(&p("/app/DIRA"));
 
         // ASSERT: Only DIRA is removed
         assert_eq!(removed.len(), 1);
-        assert_eq!(removed[0].src, path_dira);
+        assert_eq!(removed[0].src(), path_dira);
 
         // Verify DIRAA is still there
         assert!(fs.files.contains_key(&path_diraa));
@@ -202,7 +203,7 @@ mod tests {
         fs.upsert(&p("/root/sub/nested/c.txt"));
         fs.upsert(&p("/root/z.txt"));
 
-        assert_eq!(fs.len(), 4);
+        assert_eq!(fs.files.len(), 4);
 
         // ACTION: Remove directory "/root/sub"
         let removed = fs.remove(&p("/root/sub"));
@@ -210,12 +211,12 @@ mod tests {
         assert_eq!(removed.len(), 2);
 
         // Verify exact matches
-        let src_paths: Vec<_> = removed.iter().map(|f| f.src.clone()).collect();
+        let src_paths: Vec<_> = removed.iter().map(|f| f.src().to_path_buf()).collect();
         assert!(src_paths.contains(&p("/root/sub/b.txt")));
         assert!(src_paths.contains(&p("/root/sub/nested/c.txt")));
 
         // Verify remaining
-        assert_eq!(fs.len(), 2);
+        assert_eq!(fs.files.len(), 2);
         assert!(fs.files.contains_key(&p("/root/a.txt")));
         assert!(fs.files.contains_key(&p("/root/z.txt")));
     }
@@ -228,12 +229,12 @@ mod tests {
         // Upsert file totally outside
         let res = fs.upsert(&p("/etc/passwd"));
         assert!(res.is_none());
-        assert_eq!(fs.len(), 0);
+        assert_eq!(fs.files.len(), 0);
 
         // Upsert file that matches prefix string but not path component
         let res = fs.upsert(&p("/templates_backup/file"));
         assert!(res.is_none());
-        assert_eq!(fs.len(), 0);
+        assert_eq!(fs.files.len(), 0);
     }
 
     #[test]
@@ -272,7 +273,7 @@ mod tests {
         // New key present
         let p_new = p("/data/new_sub/file.txt");
         let new_entry = fs.files.get(&p_new).expect("new file should exist");
-        assert_eq!(new_entry.dst, p("/output/new_sub/file.txt"));
+        assert_eq!(new_entry.dst(), p("/output/new_sub/file.txt"));
     }
 
     #[test]

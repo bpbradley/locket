@@ -1,5 +1,5 @@
-pub mod fs;
-pub mod manager;
-pub mod types;
-pub use crate::secrets::manager::Secrets;
-pub use crate::secrets::types::{InjectFailurePolicy, SecretError, SecretFile, SecretValue};
+mod fs;
+mod manager;
+mod types;
+pub use crate::secrets::manager::{FsEvent, PathMapping, SecretValues, Secrets, SecretsOpts};
+pub use crate::secrets::types::{InjectFailurePolicy, SecretError};

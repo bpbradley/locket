@@ -1,18 +1,50 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
-use crate::secrets::types::{
-    InjectFailurePolicy, Injectable, SecretError, SecretValue, collect_value_sources_from_env,
-    value_source,
-};
+use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
 use clap::Args;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
+#[derive(Debug, Clone, Args)]
+pub struct SecretsOpts {
+    /// Mapping of source paths (holding secret templates)
+    /// to destination paths (where secrets are materialized and reflected)
+    #[arg(
+        long = "map", 
+        value_parser = parse_mapping,
+        env = "SECRET_MAP", 
+        value_delimiter = ',',
+        default_value = "/templates:/run/secrets",
+        hide_env_values = true
+    )]
+    pub mapping: Vec<PathMapping>,
+    /// Directory where secret values (literals) are materialized
+    #[arg(long = "out", env = "VALUE_OUTPUT_DIR", default_value = "/run/secrets")]
+    pub value_dir: PathBuf,
+    #[arg(
+        long = "inject-policy",
+        env = "INJECT_POLICY",
+        value_enum,
+        default_value_t = InjectFailurePolicy::CopyUnmodified
+    )]
+    /// Policy for handling injection failures
+    pub policy: InjectFailurePolicy,
+}
+
+/// Filesystem events for SecretFs
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub enum FsEvent {
+    Write(PathBuf),
+    Remove(PathBuf),
+    Move { from: PathBuf, to: PathBuf },
+}
+
+/// Mapping of source path to destination path for secret files
 #[derive(Debug, Clone)]
 pub struct PathMapping {
-    pub src: PathBuf,
-    pub dst: PathBuf,
+    src: PathBuf,
+    dst: PathBuf,
 }
 
 impl PathMapping {
@@ -22,46 +54,17 @@ impl PathMapping {
             dst: dst.as_ref().components().collect(),
         }
     }
+    pub fn src(&self) -> &Path {
+        &self.src
+    }
+    pub fn dst(&self) -> &Path {
+        &self.dst
+    }
 }
 
 impl Default for PathMapping {
     fn default() -> Self {
         Self::new("/templates", "/run/secrets")
-    }
-}
-
-/// CLI / config options.
-#[derive(Debug, Clone, Args)]
-pub struct SecretsOpts {
-    #[arg(
-        long = "map", 
-        value_parser = parse_mapping,
-        env = "SECRET_MAP", 
-        value_delimiter = ',',
-        default_value = "/templates:/run/secrets"
-    )]
-    pub mapping: Vec<PathMapping>,
-    #[arg(long = "out", env = "VALUE_OUTPUT_DIR", default_value = "/run/secrets")]
-    pub value_dir: PathBuf,
-    #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
-    pub env_value_prefix: String,
-    #[arg(
-        long = "inject-policy",
-        env = "INJECT_POLICY",
-        value_enum,
-        default_value_t = InjectFailurePolicy::CopyUnmodified
-    )]
-    pub policy: InjectFailurePolicy,
-}
-
-impl Default for SecretsOpts {
-    fn default() -> Self {
-        Self {
-            mapping: vec![PathMapping::default()],
-            value_dir: PathBuf::from("/run/secrets"),
-            env_value_prefix: "secret_".into(),
-            policy: InjectFailurePolicy::CopyUnmodified,
-        }
     }
 }
 
@@ -81,10 +84,6 @@ impl SecretsOpts {
         self.policy = policy;
         self
     }
-    pub fn with_env_value_prefix(mut self, prefix: impl AsRef<str>) -> Self {
-        self.env_value_prefix = prefix.as_ref().to_string();
-        self
-    }
     pub fn validate(&self) -> Result<(), SecretError> {
         let mut sources = Vec::new();
         let mut destinations = Vec::new();
@@ -101,7 +100,7 @@ impl SecretsOpts {
                 return Err(SecretError::SourceMissing(m.src.clone()));
             }
             sources.push(&m.src);
-            destinations.push(&m.dst);
+            destinations.push(m.dst());
         }
         destinations.push(&self.value_dir);
 
@@ -127,34 +126,67 @@ impl SecretsOpts {
     }
 }
 
-/// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
-fn parse_mapping(s: &str) -> Result<PathMapping, String> {
-    let (src, dst) = s
-        .split_once(':')
-        .or_else(|| s.split_once('=')) // Allow '=' if there is no ':' or multiple (Windows)
-        .ok_or_else(|| {
-            format!(
-                "Invalid mapping format '{}'. Expected SRC:DST or SRC=DST",
-                s
-            )
-        })?;
-
-    Ok(PathMapping::new(src, dst))
-}
-
-impl SecretsOpts {
-    pub fn build(&self) -> Result<Secrets, SecretError> {
-        self.validate()?;
-        Ok(Secrets::new(self.clone()))
+impl Default for SecretsOpts {
+    fn default() -> Self {
+        Self {
+            mapping: vec![PathMapping::default()],
+            value_dir: PathBuf::from("/run/secrets"),
+            policy: InjectFailurePolicy::CopyUnmodified,
+        }
     }
 }
 
-/// Filesystem events for SecretFs
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-pub enum FsEvent {
-    Write(PathBuf),
-    Remove(PathBuf),
-    Move { from: PathBuf, to: PathBuf },
+#[derive(Debug, Clone, Args)]
+pub struct SecretValues {
+    /// Environment variables prefixed with this string will be treated as secret values
+    #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
+    pub env_value_prefix: String,
+    /// Additional secret values specified as LABEL=SECRET_TEMPLATE
+    #[arg(
+        long = "secret",
+        env = "SECRET_VALUE",
+        value_name = "label={{template}}",
+        value_delimiter = ';',
+        hide_env_values = true
+    )]
+    pub values: Vec<String>,
+}
+
+impl SecretValues {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn load(&self) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+
+        for (k, v) in std::env::vars() {
+            if let Some(label) = k.strip_prefix(&self.env_value_prefix) {
+                map.insert(label.to_string(), v);
+            }
+        }
+
+        for s in &self.values {
+            match s.split_once('=') {
+                Some((k, v)) => {
+                    map.insert(k.to_string(), v.to_string());
+                }
+                None => {
+                    tracing::warn!("Ignoring malformed secret argument: '{}'", s);
+                }
+            }
+        }
+
+        map
+    }
+}
+
+impl Default for SecretValues {
+    fn default() -> Self {
+        Self {
+            env_value_prefix: "secret_".to_string(),
+            values: Vec::new(),
+        }
+    }
 }
 
 pub struct Secrets {
@@ -166,17 +198,23 @@ pub struct Secrets {
 impl Secrets {
     pub fn new(opts: SecretsOpts) -> Self {
         let fs = SecretFs::new(opts.mapping.clone());
-        let mut secrets = Self {
+        Self {
             opts,
             fs,
             values: HashMap::new(),
-        };
-        let envs =
-            collect_value_sources_from_env(&secrets.opts.value_dir, &secrets.opts.env_value_prefix);
-        for v in envs {
-            secrets.values.insert(v.label.clone(), v);
         }
-        secrets
+    }
+
+    pub fn with_values(mut self, values: HashMap<String, impl AsRef<str>>) -> Self {
+        for (label, template) in values {
+            let v = value_source(&self.opts.value_dir, &label, template);
+            self.values.insert(v.label.clone(), v);
+        }
+        self
+    }
+
+    pub fn iter_values(&self) -> impl Iterator<Item = &SecretValue> {
+        self.values.values()
     }
 
     pub fn options(&self) -> &SecretsOpts {
@@ -189,20 +227,12 @@ impl Secrets {
         self
     }
 
-    pub fn extend_values(&mut self, values: HashMap<String, impl AsRef<str>>) -> &mut Self {
-        for (label, template) in values {
-            let v = value_source(&self.opts.value_dir, &label, template);
-            self.values.insert(v.label.clone(), v);
-        }
-        self
-    }
-
     /// Inject all known secrets (values + files).
     pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
         let policy = self.opts.policy;
 
         // value-backed secrets
-        for v in self.values.values() {
+        for v in self.iter_values() {
             v.inject(policy, provider)?;
         }
 
@@ -220,11 +250,11 @@ impl Secrets {
         let mut entries: Vec<(&Path, String)> = Vec::new();
 
         for file in self.fs.iter_files() {
-            entries.push((&file.dst, format!("File({:?})", file.src)));
+            entries.push((file.dst(), format!("File({:?})", file.src())));
         }
 
-        for val in self.values.values() {
-            entries.push((&val.dst, format!("Value({})", val.label)));
+        for val in self.iter_values() {
+            entries.push((val.dst(), format!("Value({})", val.label)));
         }
 
         // Sort Lexicographically. This groups collisions and parent/child conflicts together.
@@ -272,14 +302,14 @@ impl Secrets {
 
         for file in &removed {
             file.remove()?;
-            debug!(?file.dst, "event: removed secret file");
+            debug!("event: removed secret file: {:?}", file.dst());
         }
 
         // Attempt to bubble delete empty parent dirs up to the event implied ceiling.
         if let Some(ceiling) = self.fs.resolve(src) {
             let mut candidates = std::collections::HashSet::new();
             for file in &removed {
-                if let Some(parent) = file.dst.parent() {
+                if let Some(parent) = file.dst().parent() {
                     candidates.insert(parent.to_path_buf());
                 }
             }
@@ -337,7 +367,11 @@ impl Secrets {
             if let Some(p) = to.parent() {
                 std::fs::create_dir_all(p)?;
             }
-
+            // TODO: I think this is overly conservative and will leave behind
+            // empty dirs in some cases. I think parent and ceil_parent end up
+            // being the same with this logic, so kind of pointless. I probably
+            // need to slightly refactor bubble_delete idea, or I need to bubble
+            // up to SecretFs root.
             match std::fs::rename(&from, &to) {
                 Ok(_) => {
                     debug!(?old, ?new, "moved");
@@ -412,6 +446,41 @@ impl Secrets {
 
 fn normalize(path: impl AsRef<Path>) -> PathBuf {
     path.as_ref().components().collect()
+}
+
+fn sanitize_name(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        let lc = ch.to_ascii_lowercase();
+        if lc.is_ascii_lowercase() || lc.is_ascii_digit() || matches!(lc, '.' | '_' | '-') {
+            out.push(lc);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+/// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
+fn parse_mapping(s: &str) -> Result<PathMapping, String> {
+    let (src, dst) = s
+        .split_once(':')
+        .or_else(|| s.split_once('=')) // Allow '=' if there is no ':' or multiple (Windows)
+        .ok_or_else(|| {
+            format!(
+                "Invalid mapping format '{}'. Expected SRC:DST or SRC=DST",
+                s
+            )
+        })?;
+
+    Ok(PathMapping::new(src, dst))
+}
+
+/// Construct a SecretValue from label + template.
+fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
+    let sanitized = sanitize_name(label);
+    let dst = output_root.join(&sanitized);
+    SecretValue::new(dst, template, sanitized)
 }
 
 #[cfg(test)]
@@ -508,5 +577,18 @@ mod tests {
         let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
 
         assert!(opts.validate().is_ok());
+    }
+
+    #[test]
+    fn sanitize_basic() {
+        assert_eq!(sanitize_name("Db_Password"), "db_password");
+        assert_eq!(sanitize_name("A/B/C"), "a_b_c");
+        assert_eq!(sanitize_name("weird name"), "weird_name");
+    }
+
+    #[test]
+    fn sanitize_unicode_and_symbols() {
+        assert_eq!(sanitize_name("πß?%"), "____");
+        assert_eq!(sanitize_name("..//--__"), "..__--__");
     }
 }
