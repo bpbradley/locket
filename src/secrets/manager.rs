@@ -1,8 +1,6 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
-use crate::secrets::types::{
-    InjectFailurePolicy, Injectable, SecretError, SecretValue
-};
+use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
 use clap::Args;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -29,7 +27,6 @@ pub struct SecretsOpts {
     pub policy: InjectFailurePolicy,
 }
 
-
 /// Filesystem events for SecretFs
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum FsEvent {
@@ -37,7 +34,6 @@ pub enum FsEvent {
     Remove(PathBuf),
     Move { from: PathBuf, to: PathBuf },
 }
-
 
 #[derive(Debug, Clone)]
 pub struct PathMapping {
@@ -463,7 +459,6 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
     Ok(PathMapping::new(src, dst))
 }
 
-
 /// Construct a SecretValue from label + template.
 fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
     let sanitized = sanitize_name(label);
@@ -579,5 +574,4 @@ mod tests {
         assert_eq!(sanitize_name("πß?%"), "____");
         assert_eq!(sanitize_name("..//--__"), "..__--__");
     }
-
 }

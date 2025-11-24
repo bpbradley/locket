@@ -2,7 +2,7 @@
 
 use crate::{
     provider::SecretsProvider,
-    secrets::{Secrets, FsEvent},
+    secrets::{FsEvent, Secrets},
 };
 use indexmap::IndexMap;
 use notify::{

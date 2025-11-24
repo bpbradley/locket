@@ -1,9 +1,6 @@
 use secret_sidecar::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{
-        SecretError, Secrets, SecretsOpts, SecretSources,
-        PathMapping
-    },
+    secrets::{PathMapping, SecretError, SecretSources, Secrets, SecretsOpts},
 };
 use std::env;
 use std::path::Path;

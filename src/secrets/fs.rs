@@ -1,4 +1,7 @@
-use crate::secrets::{manager::PathMapping, types::{SecretFile, Injectable}};
+use crate::secrets::{
+    manager::PathMapping,
+    types::{Injectable, SecretFile},
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tracing::debug;
@@ -23,7 +26,11 @@ impl SecretFs {
     }
 
     fn scan(&mut self) {
-        let roots: Vec<PathBuf> = self.mappings.iter().map(|m| m.src().to_path_buf()).collect();
+        let roots: Vec<PathBuf> = self
+            .mappings
+            .iter()
+            .map(|m| m.src().to_path_buf())
+            .collect();
 
         for src in roots {
             for entry in WalkDir::new(&src)

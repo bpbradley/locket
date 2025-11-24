@@ -218,4 +218,3 @@ impl Injectable for SecretValue {
         Ok(())
     }
 }
-
