@@ -47,3 +47,14 @@ target "aio" {
   ]
   labels = { "org.opencontainers.image.version" = VERSION }
 }
+
+target "debug" {
+  inherits = ["_common"]
+  target   = "debug"
+  tags = [
+    "${REGISTRY}/${IMAGE}:${VERSION}-debug",
+    "${REGISTRY}/${IMAGE}:debug",
+    "${REGISTRY}/${IMAGE}:latest-debug"
+  ]
+  labels = { "org.opencontainers.image.version" = VERSION }
+}

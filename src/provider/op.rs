@@ -6,21 +6,41 @@ use secrecy::{ExposeSecret, SecretString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[derive(Args, Debug, Clone)]
+pub struct OpConfig {
+    /// 1Password (op) token configuration
+    #[command(flatten)]
+    token: OpToken,
+
+    /// Path to 1Password (op) config directory
+    #[arg(long, env = "OP_CONFIG_DIR")]
+    config_dir: Option<PathBuf>
+}
+
+impl Default for OpConfig {
+    fn default() -> Self {
+        Self {
+            token: OpToken::default(),
+            config_dir: None
+        }
+    }
+}
+
 /// 1Password (op) based provider configuration
 #[derive(Args, Debug, Clone, Default)]
 #[group(id = "op_token", multiple = false, required = true)]
-pub struct OpConfig {
+pub struct OpToken {
     /// 1Password (op) service account token
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
-    pub token: Option<SecretString>,
+    token: Option<SecretString>,
 
     /// Path to file containing the service account token
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
-    pub token_file: Option<PathBuf>,
+    token_file: Option<PathBuf>,
 }
 
-impl OpConfig {
-    pub fn resolve_token(&self) -> Result<SecretString, ProviderError> {
+impl OpToken {
+    pub fn resolve(&self) -> Result<SecretString, ProviderError> {
         match (&self.token, &self.token_file) {
             (Some(tok), None) => Ok(tok.clone()),
             (None, Some(path)) => {
@@ -44,19 +64,25 @@ impl OpConfig {
 
 pub struct OpProvider {
     token: SecretString,
+    config: Option<PathBuf>,
 }
 
 impl OpProvider {
     pub fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
         Ok(Self {
-            token: cfg.resolve_token()?,
+            token: cfg.token.resolve()?,
+            config: cfg.config_dir,
         })
     }
 }
 
 impl SecretsProvider for OpProvider {
     fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError> {
-        let output = Command::new("op")
+        let mut cmd = Command::new("op");
+        if let Some(config) = &self.config {
+            cmd.arg("--config").arg(config);
+        }
+        let output = cmd
             .arg("inject")
             .arg("-i")
             .arg(src)
