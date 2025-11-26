@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-#[derive(Debug, Clone, Args)]
+#[derive(Clone, Args)]
 pub struct FileWriter {
     /// File permission mode
     #[clap(long, default_value = "600", value_parser = parse_permissions)]
@@ -12,15 +12,6 @@ pub struct FileWriter {
     /// Directory permission mode
     #[clap(long, default_value = "700", value_parser = parse_permissions)]
     dir_mode: u32,
-}
-
-impl Default for FileWriter {
-    fn default() -> Self {
-        Self {
-            file_mode: 0o600,
-            dir_mode: 0o700,
-        }
-    }
 }
 
 impl FileWriter {
@@ -104,6 +95,24 @@ impl FileWriter {
         let file = File::open(dir)?;
         file.sync_all()?;
         Ok(())
+    }
+}
+
+impl Default for FileWriter {
+    fn default() -> Self {
+        Self {
+            file_mode: 0o600,
+            dir_mode: 0o700,
+        }
+    }
+}
+
+impl std::fmt::Debug for FileWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileWriter")
+            .field("file_mode", &format_args!("0o{:o}", self.file_mode))
+            .field("dir_mode", &format_args!("0o{:o}", self.dir_mode))
+            .finish()
     }
 }
 
