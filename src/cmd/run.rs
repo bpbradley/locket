@@ -1,6 +1,6 @@
 // run.rs
 use super::{RunArgs, RunMode};
-use crate::watch::FsWatcher;
+use crate::{health::StatusFile, watch::FsWatcher};
 use sysexits::ExitCode;
 use tracing::{debug, error};
 
@@ -10,6 +10,11 @@ pub fn run(args: RunArgs) -> ExitCode {
         return ExitCode::CantCreat;
     }
     debug!(?args, "effective config");
+
+    let status: &StatusFile = &args.status_file;
+    status.clear().unwrap_or_else(|e| {
+        error!(error=%e, "failed to clear status file on startup");
+    });
 
     let provider = match args.provider() {
         Ok(p) => p,
@@ -41,7 +46,7 @@ pub fn run(args: RunArgs) -> ExitCode {
     }
 
     debug!("injection complete; creating status file");
-    if let Err(e) = args.status_file.mark_ready() {
+    if let Err(e) = status.mark_ready() {
         error!(error=%e, "failed to write status file");
         return ExitCode::IoErr;
     }

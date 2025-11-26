@@ -8,7 +8,7 @@ pub struct StatusFile {
         env = "STATUS_FILE",
         default_value = "/tmp/.secret-sidecar/ready"
     )]
-    pub path: PathBuf,
+    path: PathBuf,
 }
 
 impl StatusFile {
@@ -23,6 +23,12 @@ impl StatusFile {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&self.path, b"ready")?;
+        Ok(())
+    }
+    pub fn clear(&self) -> anyhow::Result<()> {
+        if self.path.exists() {
+            std::fs::remove_file(&self.path)?;
+        }
         Ok(())
     }
 }
