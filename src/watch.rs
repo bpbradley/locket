@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -29,6 +29,16 @@ pub enum WatchError {
 
     #[error("source path missing: {0}")]
     SourceMissing(PathBuf),
+}
+
+enum WatchEvent {
+    Shutdown,
+    Notify(NotifyResult<Event>),
+}
+
+enum ControlFlow {
+    Continue,
+    Break,
 }
 
 pub struct FsWatcher<'a> {
@@ -49,10 +59,16 @@ impl<'a> FsWatcher<'a> {
     }
 
     pub fn run(&mut self) -> Result<(), WatchError> {
-        let (tx, rx) = mpsc::channel::<NotifyResult<Event>>();
+        let (tx, rx) = mpsc::channel::<WatchEvent>();
+        let tx_fs = tx.clone();
         let mut watcher = recommended_watcher(move |res| {
-            let _ = tx.send(res);
+            let _ = tx_fs.send(WatchEvent::Notify(res));
         })?;
+        let tx_sig = tx.clone();
+        ctrlc::set_handler(move || {
+            let _ = tx_sig.send(WatchEvent::Shutdown);
+        })
+        .expect("Error setting Ctrl-C handler");
         for mapping in &self.secrets.options().mapping {
             let watched = &mapping.src();
             if !watched.exists() {
@@ -69,44 +85,68 @@ impl<'a> FsWatcher<'a> {
         loop {
             debug!("waiting for fs event indefinitely");
             let event = match rx.recv() {
-                Ok(Ok(event)) => event,
-                Ok(Err(e)) => {
-                    warn!(error=?e, "notify internal error");
-                    continue;
-                }
+                Ok(ev) => ev,
                 Err(_) => return Err(WatchError::Disconnected),
             };
 
-            if !self.ingest_event(event) {
+            let watch_ev = match event {
+                WatchEvent::Shutdown => {
+                    debug!("received shutdown signal; exiting watcher");
+                    return Ok(());
+                }
+                WatchEvent::Notify(Ok(ev)) => ev,
+                WatchEvent::Notify(Err(e)) => {
+                    warn!(error=?e, "notify internal error");
+                    continue;
+                }
+            };
+
+            if !self.ingest_event(watch_ev) {
                 continue;
             }
 
-            debug!("Debouncing events for {:?}", self.debounce);
-            let mut deadline = Instant::now() + self.debounce;
-            loop {
-                let now = Instant::now();
-                if now >= deadline {
-                    break;
+            match self.debounce_loop(&rx)? {
+                ControlFlow::Continue => {
+                    self.flush_events();
                 }
-
-                let timeout = deadline - now;
-                match rx.recv_timeout(timeout) {
-                    Ok(Ok(event)) => {
-                        // Only extend the window if the event is relevant
-                        if self.ingest_event(event) {
-                            deadline = Instant::now() + self.debounce;
-                        }
-                    }
-                    Ok(Err(e)) => warn!(error=?e, "notify internal error"),
-                    Err(mpsc::RecvTimeoutError::Timeout) => break, // Time is up
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        warn!("watcher disconnected unexpectedly");
-                        return Err(WatchError::Disconnected);
-                    }
+                ControlFlow::Break => {
+                    info!("exiting watcher loop.");
+                    return Ok(());
                 }
             }
-            self.flush_events();
         }
+    }
+
+    fn debounce_loop(
+        &mut self,
+        rx: &mpsc::Receiver<WatchEvent>,
+    ) -> Result<ControlFlow, WatchError> {
+        debug!("Debouncing events for {:?}", self.debounce);
+        let mut deadline = Instant::now() + self.debounce;
+
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            let timeout = deadline - now;
+
+            match rx.recv_timeout(timeout) {
+                Ok(WatchEvent::Shutdown) => {
+                    info!("shutdown signal received.");
+                    return Ok(ControlFlow::Break);
+                }
+                Ok(WatchEvent::Notify(Ok(event))) => {
+                    if self.ingest_event(event) {
+                        deadline = Instant::now() + self.debounce;
+                    }
+                }
+                Ok(WatchEvent::Notify(Err(e))) => warn!(error=?e, "notify internal error"),
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(WatchError::Disconnected),
+            }
+        }
+        Ok(ControlFlow::Continue)
     }
 
     fn ingest_event(&mut self, event: Event) -> bool {

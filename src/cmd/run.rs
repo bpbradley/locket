@@ -48,9 +48,18 @@ pub fn run(args: RunArgs) -> ExitCode {
 
     match args.mode {
         RunMode::OneShot => ExitCode::Ok,
-        RunMode::Park => loop {
-            std::thread::park();
-        },
+        RunMode::Park => {
+            tracing::info!("parking... (ctrl-c to exit)");
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = ctrlc::set_handler(move || {
+                let _ = tx.send(());
+            });
+
+            let _ = rx.recv();
+
+            tracing::info!("shutdown signal received. exiting.");
+            ExitCode::Ok
+        }
         RunMode::Watch => {
             let mut watcher = FsWatcher::new(&mut secrets, provider.as_ref());
             match watcher.run() {
