@@ -20,6 +20,7 @@ walkdir = "2"
 secrecy = "0.10.3"
 sysexits = "0.10"
 indexmap = "2"
+ctrlc = "3"
 
 [dev-dependencies]
 assert_fs = "1"
