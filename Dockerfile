@@ -14,6 +14,9 @@ FROM alpine:3.22 AS rootfs
 RUN addgroup -g 65532 nonroot \
  && adduser -D -H -u 65532 -G nonroot nonroot
 
+RUN grep -E '^(root|nonroot)' /etc/passwd > /etc/passwd.min \
+ && grep -E '^(root|nonroot)' /etc/group > /etc/group.min
+
 RUN install -d -m 1777 /tmp \
  && install -d -m 0755 /etc/ssl/certs \
  && install -d -m 0755 /usr/local/bin \
@@ -24,11 +27,6 @@ RUN install -d -m 1777 /tmp \
  && apk add --no-cache ca-certificates
 
 RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
-
-RUN printf 'nonroot:x:65532:65532:nonroot user:/home/nonroot:/sbin/nologin\n' > /etc/passwd \
- && printf 'nonroot:x:65532:\n' > /etc/group
-
-RUN install -d -m 1777 /tmp && stat -c '%U:%G %a %n' /tmp
 
 FROM scratch AS base
 LABEL org.opencontainers.image.title="secret-sidecar (base)"
@@ -45,13 +43,15 @@ COPY --from=rootfs --chown=nonroot:nonroot /home/nonroot /home/nonroot
 COPY --from=rootfs --chown=nonroot:nonroot /templates /templates
 COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
 COPY --from=rootfs --chmod=1777 /tmp /tmp
-COPY --from=build /src/target/x86_64-unknown-linux-musl/release/secret-sidecar /secret-sidecar
+COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
+COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
+COPY --from=build /src/target/x86_64-unknown-linux-musl/release/secret-sidecar /usr/local/bin/secret-sidecar
 
 USER nonroot:nonroot
 VOLUME ["/tmp", "/run/secrets", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
-  CMD ["/secret-sidecar","healthcheck"]
-ENTRYPOINT ["/secret-sidecar","run"]
+  CMD ["secret-sidecar","healthcheck"]
+ENTRYPOINT ["secret-sidecar","run"]
 
 FROM alpine:3.22 AS opstage
 ARG OP_VERSION=2.32.0
