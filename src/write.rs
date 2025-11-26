@@ -1,11 +1,16 @@
+use clap::Args;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Args)]
 pub struct FileWriter {
+    /// File permission mode
+    #[clap(long, default_value = "600", value_parser = parse_permissions)]
     file_mode: u32,
+    /// Directory permission mode
+    #[clap(long, default_value = "700", value_parser = parse_permissions)]
     dir_mode: u32,
 }
 
@@ -102,9 +107,49 @@ impl FileWriter {
     }
 }
 
+fn parse_permissions(perms: &str) -> Result<u32, String> {
+    let norm = perms.strip_prefix("0o").unwrap_or(perms);
+
+    let mode = u32::from_str_radix(norm, 8)
+        .map_err(|e| format!("Invalid octal permission format '{}': {}", perms, e))?;
+
+    if mode > 0o7777 {
+        return Err(format!("Permission mode '{:o}' is too large", mode));
+    }
+
+    Ok(mode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[derive(Debug, Parser)]
+    struct TestParser {
+        #[arg(long, value_parser = parse_permissions)]
+        mode: u32,
+    }
+
+    #[test]
+    fn test_permission_parsing() {
+        let opts = TestParser::try_parse_from(["test", "--mode", "600"]).unwrap();
+        assert_eq!(opts.mode, 0o600); // 0o600 octal
+        assert_ne!(opts.mode, 600); // NOT 600 decimal
+
+        let opts = TestParser::try_parse_from(["test", "--mode", "0755"]).unwrap();
+        assert_eq!(opts.mode, 0o755);
+
+        let opts = TestParser::try_parse_from(["test", "--mode", "0o644"]).unwrap();
+        assert_eq!(opts.mode, 0o644);
+    }
+
+    #[test]
+    fn test_permission_parsing_errors() {
+        assert!(TestParser::try_parse_from(["test", "--mode", "999"]).is_err());
+        assert!(TestParser::try_parse_from(["test", "--mode", "abc"]).is_err());
+        assert!(TestParser::try_parse_from(["test", "--mode", "0o70000"]).is_err());
+    }
 
     #[test]
     fn test_permissions_are_applied() {

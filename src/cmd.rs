@@ -3,6 +3,7 @@ use crate::{
     logging::Logger,
     provider::{Provider, SecretsProvider},
     secrets::{SecretValues, Secrets, SecretsOpts},
+    write::FileWriter,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -52,6 +53,10 @@ pub struct RunArgs {
     #[command(flatten)]
     pub values: SecretValues,
 
+    /// File writing permissions
+    #[command(flatten)]
+    pub writer: FileWriter,
+
     /// Logging configuration
     #[command(flatten)]
     pub logger: Logger,
@@ -67,7 +72,9 @@ impl RunArgs {
     }
     pub fn secrets(&self) -> anyhow::Result<Secrets> {
         self.secrets.validate()?;
-        Ok(Secrets::new(self.secrets.clone()).with_values(self.values.load()))
+        Ok(Secrets::new(self.secrets.clone())
+            .with_values(self.values.load())
+            .with_writer(self.writer.clone()))
     }
 }
 

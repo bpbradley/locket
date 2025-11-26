@@ -10,7 +10,7 @@ cmd = "cargo run -- run --mode one-shot"
 
 [help]
 description = "cargo run -- --help"
-cmd = "cargo run -- --help"
+cmd = "cargo run -- run --help"
 
 [health]
 description = "cargo run -- healthcheck"
