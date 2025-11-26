@@ -6,7 +6,7 @@ use secrecy::{ExposeSecret, SecretString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-#[derive(Args, Debug, Clone)]
+#[derive(Args, Debug, Clone, Default)]
 pub struct OpConfig {
     /// 1Password (op) token configuration
     #[command(flatten)]
@@ -14,16 +14,7 @@ pub struct OpConfig {
 
     /// Path to 1Password (op) config directory
     #[arg(long, env = "OP_CONFIG_DIR")]
-    config_dir: Option<PathBuf>
-}
-
-impl Default for OpConfig {
-    fn default() -> Self {
-        Self {
-            token: OpToken::default(),
-            config_dir: None
-        }
-    }
+    config_dir: Option<PathBuf>,
 }
 
 /// 1Password (op) based provider configuration
@@ -93,6 +84,10 @@ impl SecretsProvider for OpProvider {
             .env("OP_SERVICE_ACCOUNT_TOKEN", self.token.expose_secret())
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", std::env::var("HOME").unwrap_or_default())
+            .env(
+                "XDG_CONFIG_HOME",
+                std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
+            )
             .stderr(Stdio::piped())
             .stdout(Stdio::null())
             .output()?;

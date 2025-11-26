@@ -20,7 +20,7 @@ RUN install -d -m 1777 /tmp \
  && install -d -m 0755 /home/nonroot && chown nonroot:nonroot /home/nonroot \
  && install -d -m 0755 /templates && chown nonroot:nonroot /templates \
  && install -d -m 0755 /run/secrets && chown nonroot:nonroot /run/secrets \
- && install -d -m 0700 /op/config && chown nonroot:nonroot /op/config \
+ && install -d -m 0700 /config/op && chown nonroot:nonroot /config/op \
  && apk add --no-cache ca-certificates
 
 RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
@@ -34,7 +34,9 @@ FROM scratch AS base
 LABEL org.opencontainers.image.title="secret-sidecar (base)"
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
-    TMPDIR=/tmp
+    TMPDIR=/tmp \
+    XDG_CONFIG_HOME=/config \
+    HOME=/home/nonroot
 
 COPY --from=rootfs /ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=rootfs /etc/passwd /etc/passwd
@@ -46,7 +48,7 @@ COPY --from=rootfs --chmod=1777 /tmp /tmp
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/secret-sidecar /secret-sidecar
 
 USER nonroot:nonroot
-VOLUME ["/tmp", "/run/secrets", "/templates", "/op/config"]
+VOLUME ["/tmp", "/run/secrets", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
   CMD ["/secret-sidecar","healthcheck"]
 ENTRYPOINT ["/secret-sidecar","run"]
@@ -64,9 +66,8 @@ RUN set -eux; \
 FROM base AS op
 LABEL org.opencontainers.image.title="secret-sidecar (op)"
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
-COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /op/config /op/config
-ENV SECRETS_PROVIDER=op \
-    OP_CONFIG_DIR=/op/config
+COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
+ENV SECRETS_PROVIDER=op
 
 # Redundant right now as `op` is the only provider.
 # But eventually the idea is that we would copy extra tools neeeded
@@ -74,7 +75,7 @@ ENV SECRETS_PROVIDER=op \
 # any provider.
 FROM base AS aio
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
-COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /op/config /op/config
+COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 
 # Debug image with full distro, extra tools, and shell access
 FROM alpine:3.22 AS debug
@@ -85,17 +86,16 @@ RUN apk add --no-cache bash curl vim tree strace jq coreutils
 ENV PATH="/usr/local/bin:${PATH}" \
     HOME=/root \
     TMPDIR=/tmp \
-    SECRETS_PROVIDER=op \
-    OP_CONFIG_DIR=/op/config
+    XDG_CONFIG_HOME=/config
 
-RUN mkdir -p /run/secrets /templates /home/nonroot \
- && chmod 777 /run/secrets /templates /home/nonroot
+RUN mkdir -p /run/secrets /templates /config/op \
+ && chmod 740 /run/secrets /templates /config/op
 
 RUN addgroup -g 65532 nonroot \
  && adduser -D -H -u 65532 -G nonroot nonroot
 
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
-COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /op/config /op/config
+COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/secret-sidecar /usr/local/bin/secret-sidecar
-VOLUME ["/tmp", "/run/secrets", "/templates", "/op/config"]
+VOLUME ["/tmp", "/run/secrets", "/templates"]
 ENTRYPOINT ["/bin/bash"]

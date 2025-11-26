@@ -7,6 +7,10 @@ group "release" {
   targets = ["base", "op", "aio"]
 }
 
+group "all" {
+  targets = ["base", "op", "aio", "debug"]
+}
+
 target "_common" {
   context   = "."
   platforms = [PLATFORMS]

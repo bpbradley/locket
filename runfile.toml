@@ -34,15 +34,11 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 
 [docker-build]
 description = "docker build dev image"
-cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake -f docker-bake.hcl release --load"
-
-[docker-build-dbg]
-description = "docker build dbg image"
-cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake -f docker-bake.hcl debug --load"
+cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake -f docker-bake.hcl all --load"
 
 [docker-test-dbg]
 description = "Run test of docker image"
-cmd = "docker compose -f compose.sample.yaml -p run secret-sidecar --rm"
+cmd = "docker compose -f compose.debug.yaml run --rm secret-sidecar"
 
 [docker-test]
 description = "Run test of docker image"
