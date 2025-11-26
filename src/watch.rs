@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::{debug, warn, info};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -106,7 +106,9 @@ impl<'a> FsWatcher<'a> {
             }
 
             match self.debounce_loop(&rx)? {
-                ControlFlow::Continue => {self.flush_events();}
+                ControlFlow::Continue => {
+                    self.flush_events();
+                }
                 ControlFlow::Break => {
                     info!("exiting watcher loop.");
                     return Ok(());
@@ -115,10 +117,13 @@ impl<'a> FsWatcher<'a> {
         }
     }
 
-    fn debounce_loop(&mut self, rx: &mpsc::Receiver<WatchEvent>) -> Result<ControlFlow, WatchError> {
+    fn debounce_loop(
+        &mut self,
+        rx: &mpsc::Receiver<WatchEvent>,
+    ) -> Result<ControlFlow, WatchError> {
         debug!("Debouncing events for {:?}", self.debounce);
         let mut deadline = Instant::now() + self.debounce;
-        
+
         loop {
             let now = Instant::now();
             if now >= deadline {
