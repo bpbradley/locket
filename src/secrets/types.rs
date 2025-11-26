@@ -1,5 +1,5 @@
 use crate::provider::{ProviderError, SecretsProvider};
-use crate::write;
+use crate::write::FileWriter;
 use clap::ValueEnum;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -72,7 +72,7 @@ pub trait Injectable {
     /// Destination path on disk.
     fn dst(&self) -> &Path;
     /// copy implementation for fallback on injection error
-    fn copy(&self) -> Result<(), SecretError>;
+    fn copy(&self, writer: &FileWriter) -> Result<(), SecretError>;
     /// secret injection with provider
     fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError>;
     /// Generic secret injection with failure policy
@@ -80,6 +80,7 @@ pub trait Injectable {
         &self,
         policy: InjectFailurePolicy,
         provider: &dyn SecretsProvider,
+        writer: &FileWriter,
     ) -> Result<(), SecretError> {
         info!(src=?self.label(), dst=?self.dst(), "injecting secret");
 
@@ -97,7 +98,7 @@ pub trait Injectable {
 
         match self.injector(provider, tmp_out.as_ref()) {
             Ok(()) => {
-                write::atomic_move(tmp_out.as_ref(), self.dst())?;
+                writer.atomic_move(tmp_out.as_ref(), self.dst())?;
                 Ok(())
             }
             Err(e) => match policy {
@@ -109,7 +110,7 @@ pub trait Injectable {
                         error=?e,
                         "injection failed; falling back to raw copy for secret"
                     );
-                    self.copy()?;
+                    self.copy(writer)?;
                     Ok(())
                 }
                 InjectFailurePolicy::Ignore => {
@@ -174,8 +175,8 @@ impl Injectable for SecretFile {
     fn dst(&self) -> &Path {
         &self.dst
     }
-    fn copy(&self) -> Result<(), SecretError> {
-        write::atomic_copy(&self.src, &self.dst)?;
+    fn copy(&self, writer: &FileWriter) -> Result<(), SecretError> {
+        writer.atomic_copy(&self.src, &self.dst)?;
         Ok(())
     }
     fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError> {
@@ -209,8 +210,8 @@ impl Injectable for SecretValue {
     fn dst(&self) -> &Path {
         &self.dst
     }
-    fn copy(&self) -> Result<(), SecretError> {
-        write::atomic_write(&self.dst, self.template.as_bytes())?;
+    fn copy(&self, writer: &FileWriter) -> Result<(), SecretError> {
+        writer.atomic_write(&self.dst, self.template.as_bytes())?;
         Ok(())
     }
     fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError> {

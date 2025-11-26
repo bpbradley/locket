@@ -1,62 +1,193 @@
-//! Atomic file write utilities
+use clap::Args;
 use std::fs::{self, File};
 use std::io::{self, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let parent = path.parent().ok_or_else(|| io::Error::other("no parent"))?;
-    let tmp = tempfile::Builder::new()
-        .prefix(".tmp.")
-        .tempfile_in(parent)?;
-    let mut f = tmp.reopen()?;
-    f.write_all(bytes)?;
-    f.sync_all()?;
-    let tmp_path = tmp.into_temp_path();
-    // Rename is atomic on the same filesystem
-    std::fs::rename(&tmp_path, path)?;
-    // fsync the parent dir for durability where supported
-    if let Ok(dir) = File::open(parent) {
-        let _ = dir.sync_all();
-    }
-    Ok(())
+#[derive(Clone, Args)]
+pub struct FileWriter {
+    /// File permission mode
+    #[clap(long, default_value = "600", value_parser = parse_permissions)]
+    file_mode: u32,
+    /// Directory permission mode
+    #[clap(long, default_value = "700", value_parser = parse_permissions)]
+    dir_mode: u32,
 }
 
-pub fn atomic_move(from: &Path, to: &Path) -> io::Result<()> {
-    if let Some(parent) = to.parent() {
-        fs::create_dir_all(parent)?;
-        fs::rename(from, to)?;
-        if let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
+impl FileWriter {
+    pub fn new(file_mode: u32, dir_mode: u32) -> Self {
+        Self {
+            file_mode,
+            dir_mode,
         }
+    }
+
+    /// Creates a temp file with specific permissions, writes data,
+    /// then atomically swaps it into place.
+    pub fn atomic_write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        let parent = self.prepare(path)?;
+
+        let mut tmp = tempfile::Builder::new()
+            .prefix(".tmp.")
+            .permissions(fs::Permissions::from_mode(self.file_mode))
+            .tempfile_in(parent)?;
+
+        tmp.write_all(bytes)?;
+        tmp.as_file().sync_all()?;
+
+        // Atomic Swap
+        // If it fails, the temp file is automatically cleaned up by the destructor.
+        tmp.persist(path).map_err(|e| e.error)?;
+
+        self.sync_dir(parent)?;
+
         Ok(())
-    } else {
-        Err(io::Error::other("destination has no parent"))
+    }
+
+    /// Streams data from source to destination using a temp file.
+    pub fn atomic_copy(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let parent = self.prepare(to)?;
+        let mut source = File::open(from)?;
+
+        let mut tmp = tempfile::Builder::new()
+            .prefix(".tmp.")
+            .permissions(fs::Permissions::from_mode(self.file_mode))
+            .tempfile_in(parent)?;
+
+        io::copy(&mut source, &mut tmp)?;
+        tmp.as_file().sync_all()?;
+
+        tmp.persist(to).map_err(|e| e.error)?;
+        self.sync_dir(parent)?;
+
+        Ok(())
+    }
+
+    /// Renames a file within the filesystem.
+    /// Note: This cannot change file permissions easily without a race condition,
+    /// so we assume the source file already has the desired permissions
+    /// or we rely on the directory permissions to restrict access.
+    pub fn atomic_move(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let parent = self.prepare(to)?;
+
+        fs::rename(from, to)?;
+
+        self.sync_dir(parent)?;
+        Ok(())
+    }
+
+    /// Ensures parent directory exists and applies configured directory permissions.
+    fn prepare<'a>(&self, path: &'a Path) -> io::Result<&'a Path> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| io::Error::other("path has no parent"))?;
+
+        if !parent.exists() {
+            fs::create_dir_all(parent)?;
+
+            let perm = fs::Permissions::from_mode(self.dir_mode);
+            fs::set_permissions(parent, perm)?;
+        }
+        Ok(parent)
+    }
+
+    fn sync_dir(&self, dir: &Path) -> io::Result<()> {
+        let file = File::open(dir)?;
+        file.sync_all()?;
+        Ok(())
     }
 }
 
-pub fn atomic_copy(from: &Path, to: &Path) -> io::Result<()> {
-    if let Some(parent) = to.parent() {
-        fs::create_dir_all(parent)?;
-        let bytes = fs::read(from)?;
-        atomic_write(to, &bytes)
-    } else {
-        Err(io::Error::other("destination has no parent"))
+impl Default for FileWriter {
+    fn default() -> Self {
+        Self {
+            file_mode: 0o600,
+            dir_mode: 0o700,
+        }
     }
+}
+
+impl std::fmt::Debug for FileWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileWriter")
+            .field("file_mode", &format_args!("0o{:o}", self.file_mode))
+            .field("dir_mode", &format_args!("0o{:o}", self.dir_mode))
+            .finish()
+    }
+}
+
+fn parse_permissions(perms: &str) -> Result<u32, String> {
+    let norm = perms.strip_prefix("0o").unwrap_or(perms);
+
+    let mode = u32::from_str_radix(norm, 8)
+        .map_err(|e| format!("Invalid octal permission format '{}': {}", perms, e))?;
+
+    if mode > 0o7777 {
+        return Err(format!("Permission mode '{:o}' is too large", mode));
+    }
+
+    Ok(mode)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[derive(Debug, Parser)]
+    struct TestParser {
+        #[arg(long, value_parser = parse_permissions)]
+        mode: u32,
+    }
 
     #[test]
-    fn writes_files() {
-        let tmp = assert_fs::TempDir::new().unwrap();
-        let path = tmp.join("out.txt");
-        atomic_write(&path, b"hello").unwrap();
-        let got = std::fs::read(&path).unwrap();
-        assert_eq!(got, b"hello");
+    fn test_permission_parsing() {
+        let opts = TestParser::try_parse_from(["test", "--mode", "600"]).unwrap();
+        assert_eq!(opts.mode, 0o600); // 0o600 octal
+        assert_ne!(opts.mode, 600); // NOT 600 decimal
+
+        let opts = TestParser::try_parse_from(["test", "--mode", "0755"]).unwrap();
+        assert_eq!(opts.mode, 0o755);
+
+        let opts = TestParser::try_parse_from(["test", "--mode", "0o644"]).unwrap();
+        assert_eq!(opts.mode, 0o644);
+    }
+
+    #[test]
+    fn test_permission_parsing_errors() {
+        assert!(TestParser::try_parse_from(["test", "--mode", "999"]).is_err());
+        assert!(TestParser::try_parse_from(["test", "--mode", "abc"]).is_err());
+        assert!(TestParser::try_parse_from(["test", "--mode", "0o70000"]).is_err());
+    }
+
+    #[test]
+    fn test_permissions_are_applied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let output = tmp.path().join("secure_file");
+
+        let writer = FileWriter::new(0o600, 0o700);
+
+        writer.atomic_write(&output, b"data").unwrap();
+
+        let meta = fs::metadata(&output).unwrap();
+        let mode = meta.permissions().mode();
+
+        // Mask 0o777 to ignore file type bits
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn test_atomic_copy_streaming() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+
+        fs::write(&src, b"content").unwrap();
+
+        let writer = FileWriter::default();
+        writer.atomic_copy(&src, &dst).unwrap();
+
+        let content = fs::read(dst).unwrap();
+        assert_eq!(content, b"content");
     }
 }

@@ -7,6 +7,10 @@ group "release" {
   targets = ["base", "op", "aio"]
 }
 
+group "all" {
+  targets = ["base", "op", "aio", "debug"]
+}
+
 target "_common" {
   context   = "."
   platforms = [PLATFORMS]
@@ -44,6 +48,17 @@ target "aio" {
     "${REGISTRY}/${IMAGE}:${split(".", VERSION)[0]}.${split(".", VERSION)[1]}",
     "${REGISTRY}/${IMAGE}:${split(".", VERSION)[0]}",
     "${REGISTRY}/${IMAGE}:latest",
+  ]
+  labels = { "org.opencontainers.image.version" = VERSION }
+}
+
+target "debug" {
+  inherits = ["_common"]
+  target   = "debug"
+  tags = [
+    "${REGISTRY}/${IMAGE}:${VERSION}-debug",
+    "${REGISTRY}/${IMAGE}:debug",
+    "${REGISTRY}/${IMAGE}:latest-debug"
   ]
   labels = { "org.opencontainers.image.version" = VERSION }
 }

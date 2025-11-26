@@ -4,7 +4,7 @@ use crate::secrets::{
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 #[derive(Debug, Default)]
@@ -54,6 +54,13 @@ impl SecretFs {
     }
 
     pub fn upsert(&mut self, src: &Path) -> Option<&SecretFile> {
+        if std::fs::symlink_metadata(src)
+            .map(|m| m.is_symlink())
+            .unwrap_or(false)
+        {
+            warn!("Ignored symlink source: {:?}", src);
+            return None;
+        }
         if self.files.contains_key(src) {
             return self.files.get(src);
         }

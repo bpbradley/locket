@@ -1,5 +1,5 @@
 /target/
 **/*.swp
 **/*.swo
-/.status/
 /secrets/
+compose.debug.yaml

@@ -7,7 +7,7 @@ services:
       - op_token
     environment:
       OP_SERVICE_ACCOUNT_TOKEN_FILE: /run/secrets/op_token
-      secret_TEST_SECRET: "op://Testing/SecretPassword/password"
+      secret_TEST_SECRET: "op://Mordin/SecretPassword/password"
     command: --log-level=debug
     volumes:
       - ./secrets/templates:/templates:ro
@@ -23,7 +23,7 @@ services:
       - secrets-store:/run/secrets
 secrets:
   op_token:
-    file: ~/.op/service_account_token
+    file: /etc/op/token
 volumes:
   secrets-store:
     driver: local

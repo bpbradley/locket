@@ -1,6 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
+use crate::write::FileWriter;
 use clap::Args;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -193,6 +194,7 @@ pub struct Secrets {
     opts: SecretsOpts,
     fs: SecretFs,
     values: HashMap<String, SecretValue>,
+    writer: FileWriter,
 }
 
 impl Secrets {
@@ -202,6 +204,7 @@ impl Secrets {
             opts,
             fs,
             values: HashMap::new(),
+            writer: FileWriter::default(),
         }
     }
 
@@ -210,6 +213,11 @@ impl Secrets {
             let v = value_source(&self.opts.value_dir, &label, template);
             self.values.insert(v.label.clone(), v);
         }
+        self
+    }
+
+    pub fn with_writer(mut self, writer: FileWriter) -> Self {
+        self.writer = writer;
         self
     }
 
@@ -233,12 +241,12 @@ impl Secrets {
 
         // value-backed secrets
         for v in self.iter_values() {
-            v.inject(policy, provider)?;
+            v.inject(policy, provider, &self.writer)?;
         }
 
         // file-backed secrets
         for f in self.fs.iter_files() {
-            f.inject(policy, provider)?;
+            f.inject(policy, provider, &self.writer)?;
         }
 
         Ok(())
@@ -426,7 +434,7 @@ impl Secrets {
         if src.exists()
             && let Some(file) = self.fs.upsert(src)
         {
-            file.inject(self.opts.policy, provider)?;
+            file.inject(self.opts.policy, provider, &self.writer)?;
         }
         Ok(())
     }
