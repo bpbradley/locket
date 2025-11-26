@@ -56,10 +56,11 @@ pub fn run(args: RunArgs) -> ExitCode {
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
             let (tx, rx) = std::sync::mpsc::channel();
-            
+
             ctrlc::set_handler(move || {
                 let _ = tx.send(());
-            }).expect("Error setting Ctrl-C handler");
+            })
+            .expect("Error setting Ctrl-C handler");
 
             let _ = rx.recv();
 
