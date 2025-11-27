@@ -107,7 +107,7 @@ fn write_subcommand_docs(
         let title = heading.as_deref().unwrap_or("Arguments");
 
         writeln!(file, "### {}\n", title)?;
-        writeln!(file, "| Option | Env Variable | Default | Description |")?;
+        writeln!(file, "| Command | Env | Default | Description |")?;
         writeln!(file, "| :--- | :--- | :--- | :--- |")?;
 
         for arg in args {
@@ -119,19 +119,6 @@ fn write_subcommand_docs(
 }
 
 fn write_arg_row(file: &mut File, arg: &Arg) -> io::Result<()> {
-    let name = arg.get_id().as_str().replace("_", " ");
-    let pretty_name = name
-        .chars()
-        .enumerate()
-        .map(|(i, c)| {
-            if i == 0 || name.chars().nth(i - 1) == Some(' ') {
-                c.to_ascii_uppercase()
-            } else {
-                c
-            }
-        })
-        .collect::<String>();
-
     let flag = if let Some(l) = arg.get_long() {
         format!("`--{}`", l)
     } else {
@@ -185,8 +172,8 @@ fn write_arg_row(file: &mut File, arg: &Arg) -> io::Result<()> {
 
     writeln!(
         file,
-        "| {} <br> {} | {} | {} | {} |",
-        pretty_name, flag, env, default, help
+        "| {} | {} | {} | {} |",
+        flag, env, default, help
     )?;
 
     Ok(())

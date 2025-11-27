@@ -6,6 +6,6 @@ Healthcheck
 
 ### Arguments
 
-| Option | Env Variable | Default | Description |
+| Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| Path <br> `--status-file` | `STATUS_FILE` | `/tmp/.locket/ready` | Status file path |
+| `--status-file` | `STATUS_FILE` | `/tmp/.locket/ready` | Status file path |
