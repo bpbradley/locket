@@ -8,7 +8,7 @@ use crate::{
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
-#[command(name = "secret-sidecar")]
+#[command(name = "locket")]
 #[command(version, about = "Materialize secrets from environment or templates", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]

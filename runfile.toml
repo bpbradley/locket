@@ -1,4 +1,4 @@
-# Runnables for secret-sidecar (usable with `runnables-cli`)
+# Runnables for locket (usable with `runnables-cli`)
 
 [build]
 description = "cargo build (release)"
@@ -38,7 +38,7 @@ cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buil
 
 [docker-test-dbg]
 description = "Run test of docker image"
-cmd = "docker compose -f compose.debug.yaml run --rm secret-sidecar"
+cmd = "docker compose -f compose.debug.yaml run --rm locket"
 
 [docker-test]
 description = "Run test of docker image"

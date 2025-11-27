@@ -6,7 +6,7 @@ pub struct StatusFile {
     #[arg(
         long = "status-file",
         env = "STATUS_FILE",
-        default_value = "/tmp/.secret-sidecar/ready"
+        default_value = "/tmp/.locket/ready"
     )]
     path: PathBuf,
 }

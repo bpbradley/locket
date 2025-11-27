@@ -1,4 +1,4 @@
-use secret_sidecar::secrets::{PathMapping, SecretError, Secrets, SecretsOpts};
+use locket::secrets::{PathMapping, SecretError, Secrets, SecretsOpts};
 use std::{collections::HashMap, vec};
 
 #[test]

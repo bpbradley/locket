@@ -1,4 +1,4 @@
-use secret_sidecar::{
+use locket::{
     provider::{ProviderError, SecretsProvider},
     secrets::{PathMapping, SecretError, SecretValues, Secrets, SecretsOpts},
 };
@@ -73,7 +73,7 @@ fn inject_all_error_without_fallback() {
     let opts = SecretsOpts::default()
         .with_value_dir(out.clone())
         .with_mapping(vec![PathMapping::new(tpl.clone(), out.clone())])
-        .with_policy(secret_sidecar::secrets::InjectFailurePolicy::Error);
+        .with_policy(locket::secrets::InjectFailurePolicy::Error);
     let secrets = Secrets::new(opts);
     let provider = MockProvider {
         inject_should_fail: true,

@@ -37,7 +37,7 @@ jobs:
               - 'docker-bake.hcl'
               - 'compose*.yml'
               - 'compose*.yaml'
-  secret-sidecar:
+  locket:
     name: Build, clippy, test
     needs: filter
     if: needs.filter.outputs.rust == 'true'

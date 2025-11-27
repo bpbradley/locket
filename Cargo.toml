@@ -1,5 +1,5 @@
 [package]
-name = "secret-sidecar"
+name = "locket"
 version = "0.9.2"
 edition = "2024"
 license = "AGPL-3.0-or-later"
@@ -26,7 +26,7 @@ ctrlc = "3"
 assert_fs = "1"
 
 [lib]
-name = "secret_sidecar"
+name = "locket"
 path = "src/lib.rs"
 
 [profile.release]

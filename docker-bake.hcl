@@ -1,6 +1,6 @@
 variable "VERSION"   { default = "0.0.0"}
 variable "REGISTRY"  { default = "ghcr.io/bpbradley" }
-variable "IMAGE"     { default = "secret-sidecar" }
+variable "IMAGE"     { default = "locket" }
 variable "PLATFORMS" { default = "linux/amd64" }
 
 group "release" {

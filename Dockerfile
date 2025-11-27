@@ -8,7 +8,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY . .
 
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
- && strip target/x86_64-unknown-linux-musl/release/secret-sidecar
+ && strip target/x86_64-unknown-linux-musl/release/locket
 
 FROM alpine:3.22 AS rootfs
 RUN addgroup -g 65532 nonroot \
@@ -29,7 +29,7 @@ RUN install -d -m 1777 /tmp \
 RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
 
 FROM scratch AS base
-LABEL org.opencontainers.image.title="secret-sidecar (base)"
+LABEL org.opencontainers.image.title="locket (base)"
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
     TMPDIR=/tmp \
@@ -45,13 +45,13 @@ COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
 COPY --from=rootfs --chmod=1777 /tmp /tmp
 COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
-COPY --from=build /src/target/x86_64-unknown-linux-musl/release/secret-sidecar /usr/local/bin/secret-sidecar
+COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 
 USER nonroot:nonroot
 VOLUME ["/tmp", "/run/secrets", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
-  CMD ["secret-sidecar","healthcheck"]
-ENTRYPOINT ["secret-sidecar","run"]
+  CMD ["locket","healthcheck"]
+ENTRYPOINT ["locket","run"]
 
 FROM alpine:3.22 AS opstage
 ARG OP_VERSION=2.32.0
@@ -64,7 +64,7 @@ RUN set -eux; \
     apk add --no-cache 1password-cli=${OP_VERSION}-r0 || apk add --no-cache 1password-cli
 
 FROM base AS op
-LABEL org.opencontainers.image.title="secret-sidecar (op)"
+LABEL org.opencontainers.image.title="locket (op)"
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 ENV SECRETS_PROVIDER=op
@@ -79,7 +79,7 @@ COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 
 # Debug image with full distro, extra tools, and shell access
 FROM alpine:3.22 AS debug
-LABEL org.opencontainers.image.title="secret-sidecar (debug)"
+LABEL org.opencontainers.image.title="locket (debug)"
 
 RUN apk add --no-cache bash curl vim tree strace jq coreutils
 
@@ -96,6 +96,6 @@ RUN addgroup -g 65532 nonroot \
 
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
-COPY --from=build /src/target/x86_64-unknown-linux-musl/release/secret-sidecar /usr/local/bin/secret-sidecar
+COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 VOLUME ["/tmp", "/run/secrets", "/templates"]
 ENTRYPOINT ["/bin/bash"]
