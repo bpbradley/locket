@@ -21,11 +21,11 @@ pub struct OpConfig {
 #[derive(Args, Debug, Clone, Default)]
 #[group(id = "op_token", multiple = false, required = true)]
 pub struct OpToken {
-    /// 1Password (op) service account token
+    /// 1Password service account token
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
     token: Option<SecretString>,
 
-    /// Path to file containing the service account token
+    /// Path to file containing 1Password service account token
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
     token_file: Option<PathBuf>,
 }

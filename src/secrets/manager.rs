@@ -143,8 +143,10 @@ impl Default for SecretsOpts {
 pub struct SecretValues {
     /// Environment variables prefixed with this string will be treated as secret values
     #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
-    pub env_value_prefix: String,
+    pub env_prefix: String,
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
+    /// Multiple values can be provided, separated by semicolons.
+    /// Or supplied multiple times as arguments.
     #[arg(
         long = "secret",
         env = "SECRET_VALUE",
@@ -163,7 +165,7 @@ impl SecretValues {
         let mut map = HashMap::new();
 
         for (k, v) in std::env::vars() {
-            if let Some(label) = k.strip_prefix(&self.env_value_prefix) {
+            if let Some(label) = k.strip_prefix(&self.env_prefix) {
                 map.insert(label.to_string(), v);
             }
         }
@@ -186,7 +188,7 @@ impl SecretValues {
 impl Default for SecretValues {
     fn default() -> Self {
         Self {
-            env_value_prefix: "secret_".to_string(),
+            env_prefix: "secret_".to_string(),
             values: Vec::new(),
         }
     }

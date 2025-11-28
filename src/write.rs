@@ -7,10 +7,10 @@ use std::path::Path;
 #[derive(Clone, Args)]
 pub struct FileWriter {
     /// File permission mode
-    #[clap(long, default_value = "600", value_parser = parse_permissions)]
+    #[clap(long, env = "LOCKET_FILE_MODE", default_value = "600", value_parser = parse_permissions)]
     file_mode: u32,
     /// Directory permission mode
-    #[clap(long, default_value = "700", value_parser = parse_permissions)]
+    #[clap(long, env = "LOCKET_DIR_MODE", default_value = "700", value_parser = parse_permissions)]
     dir_mode: u32,
 }
 

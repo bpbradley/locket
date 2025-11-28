@@ -40,7 +40,7 @@ pub enum RunMode {
 #[derive(Args, Debug)]
 pub struct RunArgs {
     /// Mode of operation
-    #[arg(long = "mode", env = "RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
+    #[arg(long = "mode", env = "LOCKET_RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
     pub mode: RunMode,
 
     /// Status file path used for healthchecks

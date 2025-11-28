@@ -8,4 +8,4 @@ Checks the health of the sidecar agent, determined by the state of materialized 
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--status-file` | `STATUS_FILE` | `/tmp/.locket/ready` | Status file path used for healthchecks |
+| `--status-file` | `LOCKET_STATUS_FILE` | `/tmp/.locket/ready` | Status file path used for healthchecks |

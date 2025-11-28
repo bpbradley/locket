@@ -58,9 +58,12 @@ pub enum SecretError {
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum InjectFailurePolicy {
+    /// Injection failures are treated as errors and will abort the process
     Error,
+    /// On injection failure, copy the unmodified secret to destination
     #[default]
     CopyUnmodified,
+    /// On injection failure, just log a warning and proceed with the secret ignored
     Ignore,
 }
 
