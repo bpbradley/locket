@@ -58,4 +58,4 @@ cmd = "cargo release major --execute"
 
 [docs]
 description = "Generate clap derived docs"
-cmd = "cargo run --example docs"
+cmd = "cargo xtask docs"
