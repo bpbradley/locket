@@ -82,7 +82,7 @@ impl FileWriter {
             .prefix(".tmp.")
             .permissions(fs::Permissions::from_mode(self.file_mode))
             .tempfile_in(parent)?;
-            
+
         Ok(temp)
     }
 

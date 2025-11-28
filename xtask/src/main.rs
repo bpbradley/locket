@@ -1,4 +1,4 @@
-use clap::{Arg, Args, Subcommand, Command, CommandFactory, Parser};
+use clap::{Arg, Args, Command, CommandFactory, Parser, Subcommand};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
 use std::fs::{self, File};
@@ -99,17 +99,15 @@ fn write_subcommand_docs(
 ) -> io::Result<()> {
     let cmd_name = cmd.get_name();
 
-    writeln!(file, "[Return](./{})\n", config.file.display())?;
+    writeln!(file, "[Return to Index](./{})\n", config.file.display())?;
 
     writeln!(file, "# {} {}\n", app_name, cmd_name)?;
-
-    if let Some(about) = cmd.get_about() {
-        writeln!(file, "{}\n", about)?;
-    }
-
-    if let Some(long) = cmd.get_long_about() {
-        writeln!(file, "{}\n", long)?;
-    }
+    writeln!(file, "> [!TIP]")?;
+    writeln!(
+        file,
+        "> All configuration options can be set via command line arguments OR \
+        environment variables. CLI arguments take precedence.\n"
+    )?;
 
     let mut groups: IndexMap<Option<String>, Vec<&Arg>> = IndexMap::new();
     for arg in cmd.get_arguments() {
@@ -127,7 +125,7 @@ fn write_subcommand_docs(
 
     // Render Tables
     for (heading, args) in groups {
-        let title = heading.as_deref().unwrap_or("Arguments");
+        let title = heading.as_deref().unwrap_or("General");
 
         writeln!(file, "### {}\n", title)?;
         writeln!(file, "| Command | Env | Default | Description |")?;
@@ -193,11 +191,7 @@ fn write_arg_row(file: &mut File, arg: &Arg) -> io::Result<()> {
         }
     }
 
-    writeln!(
-        file,
-        "| {} | {} | {} | {} |",
-        flag, env, default, help
-    )?;
+    writeln!(file, "| {} | {} | {} | {} |", flag, env, default, help)?;
 
     Ok(())
 }
