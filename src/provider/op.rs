@@ -8,11 +8,11 @@ use std::process::{Command, Stdio};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConfig {
-    /// 1Password (op) token configuration
+    /// 1Password token configuration
     #[command(flatten)]
     token: OpToken,
 
-    /// Optional: Path to 1Password (op) config directory
+    /// Optional: Path to 1Password config directory
     /// Defaults to standard op config locations if not provided,
     /// e.g. $XDG_CONFIG_HOME/op
     #[arg(long, env = "OP_CONFIG_DIR")]
