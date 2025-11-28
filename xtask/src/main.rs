@@ -1,7 +1,7 @@
 use clap::{Arg, Args, Command, CommandFactory, Parser, Subcommand};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -55,55 +55,83 @@ fn generate_docs(config: DocGenerator) -> anyhow::Result<()> {
 
     let docs_dir = &config.dir;
     if !docs_dir.exists() {
+        if config.check {
+             anyhow::bail!("Documentation directory '{}' missing", docs_dir.display());
+        }
         fs::create_dir(docs_dir)?;
     }
 
-    let mut index_file = File::create(docs_dir.join(&config.file))?;
-
-    writeln!(index_file, "# {} {} -- Configuration Reference", app_name, version)?;
-    writeln!(index_file, "## Commands\n")?;
+    let mut index_buffer = Vec::new();
+    writeln!(&mut index_buffer, "# {} {} -- Configuration Reference", app_name, version)?;
+    writeln!(&mut index_buffer, "## Commands\n")?;
 
     for sub in cmd.get_subcommands() {
-        if sub.is_hide_set() {
-            continue;
-        }
-
+        if sub.is_hide_set() { continue; }
         let name = sub.get_name();
         let filename = format!("{}.md", name);
-
-        // Link in the index file
+        
         if let Some(about) = sub.get_about() {
-            writeln!(index_file, "- [`{}`](./{}) — {}", name, filename, about)?;
+            writeln!(&mut index_buffer, "- [`{}`](./{}) - {}", name, filename, about)?;
         } else {
-            writeln!(index_file, "- [`{}`](./{})", name, filename)?;
+            writeln!(&mut index_buffer, "- [`{}`](./{})", name, filename)?;
         }
-
-        // Command files
-        let sub_path = docs_dir.join(&filename);
-        let mut sub_file = File::create(&sub_path)?;
-        write_subcommand_docs(&mut sub_file, &config, sub, &app_name)?;
-
-        println!("Generated {}", sub_path.display());
     }
 
-    println!("Generated {}/{}", docs_dir.display(), config.file.display());
+    write_or_verify(&docs_dir.join(&config.file), &index_buffer, config.check)?;
+
+    for sub in cmd.get_subcommands() {
+        if sub.is_hide_set() { continue; }
+        let name = sub.get_name();
+        let filename = format!("{}.md", name);
+        let sub_path = docs_dir.join(&filename);
+
+        let mut sub_buffer = Vec::new();
+        write_subcommand_docs(&mut sub_buffer, &config, sub, &app_name)?;
+
+        write_or_verify(&sub_path, &sub_buffer, config.check)?;
+    }
+    
+    if config.check {
+        println!("Documentation is up to date.");
+    } else {
+        println!("Documentation generated in {}", docs_dir.display());
+    }
+
+    Ok(())
+}
+
+fn write_or_verify(path: &PathBuf, content: &[u8], check: bool) -> anyhow::Result<()> {
+    let content_str = std::str::from_utf8(content)?;
+
+    if check {
+        if !path.exists() {
+            anyhow::bail!("File missing: {}", path.display());
+        }
+        let current = fs::read_to_string(path)?;
+        if current.replace("\r\n", "\n") != content_str.replace("\r\n", "\n") {
+            anyhow::bail!("Documentation is stale for: {}. Run 'cargo xtask docs' to update.", path.display());
+        }
+    } else {
+        fs::write(path, content)?;
+        println!("Generated {}", path.display());
+    }
     Ok(())
 }
 
 fn write_subcommand_docs(
-    file: &mut File,
+    writer: &mut impl Write,
     config: &DocGenerator,
     cmd: &Command,
     app_name: &str,
 ) -> io::Result<()> {
     let cmd_name = cmd.get_name();
 
-    writeln!(file, "[Return to Index](./{})\n", config.file.display())?;
+    writeln!(writer, "[Return to Index](./{})\n", config.file.display())?;
 
-    writeln!(file, "# `{} {}`\n", app_name, cmd_name)?;
-    writeln!(file, "> [!TIP]")?;
+    writeln!(writer, "# `{} {}`\n", app_name, cmd_name)?;
+    writeln!(writer, "> [!TIP]")?;
     writeln!(
-        file,
+        writer,
         "> All configuration options can be set via command line arguments OR \
         environment variables. CLI arguments take precedence.\n"
     )?;
@@ -118,7 +146,7 @@ fn write_subcommand_docs(
     }
 
     if groups.is_empty() {
-        writeln!(file, "_No configuration options._\n")?;
+        writeln!(writer, "_No configuration options._\n")?;
         return Ok(());
     }
 
@@ -126,19 +154,19 @@ fn write_subcommand_docs(
     for (heading, args) in groups {
         let title = heading.as_deref().unwrap_or("General");
 
-        writeln!(file, "### {}\n", title)?;
-        writeln!(file, "| Command | Env | Default | Description |")?;
-        writeln!(file, "| :--- | :--- | :--- | :--- |")?;
+        writeln!(writer, "### {}\n", title)?;
+        writeln!(writer, "| Command | Env | Default | Description |")?;
+        writeln!(writer, "| :--- | :--- | :--- | :--- |")?;
 
         for arg in args {
-            write_arg_row(file, arg)?;
+            write_arg_row(writer, arg)?;
         }
     }
 
     Ok(())
 }
 
-fn write_arg_row(file: &mut File, arg: &Arg) -> io::Result<()> {
+fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
     let flag = if let Some(l) = arg.get_long() {
         format!("`--{}`", l)
     } else {
@@ -190,7 +218,7 @@ fn write_arg_row(file: &mut File, arg: &Arg) -> io::Result<()> {
         }
     }
 
-    writeln!(file, "| {} | {} | {} | {} |", flag, env, default, help)?;
+    writeln!(writer, "| {} | {} | {} | {} |", flag, env, default, help)?;
 
     Ok(())
 }
