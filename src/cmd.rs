@@ -3,6 +3,7 @@ use crate::{
     logging::Logger,
     provider::{Provider, SecretsProvider},
     secrets::{SecretValues, Secrets, SecretsOpts},
+    watch::WatcherOpts,
     write::FileWriter,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -54,6 +55,10 @@ pub struct RunArgs {
     /// Secret Sources
     #[command(flatten)]
     pub values: SecretValues,
+
+    /// Filesystem watcher options
+    #[command(flatten)]
+    pub watcher: WatcherOpts,
 
     /// File writing permissions
     #[command(flatten)]
