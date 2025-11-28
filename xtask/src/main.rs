@@ -100,7 +100,7 @@ fn write_subcommand_docs(
 
     writeln!(file, "[Return to Index](./{})\n", config.file.display())?;
 
-    writeln!(file, "# {} {}\n", app_name, cmd_name)?;
+    writeln!(file, "# `{} {}`\n", app_name, cmd_name)?;
     writeln!(file, "> [!TIP]")?;
     writeln!(
         file,

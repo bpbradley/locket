@@ -11,8 +11,9 @@ use tracing::{debug, warn};
 pub struct SecretsOpts {
     /// Mapping of source paths (holding secret templates)
     /// to destination paths (where secrets are materialized and reflected)
-    /// in the form SRC:DST or SRC=DST. Multiple mappings can be
+    /// in the form `SRC:DST` or `SRC=DST`. Multiple mappings can be
     /// provided, separated by commas, or supplied multiple times as arguments.
+    /// e.g. `--map /templates:/run/secrets/app --map /other_templates:/run/secrets/other`
     #[arg(
         long = "map", 
         value_parser = parse_mapping,
@@ -147,6 +148,7 @@ pub struct SecretValues {
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
     /// Multiple values can be provided, separated by semicolons.
     /// Or supplied multiple times as arguments.
+    /// e.g. `--secret db_password={{op://vault/credentials/db_password}} --secret api_key={{op://vault/keys/api_key}}`
     #[arg(
         long = "secret",
         env = "SECRET_VALUE",

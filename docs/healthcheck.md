@@ -1,6 +1,6 @@
 [Return to Index](./CONFIGURATION.md)
 
-# locket healthcheck
+# `locket healthcheck`
 
 > [!TIP]
 > All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.

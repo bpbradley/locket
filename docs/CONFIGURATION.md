@@ -1,4 +1,4 @@
-# locket 0.10.0 -- Configuration Refereence
+# locket 0.10.0 -- Configuration Reference
 ## Commands
 
 - [`run`](./run.md) — Start the secret sidecar agent. All secrets will be collected and materialized according to configuration
