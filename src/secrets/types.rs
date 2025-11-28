@@ -3,7 +3,6 @@ use crate::write::FileWriter;
 use clap::ValueEnum;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tempfile;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -84,17 +83,7 @@ pub trait Injectable {
     ) -> Result<(), SecretError> {
         info!(src=?self.label(), dst=?self.dst(), "injecting secret");
 
-        let parent = self
-            .dst()
-            .parent()
-            .ok_or_else(|| SecretError::NoParent(self.dst().to_path_buf()))?;
-
-        fs::create_dir_all(parent)?;
-
-        let tmp_out = tempfile::Builder::new()
-            .prefix(".tmp.")
-            .tempfile_in(parent)?
-            .into_temp_path();
+        let tmp_out = writer.create_temp_for(self.dst())?;
 
         match self.injector(provider, tmp_out.as_ref()) {
             Ok(()) => {

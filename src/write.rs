@@ -76,6 +76,16 @@ impl FileWriter {
         Ok(())
     }
 
+    pub fn create_temp_for(&self, dst: &Path) -> io::Result<tempfile::NamedTempFile> {
+        let parent = self.prepare(dst)?;
+        let temp = tempfile::Builder::new()
+            .prefix(".tmp.")
+            .permissions(fs::Permissions::from_mode(self.file_mode))
+            .tempfile_in(parent)?;
+            
+        Ok(temp)
+    }
+
     /// Ensures parent directory exists and applies configured directory permissions.
     fn prepare<'a>(&self, path: &'a Path) -> io::Result<&'a Path> {
         let parent = path
