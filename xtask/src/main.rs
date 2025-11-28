@@ -56,22 +56,32 @@ fn generate_docs(config: DocGenerator) -> anyhow::Result<()> {
     let docs_dir = &config.dir;
     if !docs_dir.exists() {
         if config.check {
-             anyhow::bail!("Documentation directory '{}' missing", docs_dir.display());
+            anyhow::bail!("Documentation directory '{}' missing", docs_dir.display());
         }
         fs::create_dir(docs_dir)?;
     }
 
     let mut index_buffer = Vec::new();
-    writeln!(&mut index_buffer, "# {} {} -- Configuration Reference", app_name, version)?;
+    writeln!(
+        &mut index_buffer,
+        "# {} {} -- Configuration Reference",
+        app_name, version
+    )?;
     writeln!(&mut index_buffer, "## Commands\n")?;
 
     for sub in cmd.get_subcommands() {
-        if sub.is_hide_set() { continue; }
+        if sub.is_hide_set() {
+            continue;
+        }
         let name = sub.get_name();
         let filename = format!("{}.md", name);
-        
+
         if let Some(about) = sub.get_about() {
-            writeln!(&mut index_buffer, "- [`{}`](./{}) - {}", name, filename, about)?;
+            writeln!(
+                &mut index_buffer,
+                "- [`{}`](./{}) - {}",
+                name, filename, about
+            )?;
         } else {
             writeln!(&mut index_buffer, "- [`{}`](./{})", name, filename)?;
         }
@@ -80,7 +90,9 @@ fn generate_docs(config: DocGenerator) -> anyhow::Result<()> {
     write_or_verify(&docs_dir.join(&config.file), &index_buffer, config.check)?;
 
     for sub in cmd.get_subcommands() {
-        if sub.is_hide_set() { continue; }
+        if sub.is_hide_set() {
+            continue;
+        }
         let name = sub.get_name();
         let filename = format!("{}.md", name);
         let sub_path = docs_dir.join(&filename);
@@ -90,7 +102,7 @@ fn generate_docs(config: DocGenerator) -> anyhow::Result<()> {
 
         write_or_verify(&sub_path, &sub_buffer, config.check)?;
     }
-    
+
     if config.check {
         println!("Documentation is up to date.");
     } else {
@@ -109,7 +121,10 @@ fn write_or_verify(path: &PathBuf, content: &[u8], check: bool) -> anyhow::Resul
         }
         let current = fs::read_to_string(path)?;
         if current.replace("\r\n", "\n") != content_str.replace("\r\n", "\n") {
-            anyhow::bail!("Documentation is stale for: {}. Run 'cargo xtask docs' to update.", path.display());
+            anyhow::bail!(
+                "Documentation is stale for: {}. Run 'cargo xtask docs' to update.",
+                path.display()
+            );
         }
     } else {
         fs::write(path, content)?;
