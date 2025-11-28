@@ -2,15 +2,15 @@
 
 # locket run
 
-Run Secret Sidecar
+Start the secret sidecar agent. All secrets will be collected and materialized according to configuration
 
 ### Arguments
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--mode` | `RUN_MODE` | `watch` | Run mode<br><br> **Options:**<br> - `one-shot`: Run once and exit<br> - `watch`: Watch for changes and re-apply<br> - `park`: Run once and then park to keep the process alive |
-| `--status-file` | `STATUS_FILE` | `/tmp/.locket/ready` | Status file path |
-| `--map` | `SECRET_MAP` | `/templates:/run/secrets` | Mapping of source paths (holding secret templates) to destination paths (where secrets are materialized and reflected) |
+| `--mode` | `RUN_MODE` | `watch` | Mode of operation<br><br> **Options:**<br> - `one-shot`: Collect and materialize all secrets once and then exit<br> - `watch`: Continuously watch for changes on configured templates and update secrets as needed<br> - `park`: Run once and then park to keep the process alive |
+| `--status-file` | `STATUS_FILE` | `/tmp/.locket/ready` | Status file path used for healthchecks |
+| `--map` | `SECRET_MAP` | `/templates:/run/secrets` | Mapping of source paths (holding secret templates) to destination paths (where secrets are materialized and reflected) in the form SRC:DST or SRC=DST. Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments |
 | `--out` | `VALUE_OUTPUT_DIR` | `/run/secrets` | Directory where secret values (literals) are materialized |
 | `--inject-policy` | `INJECT_POLICY` | `copy-unmodified` | Policy for handling injection failures <br><br> **Options:** `error`, `copy-unmodified`, `ignore` |
 | `--env-value-prefix` | `VALUE_PREFIX` | `secret_` | Environment variables prefixed with this string will be treated as secret values |

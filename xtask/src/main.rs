@@ -1,4 +1,4 @@
-use clap::{Arg, Command, CommandFactory, Parser};
+use clap::{Arg, Args, Subcommand, Command, CommandFactory, Parser};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
 use std::fs::{self, File};
@@ -6,11 +6,26 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 #[derive(Parser)]
+struct Xtask {
+    #[command(subcommand)]
+    cmd: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Generate markdown documentation
+    Docs(DocGenerator),
+}
+
+#[derive(Args)]
 pub struct DocGenerator {
+    /// Check if docs are up to date instead of generating
+    #[arg(long, default_value_t = false)]
+    check: bool,
     /// Output directory for generated docs, relative to project root
     #[arg(long, env = "DOCS_DIR", default_value = "docs")]
     dir: PathBuf,
-    ///Output filename for generated docs, relative to project root
+    /// Output filename for generated docs, relative to project root
     #[arg(long, env = "DOCS_FILE", default_value = "CONFIGURATION.md")]
     file: PathBuf,
 }
@@ -18,6 +33,7 @@ pub struct DocGenerator {
 impl Default for DocGenerator {
     fn default() -> Self {
         Self {
+            check: false,
             dir: PathBuf::from("docs"),
             file: PathBuf::from("CONFIGURATION.md"),
         }
@@ -25,7 +41,14 @@ impl Default for DocGenerator {
 }
 
 fn main() -> anyhow::Result<()> {
-    let config = DocGenerator::parse();
+    let args = Xtask::parse();
+
+    match args.cmd {
+        Commands::Docs(config) => generate_docs(config),
+    }
+}
+
+fn generate_docs(config: DocGenerator) -> anyhow::Result<()> {
     let cmd = Cli::command();
     let app_name = cmd.get_name().to_string();
     let version = cmd.get_version().unwrap();

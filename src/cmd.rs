@@ -17,18 +17,20 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Run Secret Sidecar
+    /// Start the secret sidecar agent.
+    /// All secrets will be collected and materialized according to configuration.
     Run(RunArgs),
 
-    /// Healthcheck
+    /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
+    /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.
     Healthcheck(HealthArgs),
 }
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
 pub enum RunMode {
-    /// Run once and exit
+    /// Collect and materialize all secrets once and then exit
     OneShot,
-    /// Watch for changes and re-apply
+    /// Continuously watch for changes on configured templates and update secrets as needed
     #[default]
     Watch,
     /// Run once and then park to keep the process alive
@@ -37,11 +39,11 @@ pub enum RunMode {
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Run mode
+    /// Mode of operation
     #[arg(long = "mode", env = "RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
     pub mode: RunMode,
 
-    /// Status file path
+    /// Status file path used for healthchecks
     #[command(flatten)]
     pub status_file: StatusFile,
 

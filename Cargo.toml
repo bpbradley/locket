@@ -6,6 +6,9 @@ license = "AGPL-3.0-or-later"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
 description = "Helper tool for secret injection from templates and env vars to be used as sidecar for docker compose"
 
+[workspace]
+members = [".", "xtask"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
@@ -24,6 +27,9 @@ ctrlc = "3"
 
 [dev-dependencies]
 assert_fs = "1"
+
+[alias]
+xtask = "run --package xtask --"
 
 [lib]
 name = "locket"

@@ -2,7 +2,7 @@ use clap::Args;
 use std::path::PathBuf;
 #[derive(Args, Debug)]
 pub struct StatusFile {
-    /// Status file path
+    /// Status file path used for healthchecks
     #[arg(
         long = "status-file",
         env = "STATUS_FILE",

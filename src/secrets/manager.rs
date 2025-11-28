@@ -11,6 +11,8 @@ use tracing::{debug, warn};
 pub struct SecretsOpts {
     /// Mapping of source paths (holding secret templates)
     /// to destination paths (where secrets are materialized and reflected)
+    /// in the form SRC:DST or SRC=DST. Multiple mappings can be
+    /// provided, separated by commas, or supplied multiple times as arguments.
     #[arg(
         long = "map", 
         value_parser = parse_mapping,
