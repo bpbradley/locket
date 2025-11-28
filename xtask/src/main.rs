@@ -60,7 +60,7 @@ fn generate_docs(config: DocGenerator) -> anyhow::Result<()> {
 
     let mut index_file = File::create(docs_dir.join(&config.file))?;
 
-    writeln!(index_file, "# {} v{} Configuration Refereence", app_name, version)?;
+    writeln!(index_file, "# {} {} -- Configuration Reference", app_name, version)?;
     writeln!(index_file, "## Commands\n")?;
 
     for sub in cmd.get_subcommands() {
