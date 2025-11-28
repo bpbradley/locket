@@ -28,9 +28,6 @@ ctrlc = "3"
 [dev-dependencies]
 assert_fs = "1"
 
-[alias]
-xtask = "run --package xtask --"
-
 [lib]
 name = "locket"
 path = "src/lib.rs"
@@ -40,3 +37,4 @@ codegen-units = 1
 lto = true
 opt-level = "z"
 strip = true
+

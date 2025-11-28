@@ -83,11 +83,11 @@ pub trait Injectable {
     ) -> Result<(), SecretError> {
         info!(src=?self.label(), dst=?self.dst(), "injecting secret");
 
-        let tmp_out = writer.create_temp_for(self.dst())?;
+        let tmp = writer.create_temp_for(self.dst())?;
 
-        match self.injector(provider, tmp_out.as_ref()) {
+        match self.injector(provider, tmp.as_ref()) {
             Ok(()) => {
-                writer.atomic_move(tmp_out.as_ref(), self.dst())?;
+                tmp.persist(self.dst()).map_err(|e| e.error)?;
                 Ok(())
             }
             Err(e) => match policy {
