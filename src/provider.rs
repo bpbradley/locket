@@ -5,7 +5,6 @@ use crate::provider::op::{OpConfig, OpProvider};
 use clap::{Args, ValueEnum};
 use std::io::Write;
 use std::path::Path;
-use tempfile::NamedTempFile;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -33,9 +32,15 @@ pub enum ProviderError {
 pub trait SecretsProvider {
     fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError>;
     fn inject_from_bytes(&self, bytes: &[u8], dst: &Path) -> Result<(), ProviderError> {
-        let mut src_tmp = NamedTempFile::new()?;
-        src_tmp.write_all(bytes)?;
-        self.inject(src_tmp.path(), dst)
+        let parent = dst
+            .parent()
+            .ok_or_else(|| ProviderError::Other("destination directory doesn't exist".into()))?;
+        let mut tmp = tempfile::Builder::new()
+            .prefix(".src.")
+            .tempfile_in(parent)?;
+        tmp.write_all(bytes)?;
+        tmp.as_file().sync_all()?;
+        self.inject(tmp.path(), dst)
     }
 }
 
