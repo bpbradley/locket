@@ -46,7 +46,7 @@ cmd = "docker compose -f compose.sample.yaml -p demo up"
 
 [release-rc]
 description = "Create a release candidate from the current version"
-cmd = "cargo release rc --execute"
+cmd = "cargo release rc --execute --no-publish"
 
 [release-promote]
 description = "Promote a release candidate to a full release and push"
