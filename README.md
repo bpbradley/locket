@@ -1,6 +1,6 @@
 # Locket
 
-> *A flexible secrets management agent to keep your secrets safe*
+> *A secrets management agent. Keeps your secrets safe, but out of sight.*
 
 1. [Overview](#overview)
 1. [Quick Start](#overview)
@@ -10,44 +10,40 @@
 1. [Supported Providers](#supported-providers)
 1. [Roadmap](#roadmap)
 
-
 ## Overview
-Locket is a small CLI tool, designed to be run as a sidecar process for your applications
-which might carry sensitive data in configuration files. You might want these files off disk completely in tmpfs, or simply somewhere out of revision control.
+Locket is a small CLI tool, packaged as a tiny rootless and distroless Docker image, designed to be run as a sidecar process for applications which might carry sensitive data in configuration files. Locket can help keep sensitive files off disk completely in tmpfs, or just somewhere out of revision control.
 
-The basic premise is that you would move these secrets to a dedicated secret manager, and adjust your config files to carry **secret references** instead of raw secrets, which are
-safe to commit directly to revision control.
+The basic premise is:
 
-Then, you simply configure locket for your secrets provider, and provide your safe, secret-free files as templates. Locket will find all secret references, collect their actual value from your secrets provider, and inject them to your provided output destination.
+1. Move your sensitive data to a dedicated secret manager (only 1password supported today, more to come), 
+1. Adjust your config files to carry *secret references* instead of raw sensitive data, which are safe to commit directly to revision control (i.e `{{ op://vault/keys/privatekey?ssh-format=openssh }}`)
+1. Configure locket to use your secrets provider `--provider=op` or with env: `SECRETS_PROVIDER=op`
+1. Mount your templates containing secret references for locket to read, i.e. `./templates:/template:ro`, and mount an output directory for the secrets to be placed (usually a named tmpfs volume, or some secure location) `secrets-store:/run/secrets/`
+1. Finally, map the template->output for each required mapping. You can map arbitrarily many directories->directories or files->files. `--map /templates:/run/secrets`
 
-By default, locket will also *watch* for changes to your secret reference files, and will
-reflect those changes immediately to the actual output. So if you have an application which
-supports a dynamic config file with hot-reloading, you can manage this with locket directly.
+Your secrets will all be injected according to the provided configuration, and any dependant applications will have materialized secrets available.
+
+> [!TIP] By default, locket will also *watch* for changes to your secret reference files, and will reflect those changes immediately to the configured output. So if you have an application which supports a dynamic config file with hot-reloading, you can manage this with locket directly without downtime. If you dont want files watched, simply use `--mode=park` to inject once and then hang out (to keep the process alive for healthchecks). Or use `--mode=one-shot` to do a single inject and exit.
 
 ## Quick Start
 
-A full configuration reference for all available options is provided in [`docs/run.md`](./docs/run.md)
+We can use locket as a small sidecar service to safely inject secrets to tmpfs before our primary service starts.
 
-We can use locket as a small sidecar service to safely inject secrets to tmpfs
-before our primary service starts.
+A full configuration reference for all available options is provided in [`docs/run.md`](./docs/run.md)
 
 ```yaml
 services:
   locket:
     image: ghcr.io/bpbradley/locket:latest
     user: "65532:65532" # The default user is 65532:65532 (nonroot) when not specified
+    # Configurations can be supplied via command like below, or via env variables.
     command:
         - "--provider=op"
         - "--token-file=/run/secrets/op_token"
         - "--map=/templates:/run/secrets" # Supports multiple maps, if needed.
-        - "--secret=db_pass={{op://vaults/db_pass}}"
-        - "--secret=db_host={{op://vaults/db_host}}"
-    # All configurations support command config, or env, or a mixture
-    # environment:
-    #  SECRETS_PROVIDER: "op"
-    #  OP_SERVICE_ACCOUNT_TOKEN_FILE: "/run/secrets/op_token"
-    #  SECRET_MAP: "/templates:/run/secrets"
-    #  SECRET_VALUES: "db_pass={{op://vaults/db_pass}};db_host={{op://vaults/db_host}}"
+        - "--secret=db_pass={{ op://vault/db/pass }}"
+        - "--secret=db_host={{ op://vault/db/host }}"
+        - "--secret=key={{ op://vault/keys/privatekey?ssh-format=openssh }}"
     secrets:
       - op_token
     volumes:
@@ -57,18 +53,18 @@ services:
       - secrets-store:/run/secrets
   app:
     image: my-app:latest
+    depends_on:
+        locket:
+            condition: healthy # locket is healthy once all secrets are injected
     volumes:
       # Mount the shared volume wherever you want the secrets in the container
       - secrets-store:/run/secrets:ro
-    # We can force the application to wait until locket is healthy, meaning all
-    # secrets were successfully injected.
     environment:
-        # We can directly reference the materialized secrets
+        # We can directly reference the materialized secrets as files
         DB_PASSWORD_FILE: /run/secrets/db_pass
-        DB_HOST_FILE: /run/secrets/db_host
-    depends_on:
-        locket:
-            condition: healthy
+        DB_HOST_FILE: /run/secrets/
+        SECRET_KEY: /run/secrets/key
+
 secrets:
   op_token:
     file: /etc/op/token # Must have read permissions by locket user
@@ -84,15 +80,27 @@ volumes:
 ```
 ## Permissions
 
-Because locket was designed to run distroless and non-root by default, it is important
-to understand some pitfalls with file permissions which might arise.
+The image runs as user `65532` (`nonroot`) by default. This was adopted from the standards
+set in Google's popular rootless/distroless images.
 
-1. The locket image is designed distroless and non-root, running as uid=65532 and gid=65532
-with a user and group `nonroot` by default. This is a standard set by Googles distroless
-images which was adopted here.
-1. Template files, output directories, and auth tokens will need to have permissions for this user to read them. If docker volumes, this will usually "just work". But if not, the uid,gid,
-and mode can be set for tmpfs volumes directly. i.e. `o: "uid=1000,gid=1000,mode=700"` in `driver_opts`.
-1. The container can be run as root, or any arbitrary non-root user besides 65532 using the `user` directive in docker, however some extra steps are needed (at the moment) to support this use case.
+If you must run as a different user (e.g. uid: 1000), you will encounter strict security checks from the 1Password CLI (op). It requires that the current user has a valid entry in /etc/passwd and owns its configuration directory.
+
+To support custom UIDs, you must mount two additional items
+
+```yaml
+services:
+  locket:
+    user: "1000:1000"
+    volumes:
+      # 1. Identity: Provide a user entry for UID 1000
+      # i.e. `op:x:1000:1000::/home/nonroot:/bin/sh`
+      - ./passwd:/etc/passwd:ro
+      # 2. Config: Provide a writable config directory owned by UID 1000
+      - ./op-data:/config
+```
+
+> [!NOTE] 
+> This will be fixed in v1.0.0 when the `op` cli dependency is removed
 
 ## Example: Hot-Reloading Traefik configurations with Secrets
 
@@ -174,25 +182,9 @@ volumes:
 
 ## Providers
 
-Right now, only 1password is supported, but the architecture of locket put significant emphasis on making sure this would be easy to expand later.
+1. 1password.
 
-### Using 1password provider with non-default user
-
-Right now, using 1password with non-default user is possible, but annoying due to some
-restrictions with the `op` cli tool being very aggressive in its security posture surrounding
-its config files. Basically, `op` requires that a config file exists (where it places some details about the credentialed user/device), and it requires that folder be owned by the user process, that it not have permissions broader than 0700, and importantly, that the user is resolvable via /etc/passwd. 
-
-The default `65532:65532` is resolved via /etc/passwd to `nonroot` and so all of this is fine.
-But a different user than this must supply an /etc/password with that uid resolving to some entry (it doesn't matter what). So in this case, you must mount something in like
-
-```
-volumes:
-    /etc/passwd:/etc/passwd:ro
-    op-data:/config
-```
-
-> [!NOTE]
-> This will be fixed by v1.0.0 when the `op` dependency is removed.
+Yes, it is a lonely list. More providers will be supported prior to v1.0.0. The architecture was specifically designed to make sure this would be easy to expand later™
 
 ## Roadmap
 
