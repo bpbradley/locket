@@ -44,28 +44,28 @@ function "tags_main" {
 
 target "base" {
   inherits = ["_common"]
-  target   = "base"
-  tags     = tags_for("base")
-  labels   = { "org.opencontainers.image.version" = VERSION }
+  target = "base"
+  tags = tags_for("base")
+  labels = { "org.opencontainers.image.version" = VERSION }
 }
 
 target "op" {
   inherits = ["_common"]
-  target   = "op"
-  tags     = tags_for("op")
-  labels   = { "org.opencontainers.image.version" = VERSION }
+  target = "op"
+  tags = tags_for("op")
+  labels = { "org.opencontainers.image.version" = VERSION }
 }
 
 target "aio" {
   inherits = ["_common"]
-  target   = "aio"
-  tags     = tags_main()
-  labels   = { "org.opencontainers.image.version" = VERSION }
+  target = "aio"
+  tags = tags_main()
+  labels = { "org.opencontainers.image.version" = VERSION }
 }
 
 target "debug" {
   inherits = ["_common"]
-  target   = "debug"
+  target = "debug"
   tags = [
     "${REGISTRY}/${IMAGE}:${VERSION}-debug",
     "${REGISTRY}/${IMAGE}:debug"
