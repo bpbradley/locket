@@ -44,6 +44,14 @@ cmd = "docker compose -f compose.debug.yaml run --rm locket"
 description = "Run test of docker image"
 cmd = "docker compose -f compose.sample.yaml -p demo up"
 
+[release-rc]
+description = "Create a release candidate from the current version"
+cmd = "cargo release rc --execute"
+
+[release-promote]
+description = "Promote a release candidate to a full release and push"
+cmd = "cargo release release --execute"
+
 [release-patch]
 description = "Bump patch version and execute release"
 cmd = "cargo release patch --execute"
