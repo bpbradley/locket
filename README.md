@@ -191,14 +191,13 @@ Yes, it is a lonely list. More providers will be supported prior to v1.0.0. The 
 
 ### Before v1.0.0
 
-1. Decouple from `op` cli dependancy in secrets provider. This was done as a convience while developing the broader architecture, but it carries some annoying caveats
+1. Decouple from `op` cli dependency in secrets provider. This was done as a convience while developing the broader architecture, but it carries some annoying caveats
 1. Implement support for at least two more providers, as 1password is the only currently supported provider.
 1. Add support for relative paths for more use as a standalone CLI.
 
 ### Beyond
 
-1. Support for configuration via docker labels, so that one locket instance can exist and each
-application / stack can easily add new secrets via docker labels
-1. An `exec` subcommand which is able to wrap arbitrary commands, providing injected secrets as environment variables in the scope of the command. i.e. `locket exec --env .env -- docker compose up`, etc.
-1. Support as a secrets operator for swarm mode
+1. **Docker Labels**: Configure secrets via container labels so that a single locket instance could provide for many apps via service discovery.
+1. **exec Command**: A wrapper mode (`locket exec --env .env -- docker compose up -d`) that injects secrets into the child process environment without writing files.
+1. **Swarm Operator**: Native integration for Docker Swarm secrets.
 
