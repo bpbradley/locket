@@ -3,7 +3,6 @@ use crate::write::FileWriter;
 use clap::ValueEnum;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tempfile;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -24,7 +23,7 @@ pub enum SecretError {
     #[error("source {src:?} is inside destination {dst:?}")]
     Destructive { src: PathBuf, dst: PathBuf },
 
-    #[error("Path is forbidden in source: {0:?}")]
+    #[error("Relative paths are forbidden in source: {0:?}")]
     Forbidden(PathBuf),
 
     #[error(
@@ -59,9 +58,12 @@ pub enum SecretError {
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum InjectFailurePolicy {
+    /// Injection failures are treated as errors and will abort the process
     Error,
+    /// On injection failure, copy the unmodified secret to destination
     #[default]
     CopyUnmodified,
+    /// On injection failure, just log a warning and proceed with the secret ignored
     Ignore,
 }
 
@@ -84,21 +86,11 @@ pub trait Injectable {
     ) -> Result<(), SecretError> {
         info!(src=?self.label(), dst=?self.dst(), "injecting secret");
 
-        let parent = self
-            .dst()
-            .parent()
-            .ok_or_else(|| SecretError::NoParent(self.dst().to_path_buf()))?;
+        let tmp = writer.create_temp_for(self.dst())?;
 
-        fs::create_dir_all(parent)?;
-
-        let tmp_out = tempfile::Builder::new()
-            .prefix(".tmp.")
-            .tempfile_in(parent)?
-            .into_temp_path();
-
-        match self.injector(provider, tmp_out.as_ref()) {
+        match self.injector(provider, tmp.as_ref()) {
             Ok(()) => {
-                writer.atomic_move(tmp_out.as_ref(), self.dst())?;
+                tmp.persist(self.dst()).map_err(|e| e.error)?;
                 Ok(())
             }
             Err(e) => match policy {

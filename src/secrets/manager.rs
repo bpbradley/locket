@@ -11,6 +11,9 @@ use tracing::{debug, warn};
 pub struct SecretsOpts {
     /// Mapping of source paths (holding secret templates)
     /// to destination paths (where secrets are materialized and reflected)
+    /// in the form `SRC:DST` or `SRC=DST`. Multiple mappings can be
+    /// provided, separated by commas, or supplied multiple times as arguments.
+    /// e.g. `--map /templates:/run/secrets/app --map /other_templates:/run/secrets/other`
     #[arg(
         long = "map", 
         value_parser = parse_mapping,
@@ -141,8 +144,11 @@ impl Default for SecretsOpts {
 pub struct SecretValues {
     /// Environment variables prefixed with this string will be treated as secret values
     #[arg(long, env = "VALUE_PREFIX", default_value = "secret_")]
-    pub env_value_prefix: String,
+    pub env_prefix: String,
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
+    /// Multiple values can be provided, separated by semicolons.
+    /// Or supplied multiple times as arguments.
+    /// e.g. `--secret db_password={{op://vault/credentials/db_password}} --secret api_key={{op://vault/keys/api_key}}`
     #[arg(
         long = "secret",
         env = "SECRET_VALUE",
@@ -161,7 +167,7 @@ impl SecretValues {
         let mut map = HashMap::new();
 
         for (k, v) in std::env::vars() {
-            if let Some(label) = k.strip_prefix(&self.env_value_prefix) {
+            if let Some(label) = k.strip_prefix(&self.env_prefix) {
                 map.insert(label.to_string(), v);
             }
         }
@@ -184,7 +190,7 @@ impl SecretValues {
 impl Default for SecretValues {
     fn default() -> Self {
         Self {
-            env_value_prefix: "secret_".to_string(),
+            env_prefix: "secret_".to_string(),
             values: Vec::new(),
         }
     }

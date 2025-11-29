@@ -42,11 +42,11 @@ impl LogLevel {
 #[derive(Default, Args, Debug, Clone)]
 pub struct Logger {
     /// Log format
-    #[arg(long, env = "LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
+    #[arg(long, env = "LOCKET_LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
     pub log_format: LogFormat,
 
     /// Log level
-    #[arg(long, env = "LOG_LEVEL", value_enum, default_value_t = LogLevel::Info)]
+    #[arg(long, env = "LOCKET_LOG_LEVEL", value_enum, default_value_t = LogLevel::Info)]
     pub log_level: LogLevel,
 }
 

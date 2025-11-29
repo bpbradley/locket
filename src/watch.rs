@@ -4,6 +4,7 @@ use crate::{
     provider::SecretsProvider,
     secrets::{FsEvent, Secrets},
 };
+use clap::Args;
 use indexmap::IndexMap;
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
@@ -31,6 +32,22 @@ pub enum WatchError {
     SourceMissing(PathBuf),
 }
 
+#[derive(Debug, Clone, Copy, Args)]
+pub struct WatcherOpts {
+    /// Debounce duration in milliseconds for filesystem events.
+    /// Events occurring within this duration will be coalesced into a single update
+    /// so as to not overwhelm the secrets manager with rapid successive updates from
+    /// filesystem noise.
+    #[arg(long, env = "WATCH_DEBOUNCE_MS", default_value_t = 500)]
+    debounce_ms: u64,
+}
+
+impl Default for WatcherOpts {
+    fn default() -> Self {
+        Self { debounce_ms: 500 }
+    }
+}
+
 enum WatchEvent {
     Shutdown,
     Notify(NotifyResult<Event>),
@@ -49,11 +66,15 @@ pub struct FsWatcher<'a> {
 }
 
 impl<'a> FsWatcher<'a> {
-    pub fn new(secrets: &'a mut Secrets, provider: &'a dyn SecretsProvider) -> Self {
+    pub fn new(
+        opts: WatcherOpts,
+        secrets: &'a mut Secrets,
+        provider: &'a dyn SecretsProvider,
+    ) -> Self {
         Self {
             secrets,
             provider,
-            debounce: Duration::from_millis(500),
+            debounce: Duration::from_millis(opts.debounce_ms),
             events: EventRegistry::new(),
         }
     }

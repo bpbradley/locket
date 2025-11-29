@@ -68,7 +68,7 @@ pub fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let mut watcher = FsWatcher::new(&mut secrets, provider.as_ref());
+            let mut watcher = FsWatcher::new(args.watcher, &mut secrets, provider.as_ref());
             match watcher.run() {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {

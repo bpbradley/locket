@@ -7,10 +7,10 @@ use std::path::Path;
 #[derive(Clone, Args)]
 pub struct FileWriter {
     /// File permission mode
-    #[clap(long, default_value = "600", value_parser = parse_permissions)]
+    #[clap(long, env = "LOCKET_FILE_MODE", default_value = "600", value_parser = parse_permissions)]
     file_mode: u32,
     /// Directory permission mode
-    #[clap(long, default_value = "700", value_parser = parse_permissions)]
+    #[clap(long, env = "LOCKET_DIR_MODE", default_value = "700", value_parser = parse_permissions)]
     dir_mode: u32,
 }
 
@@ -74,6 +74,16 @@ impl FileWriter {
 
         self.sync_dir(parent)?;
         Ok(())
+    }
+
+    pub fn create_temp_for(&self, dst: &Path) -> io::Result<tempfile::NamedTempFile> {
+        let parent = self.prepare(dst)?;
+        let temp = tempfile::Builder::new()
+            .prefix(".tmp.")
+            .permissions(fs::Permissions::from_mode(self.file_mode))
+            .tempfile_in(parent)?;
+
+        Ok(temp)
     }
 
     /// Ensures parent directory exists and applies configured directory permissions.

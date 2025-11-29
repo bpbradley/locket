@@ -55,3 +55,7 @@ cmd = "cargo release minor --execute"
 [release-major]
 description = "Bump major version and execute release"
 cmd = "cargo release major --execute"
+
+[docs]
+description = "Generate clap derived docs"
+cmd = "cargo xtask docs"

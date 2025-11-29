@@ -6,6 +6,9 @@ license = "AGPL-3.0-or-later"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
 description = "Helper tool for secret injection from templates and env vars to be used as sidecar for docker compose"
 
+[workspace]
+members = [".", "xtask"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
@@ -34,3 +37,4 @@ codegen-units = 1
 lto = true
 opt-level = "z"
 strip = true
+
