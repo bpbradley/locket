@@ -17,7 +17,7 @@ The basic premise is:
 
 1. Move your sensitive data to a dedicated secret manager (only 1password supported today, more to come), 
 1. Adjust your config files to carry *secret references* instead of raw sensitive data, which are safe to commit directly to revision control (i.e `{{ op://vault/keys/privatekey?ssh-format=openssh }}`)
-1. Configure locket to use your secrets provider `--provider=op` or with env: `SECRETS_PROVIDER=op`
+1. Configure locket to use your secrets provider `--provider=op` or with env: `SECRETS_PROVIDER=op`. Or just use the docker image tag `locket:op`
 1. Mount your templates containing secret references for locket to read, i.e. `./templates:/template:ro`, and mount an output directory for the secrets to be placed (usually a named tmpfs volume, or some secure location) `secrets-store:/run/secrets/`
 1. Finally, map the template->output for each required mapping. You can map arbitrarily many directories->directories or files->files. `--map /templates:/run/secrets`
 
