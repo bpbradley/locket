@@ -4,7 +4,13 @@ version = "0.10.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
-description = "Helper tool for secret injection from templates and env vars to be used as sidecar for docker compose"
+description = "Helper tool for secret injection as a dependency"
+repository = "https://github.com/bpbradley/locket"
+homepage = "https://github.com/bpbradley/locket"
+documentation = "https://docs.rs/locket"
+readme = "README.md"
+keywords = ["secrets", "docker"]
+categories = ["command-line-utilities", "config"]
 
 [workspace]
 members = [".", "xtask"]
