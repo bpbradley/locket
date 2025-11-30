@@ -5,3 +5,4 @@ pub mod provider;
 pub mod secrets;
 pub mod watch;
 pub mod write;
+pub mod template;
