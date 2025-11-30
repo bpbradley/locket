@@ -42,34 +42,58 @@ impl<'a> Template<'a> {
     where
         S: AsRef<str>,
     {
-        if !self.has_tags() {
-            return Cow::Borrowed(self.source);
-        }
-
-        let mut output = String::with_capacity(self.source.len());
+        let mut output: Option<String> = None;
         let mut last_idx = 0;
 
         for (range, inner) in self.iter_tags() {
             let key = inner.trim();
+            if key.is_empty() { continue; }
 
-            // Append text before this tag
-            output.push_str(&self.source[last_idx..range.start]);
+            if output.is_none() {
+                if let Some(val) = values.get(key) {
+                    // Match found. Diverge from the original source.
+                    // Initialize the buffer and catch up.
+                    let mut s = String::with_capacity(self.source.len());
+                    
+                    // Push everything from the start up to this tag
+                    s.push_str(&self.source[0..range.start]);
+                    s.push_str(val.as_ref());
+                    
+                    last_idx = range.end;
+                    output = Some(s);
+                }
+                // No match found.
+                // Ignore this tag and leave it as part of the
+                // original string, avoiding allocation.
+                continue;
+            }
 
-            // Append resolved secret OR original tag if missing
+            // output is Some, we must render.
+            let out = output.as_mut().unwrap();
+
+            // Append text between the last processed tag and this one
+            out.push_str(&self.source[last_idx..range.start]);
+
             match values.get(key) {
-                Some(secret) => output.push_str(secret.as_ref()),
-                None => output.push_str(&self.source[range.clone()]),
+                Some(val) => out.push_str(val.as_ref()),
+                None => out.push_str(&self.source[range.clone()]),
             }
 
             last_idx = range.end;
         }
 
-        // Append remaining text
-        if last_idx < self.source.len() {
-            output.push_str(&self.source[last_idx..]);
+        match output {
+            Some(mut s) => {
+                // Append any remaining text after the last tag
+                if last_idx < self.source.len() {
+                    s.push_str(&self.source[last_idx..]);
+                }
+                Cow::Owned(s)
+            }
+            // If output is still None, it means we either found no tags,
+            // or found tags that didn't need replacing. Return original.
+            None => Cow::Borrowed(self.source),
         }
-
-        Cow::Owned(output)
     }
 
     /// Internal iterator over tags.
