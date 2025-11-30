@@ -18,8 +18,7 @@ impl<'a> Template<'a> {
 
     /// Returns true if the template contains any `{{ ... }}` tags.
     pub fn has_tags(&self) -> bool {
-        self.iter_tags()
-            .any(|(_, key)| !key.trim().is_empty())
+        self.iter_tags().any(|(_, key)| !key.trim().is_empty())
     }
 
     /// Scans the template and returns a unique set of secret reference keys found within tags.
@@ -47,51 +46,50 @@ impl<'a> Template<'a> {
 
         for (range, inner) in self.iter_tags() {
             let key = inner.trim();
-            if key.is_empty() { continue; }
-
-            if output.is_none() {
-                if let Some(val) = values.get(key) {
-                    // Match found. Diverge from the original source.
-                    // Initialize the buffer and catch up.
-                    let mut s = String::with_capacity(self.source.len());
-                    
-                    // Push everything from the start up to this tag
-                    s.push_str(&self.source[0..range.start]);
-                    s.push_str(val.as_ref());
-                    
-                    last_idx = range.end;
-                    output = Some(s);
-                }
-                // No match found.
-                // Ignore this tag and leave it as part of the
-                // original string, avoiding allocation.
+            if key.is_empty() {
                 continue;
             }
 
-            // output is Some, we must render.
-            let out = output.as_mut().unwrap();
-
-            // Append text between the last processed tag and this one
-            out.push_str(&self.source[last_idx..range.start]);
-
-            match values.get(key) {
-                Some(val) => out.push_str(val.as_ref()),
-                None => out.push_str(&self.source[range.clone()]),
+            if output.is_none() {
+                match values.get(key) {
+                    Some(val) => {
+                        // Match found. Diverge from the original source.
+                        // Initialize the buffer and catch up.
+                        let mut s = String::with_capacity(self.source.len());
+                        s.push_str(&self.source[0..range.start]);
+                        s.push_str(val.as_ref());
+                        last_idx = range.end;
+                        output = Some(s);
+                        continue;
+                    }
+                    None => {
+                        // No match. Continue to defer allocation.
+                        continue;
+                    }
+                }
             }
 
-            last_idx = range.end;
+            // Output is Some, we must render.
+            if let Some(out) = output.as_mut() {
+                // Append text between the last processed tag and this one
+                out.push_str(&self.source[last_idx..range.start]);
+
+                match values.get(key) {
+                    Some(val) => out.push_str(val.as_ref()),
+                    None => out.push_str(&self.source[range.clone()]),
+                }
+
+                last_idx = range.end;
+            }
         }
 
         match output {
             Some(mut s) => {
-                // Append any remaining text after the last tag
                 if last_idx < self.source.len() {
                     s.push_str(&self.source[last_idx..]);
                 }
                 Cow::Owned(s)
             }
-            // If output is still None, it means we either found no tags,
-            // or found tags that didn't need replacing. Return original.
             None => Cow::Borrowed(self.source),
         }
     }
@@ -130,7 +128,7 @@ impl<'a> Iterator for TagIterator<'a> {
         // Find end "}}" after the start
         // We are guaranteed that tag_start + 2 is valid because "{{" was found.
         let rest = &self.source[tag_start + 2..];
-        
+
         if let Some(end_offset) = rest.find("}}") {
             let tag_end = tag_start + 2 + end_offset + 2; // +2 for {{, +2 for }}
 
@@ -141,9 +139,9 @@ impl<'a> Iterator for TagIterator<'a> {
             let inner = &self.source[tag_start + 2..tag_end - 2];
             return Some((tag_start..tag_end, inner));
         }
-        
+
         // No closing tag found
-        // Treat as end of valid stream. The 'Template::render' logic will 
+        // Treat as end of valid stream. The 'Template::render' logic will
         // handle the leftover text (including the unclosed "{{") as raw string.
         None
     }
@@ -198,7 +196,10 @@ mod tests {
         // Should ignore unclosed tags
         let tpl = Template::new("Start {{ broken end");
         assert!(tpl.keys().is_empty());
-        assert_eq!(tpl.render(&HashMap::<String, String>::new()), "Start {{ broken end");
+        assert_eq!(
+            tpl.render(&HashMap::<String, String>::new()),
+            "Start {{ broken end"
+        );
     }
 
     #[test]

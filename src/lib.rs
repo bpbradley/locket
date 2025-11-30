@@ -3,6 +3,6 @@ pub mod health;
 pub mod logging;
 pub mod provider;
 pub mod secrets;
+pub mod template;
 pub mod watch;
 pub mod write;
-pub mod template;
