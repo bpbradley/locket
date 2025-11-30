@@ -1,10 +1,10 @@
 // run.rs
 use super::{RunArgs, RunMode};
-use crate::{health::StatusFile, watch::FsWatcher};
+use crate::{health::StatusFile, signal, watch::FsWatcher};
 use sysexits::ExitCode;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
-pub fn run(args: RunArgs) -> ExitCode {
+pub async fn run(args: RunArgs) -> ExitCode {
     if let Err(e) = args.logger.init() {
         error!(error=%e, "init logging failed");
         return ExitCode::CantCreat;
@@ -40,7 +40,7 @@ pub fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    if let Err(e) = secrets.inject_all(provider.as_ref()) {
+    if let Err(e) = secrets.inject_all(provider.as_ref()).await {
         error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
@@ -55,21 +55,14 @@ pub fn run(args: RunArgs) -> ExitCode {
         RunMode::OneShot => ExitCode::Ok,
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
-            let (tx, rx) = std::sync::mpsc::channel();
+            signal::recv_shutdown().await;
 
-            ctrlc::set_handler(move || {
-                let _ = tx.send(());
-            })
-            .expect("Error setting Ctrl-C handler");
-
-            let _ = rx.recv();
-
-            tracing::info!("shutdown signal received. exiting.");
+            info!("shutdown complete");
             ExitCode::Ok
         }
         RunMode::Watch => {
             let mut watcher = FsWatcher::new(args.watcher, &mut secrets, provider.as_ref());
-            match watcher.run() {
+            match watcher.run().await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {
                     error!(error=%e, "watch errored");

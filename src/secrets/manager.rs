@@ -1,11 +1,13 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
+use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretsOpts {
@@ -241,21 +243,97 @@ impl Secrets {
         self
     }
 
-    /// Inject all known secrets (values + files).
-    pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
-        let policy = self.opts.policy;
+    pub async fn process_secret(
+        &self,
+        item: &dyn Injectable,
+        provider: &dyn SecretsProvider,
+    ) -> Result<(), SecretError> {
+        let content = item.content()?;
 
-        // value-backed secrets
-        for v in self.iter_values() {
-            v.inject(policy, provider, &self.writer)?;
+        let tpl = Template::new(&content);
+        let keys = tpl.keys();
+        let has_keys = !keys.is_empty();
+
+        let candidates: Vec<&str> = if has_keys {
+            keys.into_iter().collect()
+        } else {
+            vec![content.trim()]
+        };
+
+        let references: Vec<&str> = candidates
+            .into_iter()
+            .filter(|k| provider.accepts_key(k))
+            .collect();
+
+        if references.is_empty() {
+            debug!(dst=?item.dst(), "no resolveable secrets found; passing through");
+            self.writer.atomic_write(item.dst(), content.as_bytes())?;
+            return Ok(());
         }
 
-        // file-backed secrets
-        for f in self.fs.iter_files() {
-            f.inject(policy, provider, &self.writer)?;
-        }
+        info!(dst=?item.dst(), count=references.len(), "fetching secrets");
+        let secrets_map = provider.fetch_map(&references).await?;
+
+        let output = if has_keys {
+            tpl.render(&secrets_map)
+        } else {
+            match secrets_map.get(content.trim()) {
+                Some(val) => Cow::Borrowed(val.as_str()),
+                None => {
+                    warn!(dst=?item.dst(), "provider returned success but secret value was missing");
+                    content
+                }
+            }
+        };
+
+        self.writer.atomic_write(item.dst(), output.as_bytes())?;
 
         Ok(())
+    }
+
+    pub async fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
+        let policy = self.opts.policy;
+
+        // Combine sources
+        let values = self.iter_values().map(|v| v as &dyn Injectable);
+        let files = self.fs.iter_files().map(|f| f as &dyn Injectable);
+
+        // TODO: Parallelize?
+        for item in values.chain(files) {
+            match self.process_secret(item, provider).await {
+                Ok(_) => {}
+                Err(e) => self.handle_policy(item, e, policy)?,
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_policy(
+        &self,
+        item: &dyn Injectable,
+        err: SecretError,
+        policy: InjectFailurePolicy,
+    ) -> Result<(), SecretError> {
+        match policy {
+            InjectFailurePolicy::Error => Err(err),
+            InjectFailurePolicy::CopyUnmodified => {
+                warn!(
+                    src = ?item.label(),
+                    dst = ?item.dst(),
+                    error = ?err,
+                    "injection failed; policy=copy-unmodified. Reverting to raw copy."
+                );
+                let raw = item.content().unwrap_or(Cow::Borrowed(""));
+                if !raw.is_empty() {
+                    self.writer.atomic_write(item.dst(), raw.as_bytes())?;
+                }
+                Ok(())
+            }
+            InjectFailurePolicy::Ignore => {
+                warn!(src = ?item.label(), dst = ?item.dst(), error = ?err, "injection failed; ignoring");
+                Ok(())
+            }
+        }
     }
 
     pub fn collisions(&self) -> Result<(), SecretError> {
@@ -294,9 +372,7 @@ impl Secrets {
             if next_path.starts_with(curr_path) {
                 return Err(SecretError::StructureConflict {
                     blocker: curr_src.clone(),
-                    blocker_path: curr_path.to_path_buf(),
                     blocked: next_src.clone(),
-                    blocked_path: next_path.to_path_buf(),
                 });
             }
         }
@@ -315,7 +391,10 @@ impl Secrets {
         }
 
         for file in &removed {
-            file.remove()?;
+            let dst = file.dst();
+            if dst.exists() {
+                std::fs::remove_file(dst)?;
+            }
             debug!("event: removed secret file: {:?}", file.dst());
         }
 
@@ -369,7 +448,7 @@ impl Secrets {
         }
     }
 
-    fn on_move(
+    async fn on_move(
         &mut self,
         provider: &dyn SecretsProvider,
         old: &Path,
@@ -407,6 +486,10 @@ impl Secrets {
                     warn!(error=?e, "move failed; falling back to reinjection");
                     // Rollback memory state so we can start fresh
                     self.fs.remove(new);
+
+                    if from.exists() {
+                        let _ = std::fs::remove_file(&from);
+                    }
                 }
             }
         }
@@ -414,46 +497,57 @@ impl Secrets {
         // Fallback to remove + write
         debug!(?old, ?new, "fallback move via remove + write");
         self.on_remove(old)?;
-        self.on_write(provider, new)?;
+        self.on_write(provider, new).await?;
 
         Ok(())
     }
 
-    fn on_write(&mut self, provider: &dyn SecretsProvider, src: &Path) -> Result<(), SecretError> {
+    async fn on_write(
+        &mut self,
+        provider: &dyn SecretsProvider,
+        src: &Path,
+    ) -> Result<(), SecretError> {
         if src.is_dir() {
             debug!(?src, "directory write event; scanning for children");
-            for entry in walkdir::WalkDir::new(src)
+            let entries: Vec<PathBuf> = walkdir::WalkDir::new(src)
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
-            {
+                .map(|e| e.path().to_path_buf())
+                .collect();
+
+            for entry in entries {
                 // Recursion.. Treat every child file as its own Write event.
                 // Should only ever be one level deep here, since we are already
                 // inside a directory write event.
-                self.on_write(provider, entry.path())?;
+                Box::pin(self.on_write(provider, &entry)).await?;
             }
             return Ok(());
         }
         // Tiny race condition here, if file is removed while we are processing it..
         // Only a possible issue with inject failure policy of Error.
         // Otherwise, this will lead to eventual consistency on the next processing event
-        if src.exists()
-            && let Some(file) = self.fs.upsert(src)
-        {
-            file.inject(self.opts.policy, provider, &self.writer)?;
+        if src.exists() {
+            self.fs.upsert(src);
+            if let Some(file) = self.fs.iter_files().find(|f| f.src() == src) {
+                self.process_secret(file, provider).await?;
+            }
         }
         Ok(())
     }
 
-    pub fn handle_fs_event(
+    pub async fn handle_fs_event(
         &mut self,
         provider: &dyn SecretsProvider,
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_write(provider, &normalize(src)),
+            FsEvent::Write(src) => self.on_write(provider, &normalize(src)).await,
             FsEvent::Remove(src) => self.on_remove(&normalize(src)),
-            FsEvent::Move { from, to } => self.on_move(provider, &normalize(from), &normalize(to)),
+            FsEvent::Move { from, to } => {
+                self.on_move(provider, &normalize(from), &normalize(to))
+                    .await
+            }
         }
     }
 }

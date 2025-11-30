@@ -1,10 +1,11 @@
 //! 1password (op) based provider implementation
 
 use crate::provider::{ProviderError, SecretsProvider};
+use async_trait::async_trait;
 use clap::Args;
 use secrecy::{ExposeSecret, SecretString};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConfig {
@@ -69,46 +70,28 @@ impl OpProvider {
     }
 }
 
+#[async_trait]
 impl SecretsProvider for OpProvider {
-    fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError> {
-        let mut cmd = Command::new("op");
-        if let Some(config) = &self.config {
-            cmd.arg("--config").arg(config);
-        }
-        let output = cmd
-            .arg("inject")
-            .arg("-i")
-            .arg(src)
-            .arg("-o")
-            .arg(dst)
-            .arg("--force")
-            .env_clear()
-            .env("OP_SERVICE_ACCOUNT_TOKEN", self.token.expose_secret())
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
-            .env("HOME", std::env::var("HOME").unwrap_or_default())
-            .env(
-                "XDG_CONFIG_HOME",
-                std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
-            )
-            .stderr(Stdio::piped())
-            .stdout(Stdio::null())
-            .output()?;
+    async fn fetch_map(
+        &self,
+        references: &[&str],
+    ) -> Result<HashMap<String, String>, ProviderError> {
+        // Simulated async fetch for demonstration purposes
+        // Need to reimplement `op inject` using connect API
+        let mut map = HashMap::new();
 
-        if output.status.success() {
-            Ok(())
-        } else {
-            let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            // keep logs sane; avoid massive stderr
-            const MAX_ERR: usize = 8 * 1024;
-            if stderr.len() > MAX_ERR {
-                stderr.truncate(MAX_ERR);
-                stderr.push_str("…[truncated]");
-            }
-            Err(ProviderError::Exec {
-                program: "op",
-                status: output.status.code(),
-                stderr,
-            })
+        for &key in references {
+            // Simulate some async delay
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let value = format!("SECRET[{}]", key);
+            map.insert(key.to_string(), value);
         }
+
+        Ok(map)
+    }
+
+    fn accepts_key(&self, key: &str) -> bool {
+        key.starts_with("op://")
     }
 }

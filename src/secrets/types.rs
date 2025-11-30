@@ -1,10 +1,8 @@
-use crate::provider::{ProviderError, SecretsProvider};
-use crate::write::FileWriter;
+use crate::provider::ProviderError;
 use clap::ValueEnum;
-use std::fs;
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -12,7 +10,24 @@ pub enum SecretError {
     Io(#[from] std::io::Error),
 
     #[error("provider error: {0}")]
-    Provider(#[from] crate::provider::ProviderError),
+    Provider(#[from] ProviderError),
+
+    #[error("input file too large: {size} bytes (limit: {limit} bytes): {path:?}")]
+    SourceTooLarge {
+        path: PathBuf,
+        size: u64,
+        limit: u64,
+    },
+
+    #[error("collision detected: '{dst:?}' is targeted by multiple sources")]
+    Collision {
+        first: String,
+        second: String,
+        dst: PathBuf,
+    },
+
+    #[error("structure conflict: {blocker:?} blocks {blocked:?}")]
+    StructureConflict { blocker: String, blocked: String },
 
     #[error("source path missing: {0:?}")]
     SourceMissing(PathBuf),
@@ -25,32 +40,6 @@ pub enum SecretError {
 
     #[error("Relative paths are forbidden in source: {0:?}")]
     Forbidden(PathBuf),
-
-    #[error(
-        "collision detected: '{dst:?}' is targeted by multiple sources: '{first:?}' and '{second:?}'"
-    )]
-    Collision {
-        first: String,
-        second: String,
-        dst: PathBuf,
-    },
-
-    #[error(
-        "structure conflict: {blocker:?} maps to '{blocker_path:?}', which blocks {blocked:?} from writing to '{blocked_path:?}'"
-    )]
-    StructureConflict {
-        blocker: String,
-        blocker_path: PathBuf,
-        blocked: String,
-        blocked_path: PathBuf,
-    },
-
-    // Fallback for generic injection errors
-    #[error("injection failed: {source}")]
-    InjectionFailed {
-        #[source]
-        source: crate::provider::ProviderError,
-    },
 
     #[error("dst has no parent: {0}")]
     NoParent(PathBuf),
@@ -66,66 +55,15 @@ pub enum InjectFailurePolicy {
     /// On injection failure, just log a warning and proceed with the secret ignored
     Ignore,
 }
-
-/// Something that can be injected to a destination path.
-pub trait Injectable {
-    /// Label used for logging
-    fn label(&self) -> &str;
-    /// Destination path on disk.
+pub trait Injectable: Send + Sync {
+    /// Destination path for injected secret
     fn dst(&self) -> &Path;
-    /// copy implementation for fallback on injection error
-    fn copy(&self, writer: &FileWriter) -> Result<(), SecretError>;
-    /// secret injection with provider
-    fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError>;
-    /// Generic secret injection with failure policy
-    fn inject(
-        &self,
-        policy: InjectFailurePolicy,
-        provider: &dyn SecretsProvider,
-        writer: &FileWriter,
-    ) -> Result<(), SecretError> {
-        info!(src=?self.label(), dst=?self.dst(), "injecting secret");
 
-        let tmp = writer.create_temp_for(self.dst())?;
+    /// label for logging and error messages
+    fn label(&self) -> &str;
 
-        match self.injector(provider, tmp.as_ref()) {
-            Ok(()) => {
-                tmp.persist(self.dst()).map_err(|e| e.error)?;
-                Ok(())
-            }
-            Err(e) => match policy {
-                InjectFailurePolicy::Error => Err(SecretError::InjectionFailed { source: e }),
-                InjectFailurePolicy::CopyUnmodified => {
-                    warn!(
-                        src=?self.label(),
-                        dst=?self.dst(),
-                        error=?e,
-                        "injection failed; falling back to raw copy for secret"
-                    );
-                    self.copy(writer)?;
-                    Ok(())
-                }
-                InjectFailurePolicy::Ignore => {
-                    warn!(
-                        src=?self.label(),
-                        dst=?self.dst(),
-                        error=?e,
-                        "injection failed; ignoring"
-                    );
-                    Ok(())
-                }
-            },
-        }
-    }
-    /// Remove the secret from disk.
-    fn remove(&self) -> Result<(), SecretError> {
-        let dst = self.dst();
-        debug!(dst=?dst, exists=?dst.exists(), "removing secret");
-        if dst.exists() {
-            fs::remove_file(dst)?;
-        }
-        Ok(())
-    }
+    /// Content as string
+    fn content(&self) -> Result<Cow<'_, str>, SecretError>;
 }
 
 impl std::fmt::Display for dyn Injectable {
@@ -161,19 +99,26 @@ impl SecretFile {
 }
 
 impl Injectable for SecretFile {
-    fn label(&self) -> &str {
-        self.src.to_str().unwrap_or("<invalid utf8>")
-    }
     fn dst(&self) -> &Path {
         &self.dst
     }
-    fn copy(&self, writer: &FileWriter) -> Result<(), SecretError> {
-        writer.atomic_copy(&self.src, &self.dst)?;
-        Ok(())
+    fn label(&self) -> &str {
+        self.src.to_str().unwrap_or("unknown")
     }
-    fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError> {
-        provider.inject(&self.src, dst)?;
-        Ok(())
+    fn content(&self) -> Result<Cow<'_, str>, SecretError> {
+        let meta = std::fs::metadata(&self.src).map_err(SecretError::Io)?;
+
+        // 10MB Limit. TODO: Make configurable
+        if meta.len() > 10 * 1024 * 1024 {
+            return Err(SecretError::SourceTooLarge {
+                path: self.src.clone(),
+                size: meta.len(),
+                limit: 10 * 1024 * 1024,
+            });
+        }
+
+        let content = std::fs::read_to_string(&self.src).map_err(SecretError::Io)?;
+        Ok(Cow::Owned(content))
     }
 }
 
@@ -196,18 +141,13 @@ impl SecretValue {
 }
 
 impl Injectable for SecretValue {
-    fn label(&self) -> &str {
-        &self.label
-    }
     fn dst(&self) -> &Path {
         &self.dst
     }
-    fn copy(&self, writer: &FileWriter) -> Result<(), SecretError> {
-        writer.atomic_write(&self.dst, self.template.as_bytes())?;
-        Ok(())
+    fn label(&self) -> &str {
+        &self.label
     }
-    fn injector(&self, provider: &dyn SecretsProvider, dst: &Path) -> Result<(), ProviderError> {
-        provider.inject_from_bytes(self.template.as_bytes(), dst)?;
-        Ok(())
+    fn content(&self) -> Result<Cow<'_, str>, SecretError> {
+        Ok(Cow::Borrowed(&self.template))
     }
 }

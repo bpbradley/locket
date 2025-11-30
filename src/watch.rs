@@ -2,7 +2,8 @@
 
 use crate::{
     provider::SecretsProvider,
-    secrets::{FsEvent, Secrets},
+    secrets::{FsEvent, SecretError, Secrets},
+    signal,
 };
 use clap::Args;
 use indexmap::IndexMap;
@@ -12,9 +13,10 @@ use notify::{
     recommended_watcher,
 };
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::mpsc;
+use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
@@ -30,6 +32,9 @@ pub enum WatchError {
 
     #[error("source path missing: {0}")]
     SourceMissing(PathBuf),
+
+    #[error("secrets error: {0}")]
+    Secret(#[from] SecretError),
 }
 
 #[derive(Debug, Clone, Copy, Args)]
@@ -46,11 +51,6 @@ impl Default for WatcherOpts {
     fn default() -> Self {
         Self { debounce_ms: 500 }
     }
-}
-
-enum WatchEvent {
-    Shutdown,
-    Notify(NotifyResult<Event>),
 }
 
 enum ControlFlow {
@@ -79,19 +79,16 @@ impl<'a> FsWatcher<'a> {
         }
     }
 
-    pub fn run(&mut self) -> Result<(), WatchError> {
-        let (tx, rx) = mpsc::channel::<WatchEvent>();
+    pub async fn run(&mut self) -> Result<(), WatchError> {
+        let (tx, mut rx) = mpsc::channel::<NotifyResult<Event>>(100);
         let tx_fs = tx.clone();
         let mut watcher = recommended_watcher(move |res| {
-            let _ = tx_fs.send(WatchEvent::Notify(res));
+            let _ = tx_fs.blocking_send(res);
         })?;
-        let tx_sig = tx.clone();
-        ctrlc::set_handler(move || {
-            let _ = tx_sig.send(WatchEvent::Shutdown);
-        })
-        .expect("Error setting Ctrl-C handler");
+        let shutdown = signal::recv_shutdown();
+        tokio::pin!(shutdown);
         for mapping in &self.secrets.options().mapping {
-            let watched = &mapping.src();
+            let watched = mapping.src();
             if !watched.exists() {
                 return Err(WatchError::SourceMissing(watched.to_path_buf()));
             }
@@ -101,34 +98,37 @@ impl<'a> FsWatcher<'a> {
                 RecursiveMode::NonRecursive
             };
             watcher.watch(watched, mode)?;
+            info!(path=?watched, "watching for changes");
         }
 
         loop {
-            debug!("waiting for fs event indefinitely");
-            let event = match rx.recv() {
-                Ok(ev) => ev,
-                Err(_) => return Err(WatchError::Disconnected),
-            };
+            debug!("waiting for fs event");
 
-            let watch_ev = match event {
-                WatchEvent::Shutdown => {
-                    debug!("received shutdown signal; exiting watcher");
+            let event = tokio::select! {
+                _ = &mut shutdown => {
+                    info!("shutdown signal received; exiting watcher");
                     return Ok(());
                 }
-                WatchEvent::Notify(Ok(ev)) => ev,
-                WatchEvent::Notify(Err(e)) => {
-                    warn!(error=?e, "notify internal error");
-                    continue;
+                signal = rx.recv() => {
+                    match signal {
+                        Some(Ok(ev)) => ev,
+                        Some(Err(e)) => {
+                            warn!(error=?e, "notify internal error");
+                            continue;
+                        }
+                        None => return Err(WatchError::Disconnected),
+                    }
                 }
             };
 
-            if !self.ingest_event(watch_ev) {
+            if !self.ingest_event(event) {
                 continue;
             }
 
-            match self.debounce_loop(&rx)? {
+            // Enter debounce loop to coalesce rapid successive events
+            match self.debounce_loop(&mut rx, &mut shutdown).await? {
                 ControlFlow::Continue => {
-                    self.flush_events();
+                    self.flush_events().await;
                 }
                 ControlFlow::Break => {
                     info!("exiting watcher loop.");
@@ -138,36 +138,49 @@ impl<'a> FsWatcher<'a> {
         }
     }
 
-    fn debounce_loop(
+    async fn debounce_loop<F>(
         &mut self,
-        rx: &mpsc::Receiver<WatchEvent>,
-    ) -> Result<ControlFlow, WatchError> {
+        rx: &mut mpsc::Receiver<NotifyResult<Event>>,
+        shutdown: &mut std::pin::Pin<&mut F>,
+    ) -> Result<ControlFlow, WatchError>
+    where
+        F: Future<Output = ()>,
+    {
         debug!("Debouncing events for {:?}", self.debounce);
-        let mut deadline = Instant::now() + self.debounce;
+        let deadline = Instant::now() + self.debounce;
+
+        // Use sleep_until for precise deadline handling
+        let sleep = time::sleep_until(deadline);
+        tokio::pin!(sleep);
 
         loop {
-            let now = Instant::now();
-            if now >= deadline {
-                break;
-            }
-            let timeout = deadline - now;
+            tokio::select! {
+                // Timeout reached. No new events in debounce period.
+                _ = &mut sleep => {
+                    return Ok(ControlFlow::Continue);
+                }
 
-            match rx.recv_timeout(timeout) {
-                Ok(WatchEvent::Shutdown) => {
-                    info!("shutdown signal received.");
+                _ = shutdown.as_mut() => {
+                    info!("shutdown signal received");
                     return Ok(ControlFlow::Break);
                 }
-                Ok(WatchEvent::Notify(Ok(event))) => {
-                    if self.ingest_event(event) {
-                        deadline = Instant::now() + self.debounce;
+                // New event received before timeout.
+                signal = rx.recv() => {
+                    match signal {
+                        Some(Ok(event)) => {
+                            if self.ingest_event(event) {
+                                // Reset the timer
+                                sleep.as_mut().reset(Instant::now() + self.debounce);
+                            }
+                        }
+                        Some(Err(e)) => {
+                            warn!(error=?e, "notify internal error");
+                        }
+                        None => return Err(WatchError::Disconnected),
                     }
                 }
-                Ok(WatchEvent::Notify(Err(e))) => warn!(error=?e, "notify internal error"),
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(WatchError::Disconnected),
             }
         }
-        Ok(ControlFlow::Continue)
     }
 
     fn ingest_event(&mut self, event: Event) -> bool {
@@ -178,7 +191,7 @@ impl<'a> FsWatcher<'a> {
         false
     }
 
-    fn flush_events(&mut self) {
+    async fn flush_events(&mut self) {
         if self.events.is_empty() {
             return;
         }
@@ -187,7 +200,7 @@ impl<'a> FsWatcher<'a> {
         debug!(count = events.len(), "processing batched fs events");
 
         for ev in events {
-            if let Err(e) = self.secrets.handle_fs_event(self.provider, ev) {
+            if let Err(e) = self.secrets.handle_fs_event(self.provider, ev).await {
                 warn!(error=?e, "failed to handle fs event");
             }
         }
@@ -259,9 +272,7 @@ impl EventRegistry {
                 from: origin.clone(),
                 to: to.clone(),
             },
-
-            // Case 3: File was stable (not in map) or previously removed (rare edge case).
-            // Logic: Standard Move optimization applies.
+            // Just move
             _ => FsEvent::Move {
                 from: from.clone(),
                 to: to.clone(),
