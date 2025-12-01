@@ -1,12 +1,13 @@
 //! Secrets provider implementation
 //!
 //! Providers will inject secrets from templates
-use crate::provider::op::{OpConfig, OpProvider};
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use op::{OpConfig, OpProvider};
+use connect::{OpConnectConfig, OpConnectProvider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -162,5 +163,4 @@ impl ExposeSecret<str> for AuthToken {
 pub use ProviderSelection as Provider;
 
 mod connect;
-pub mod op;
-pub use connect::{OpConnectConfig, OpConnectProvider};
+mod op;
