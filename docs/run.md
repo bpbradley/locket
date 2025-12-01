@@ -25,14 +25,14 @@
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` | *None* | Secrets provider <br><br> **Options:** `op`, `op-connect` |
+| `--provider` | `SECRETS_PROVIDER` | *None* | Secrets provider<br><br> **Options:**<br> - `op`: 1Password Service Account<br> - `op-connect`: 1Password Connect Provider |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` | *None* | 1Password service account token |
 | `--op.token-file` | `OP_SERVICE_ACCOUNT_TOKEN_FILE` | *None* | Path to file containing 1Password service account token |
-| `--config-dir` | `OP_CONFIG_DIR` | *None* | Optional: Path to 1Password config directory Defaults to standard op config locations if not provided, e.g. $XDG_CONFIG_HOME/op |
+| `--op.config-dir` | `OP_CONFIG_DIR` | *None* | Optional: Path to 1Password config directory Defaults to standard op config locations if not provided, e.g. $XDG_CONFIG_HOME/op |
 ### 1Password Connect
 
 | Command | Env | Default | Description |

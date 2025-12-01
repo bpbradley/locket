@@ -64,7 +64,9 @@ pub trait SecretsProvider: Send + Sync {
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum ProviderKind {
+    /// 1Password Service Account
     Op,
+    /// 1Password Connect Provider
     OpConnect,
 }
 

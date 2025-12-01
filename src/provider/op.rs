@@ -16,7 +16,7 @@ pub struct OpConfig {
     /// Optional: Path to 1Password config directory
     /// Defaults to standard op config locations if not provided,
     /// e.g. $XDG_CONFIG_HOME/op
-    #[arg(long, env = "OP_CONFIG_DIR")]
+    #[arg(long = "op.config-dir", env = "OP_CONFIG_DIR")]
     config_dir: Option<PathBuf>,
 }
 
