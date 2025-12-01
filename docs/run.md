@@ -37,6 +37,6 @@
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--host` | `OP_CONNECT_HOST` | *None* | 1Password Connect Host HTTP(S) URL |
+| `--connect.host` | `OP_CONNECT_HOST` | *None* | 1Password Connect Host HTTP(S) URL |
 | `--connect.token` | `OP_CONNECT_TOKEN` | *None* | 1Password Connect API token |
 | `--connect.token-file` | `OP_CONNECT_TOKEN_FILE` | *None* | Path to file containing 1Password Connect API token |

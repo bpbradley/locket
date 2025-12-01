@@ -17,7 +17,7 @@ use url::Url;
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
-    #[arg(long, env = "OP_CONNECT_HOST")]
+    #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
     pub host: Option<String>,
 
     /// 1Password Connect Token
