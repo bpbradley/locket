@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Represents a loaded text resource that may contain secret references.
 ///
@@ -129,7 +129,7 @@ impl<'a> Iterator for TagIterator<'a> {
             if !key.is_empty() {
                 return Some((tag_start..tag_end, key));
             }
-        } 
+        }
 
         // No closing tag found
         // Treat as end of valid stream. The 'Template::render' logic will
@@ -158,6 +158,7 @@ fn sanitize_key(raw: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn extract_keys_simple() {
@@ -297,7 +298,7 @@ mod tests {
         let out = tpl.render(&map);
         assert_eq!(out, "val1 | val2");
     }
-    
+
     #[test]
     fn empty_quotes_ignored() {
         let raw = r#"{{ "" }} {{ '' }} {{ }} "#;

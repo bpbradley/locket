@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use url::Url;
 use tracing::debug;
+use url::Url;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConnectConfig {
@@ -267,7 +267,10 @@ impl OpConnectProvider {
             }
         };
 
-        debug!("Fetching secret: item: {}, section: {:?}, field: {}", item_ref, _section, raw_field);
+        debug!(
+            "Fetching secret: item: {}, section: {:?}, field: {}",
+            item_ref, _section, raw_field
+        );
 
         let field_cow = percent_decode_str(raw_field)
             .decode_utf8()
