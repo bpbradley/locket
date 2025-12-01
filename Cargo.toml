@@ -15,6 +15,10 @@ categories = ["command-line-utilities", "config"]
 [workspace]
 members = [".", "xtask"]
 
+[features]
+default = ["op"]
+op = ["tokio/process"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }

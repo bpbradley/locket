@@ -66,6 +66,7 @@ pub trait SecretsProvider: Send + Sync {
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum ProviderKind {
     /// 1Password Service Account
+    #[cfg(feature = "op")]
     Op,
     /// 1Password Connect Provider
     OpConnect,
@@ -96,6 +97,7 @@ impl ProviderSelection {
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct ProviderConfig {
+    #[cfg(feature = "op")]
     #[command(flatten, next_help_heading = "1Password (op)")]
     pub op: OpConfig,
     #[command(flatten, next_help_heading = "1Password Connect")]
@@ -163,4 +165,5 @@ impl ExposeSecret<str> for AuthToken {
 pub use ProviderSelection as Provider;
 
 mod connect;
+#[cfg(feature = "op")]
 mod op;
