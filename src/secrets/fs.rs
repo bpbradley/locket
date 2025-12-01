@@ -11,13 +11,15 @@ use walkdir::WalkDir;
 pub struct SecretFs {
     mappings: Vec<PathMapping>,
     files: BTreeMap<PathBuf, SecretFile>,
+    max_file_size: u64,
 }
 
 impl SecretFs {
-    pub fn new(mappings: Vec<PathMapping>) -> Self {
+    pub fn new(mappings: Vec<PathMapping>, max_file_size: u64) -> Self {
         let mut fs = Self {
             mappings,
             files: BTreeMap::new(),
+            max_file_size,
         };
 
         fs.scan();
@@ -65,7 +67,7 @@ impl SecretFs {
             return self.files.get(src);
         }
         if let Some(dst) = self.resolve(src) {
-            let file = SecretFile::new(src, dst);
+            let file = SecretFile::new(src, dst, self.max_file_size);
             self.files.insert(src.to_path_buf(), file);
             debug!("Added secret file: {:?}", src);
             return self.files.get(src);
@@ -129,7 +131,7 @@ impl SecretFs {
         // Commit updates
         for (old_k, new_k, new_d) in updates {
             if let Some(mut file) = self.files.remove(&old_k) {
-                file = SecretFile::new(&new_k, &new_d);
+                file = SecretFile::new(&new_k, &new_d, self.max_file_size);
                 self.files.insert(file.src().to_path_buf(), file);
             }
         }

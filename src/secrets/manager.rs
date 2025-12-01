@@ -36,6 +36,10 @@ pub struct SecretsOpts {
     )]
     /// Policy for handling injection failures
     pub policy: InjectFailurePolicy,
+    /// Maximum allowable size for a template file. Files larger than this will be rejected.
+    /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
+    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M", value_parser = parse_size)]
+    pub max_file_size: u64,
 }
 
 /// Filesystem events for SecretFs
@@ -138,6 +142,7 @@ impl Default for SecretsOpts {
             mapping: vec![PathMapping::default()],
             value_dir: PathBuf::from("/run/secrets"),
             policy: InjectFailurePolicy::CopyUnmodified,
+            max_file_size: 10 * 1024 * 1024,
         }
     }
 }
@@ -207,7 +212,7 @@ pub struct Secrets {
 
 impl Secrets {
     pub fn new(opts: SecretsOpts) -> Self {
-        let fs = SecretFs::new(opts.mapping.clone());
+        let fs = SecretFs::new(opts.mapping.clone(), opts.max_file_size);
         Self {
             opts,
             fs,
@@ -590,6 +595,38 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
     Ok(PathMapping::new(src, dst))
 }
 
+/// Parse a human-friendly size string into bytes.
+fn parse_size(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+
+    // Find where the number ends and the suffix begins
+    let digit_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let (num_str, suffix) = s.split_at(digit_end);
+
+    if num_str.is_empty() {
+        return Err("No number provided".to_string());
+    }
+
+    let num: u64 = num_str
+        .parse()
+        .map_err(|e| format!("Invalid number: {}", e))?;
+
+    let multiplier = match suffix.trim().to_ascii_lowercase().as_str() {
+        "" | "b" | "byte" | "bytes" => 1,
+        "k" | "kb" | "kib" => 1024,
+        "m" | "mb" | "mib" => 1024 * 1024,
+        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+        _ => {
+            return Err(format!(
+                "Unknown size suffix: '{}'. Supported: k, m, g",
+                suffix
+            ));
+        }
+    };
+
+    Ok(num.saturating_mul(multiplier))
+}
+
 /// Construct a SecretValue from label + template.
 fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
     let sanitized = sanitize_name(label);
@@ -704,5 +741,19 @@ mod tests {
     fn sanitize_unicode_and_symbols() {
         assert_eq!(sanitize_name("πß?%"), "____");
         assert_eq!(sanitize_name("..//--__"), "..__--__");
+    }
+
+    #[test]
+    fn test_size_parsing() {
+        assert_eq!(parse_size("100").unwrap(), 100);
+        assert_eq!(parse_size("1k").unwrap(), 1024);
+        assert_eq!(parse_size("1KB").unwrap(), 1024);
+        assert_eq!(parse_size("10M").unwrap(), 10 * 1024 * 1024);
+        assert_eq!(parse_size("1G").unwrap(), 1024 * 1024 * 1024);
+
+        // Edge cases
+        assert!(parse_size("").is_err());
+        assert!(parse_size("mb").is_err());
+        assert!(parse_size("10x").is_err());
     }
 }

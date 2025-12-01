@@ -84,13 +84,18 @@ pub struct SecretFile {
     src: PathBuf,
     /// Destination path for injected secret
     dst: PathBuf,
+    /// Maximum file size in bytes for source file.
+    /// The file is buffered in memory during injection.
+    /// So we want to reasonably limit this to avoid excessive memory usage.
+    max_file_size: u64,
 }
 
 impl SecretFile {
-    pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
+    pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>, max_file_size: u64) -> Self {
         Self {
             src: src.as_ref().components().collect(),
             dst: dst.as_ref().components().collect(),
+            max_file_size,
         }
     }
     pub fn src(&self) -> &Path {
@@ -108,12 +113,11 @@ impl Injectable for SecretFile {
     fn content(&self) -> Result<Cow<'_, str>, SecretError> {
         let meta = std::fs::metadata(&self.src).map_err(SecretError::Io)?;
 
-        // 10MB Limit. TODO: Make configurable
-        if meta.len() > 10 * 1024 * 1024 {
+        if meta.len() > self.max_file_size {
             return Err(SecretError::SourceTooLarge {
                 path: self.src.clone(),
                 size: meta.len(),
-                limit: 10 * 1024 * 1024,
+                limit: self.max_file_size,
             });
         }
 
