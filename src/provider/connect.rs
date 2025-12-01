@@ -23,6 +23,14 @@ pub struct OpConnectConfig {
     /// 1Password Connect Token
     #[command(flatten)]
     token: OpConnectToken,
+
+    /// Maximum allowed concurrent requests to Connect API
+    #[arg(
+        long = "connect.max-concurrent",
+        env = "OP_CONNECT_MAX_CONCURRENT",
+        default_value_t = 20
+    )]
+    pub max_concurrent: usize,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -63,6 +71,7 @@ pub struct OpConnectProvider {
     host: Url,
     token: AuthToken,
     cache: Arc<Mutex<ResolutionCache>>,
+    max_concurrent: usize,
 }
 
 impl OpConnectProvider {
@@ -86,6 +95,7 @@ impl OpConnectProvider {
             host,
             token,
             cache: Arc::new(Mutex::new(ResolutionCache::default())),
+            max_concurrent: cfg.max_concurrent,
         })
     }
 
@@ -121,7 +131,7 @@ impl OpConnectProvider {
             .map(|vault| async move {
                 let _ = self.resolve_vault_id(&vault).await;
             })
-            .buffer_unordered(10)
+            .buffer_unordered(self.max_concurrent)
             .collect::<Vec<_>>()
             .await;
 
@@ -134,7 +144,7 @@ impl OpConnectProvider {
                 };
                 let _ = self.resolve_item_id(&vault_uuid, &item).await;
             })
-            .buffer_unordered(10)
+            .buffer_unordered(self.max_concurrent)
             .collect::<Vec<_>>()
             .await;
 
@@ -146,9 +156,11 @@ impl OpConnectProvider {
             return Ok(name_or_id.to_string());
         }
 
-        let mut cache = self.cache.lock().await;
-        if let Some(uuid) = cache.vaults.get(name_or_id) {
-            return Ok(uuid.clone());
+        {
+            let cache = self.cache.lock().await;
+            if let Some(uuid) = cache.vaults.get(name_or_id) {
+                return Ok(uuid.clone());
+            }
         }
 
         let url = self
@@ -188,7 +200,10 @@ impl OpConnectProvider {
             .ok_or_else(|| ProviderError::Other("vault response missing id".into()))?
             .to_string();
 
-        cache.vaults.insert(name_or_id.to_string(), uuid.clone());
+        {
+            let mut cache = self.cache.lock().await;
+            cache.vaults.insert(name_or_id.to_string(), uuid.clone());
+        }
         Ok(uuid)
     }
 
@@ -200,11 +215,12 @@ impl OpConnectProvider {
         if is_uuid(item_name_or_id) {
             return Ok(item_name_or_id.to_string());
         }
-
-        let mut cache = self.cache.lock().await;
         let key = (vault_uuid.to_string(), item_name_or_id.to_string());
-        if let Some(uuid) = cache.items.get(&key) {
-            return Ok(uuid.clone());
+        {
+            let cache = self.cache.lock().await;
+            if let Some(uuid) = cache.items.get(&key) {
+                return Ok(uuid.clone());
+            }
         }
 
         let path = format!("/v1/vaults/{}/items", vault_uuid);
@@ -238,7 +254,11 @@ impl OpConnectProvider {
             .ok_or_else(|| ProviderError::Other("item response missing id".into()))?
             .to_string();
 
-        cache.items.insert(key, uuid.clone());
+        {
+            let mut cache = self.cache.lock().await;
+            cache.items.insert(key, uuid.clone());
+        }
+
         Ok(uuid)
     }
 
@@ -346,9 +366,6 @@ impl SecretsProvider for OpConnectProvider {
             tracing::warn!("cache pre-warm failed: {}", e);
         }
 
-        // Fetch up to MAX_CONCURRENT secrets in parallel
-        // TODO: configurable?
-        const MAX_CONCURRENT: usize = 20;
         let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
 
         let results: Vec<Result<Option<(String, String)>, ProviderError>> = stream::iter(refs)
@@ -359,7 +376,7 @@ impl SecretsProvider for OpConnectProvider {
                     Err(e) => Err(e),
                 }
             })
-            .buffer_unordered(MAX_CONCURRENT)
+            .buffer_unordered(self.max_concurrent)
             .collect::<Vec<_>>()
             .await;
 
