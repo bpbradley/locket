@@ -3,7 +3,9 @@
 //! Providers will inject secrets from templates
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
+#[cfg(feature = "connect")]
 use connect::{OpConnectConfig, OpConnectProvider};
+#[cfg(feature = "op")]
 use op::{OpConfig, OpProvider};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
@@ -69,6 +71,7 @@ pub enum ProviderKind {
     #[cfg(feature = "op")]
     Op,
     /// 1Password Connect Provider
+    #[cfg(feature = "connect")]
     OpConnect,
 }
 
@@ -87,7 +90,9 @@ impl ProviderSelection {
     /// Build a runtime provider from configuration
     pub fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
         match self.kind {
+            #[cfg(feature = "op")]
             ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone())?)),
+            #[cfg(feature = "connect")]
             ProviderKind::OpConnect => {
                 Ok(Box::new(OpConnectProvider::new(self.cfg.connect.clone())?))
             }
@@ -100,6 +105,7 @@ pub struct ProviderConfig {
     #[cfg(feature = "op")]
     #[command(flatten, next_help_heading = "1Password (op)")]
     pub op: OpConfig,
+    #[cfg(feature = "connect")]
     #[command(flatten, next_help_heading = "1Password Connect")]
     pub connect: OpConnectConfig,
 }
@@ -164,6 +170,10 @@ impl ExposeSecret<str> for AuthToken {
 // Re-export alias that is more expressive while internally remaining descriptive
 pub use ProviderSelection as Provider;
 
+#[cfg(not(any(feature = "op", feature = "connect")))]
+compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
+
+#[cfg(feature = "connect")]
 mod connect;
 #[cfg(feature = "op")]
 mod op;

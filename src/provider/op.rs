@@ -104,20 +104,22 @@ impl SecretsProvider for OpProvider {
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     Err(ProviderError::Other(format!(
-                        "op error for {}: {}", 
-                        key, 
+                        "op error for {}: {}",
+                        key,
                         stderr.trim()
                     )))
                 }
             })
-            .buffer_unordered(MAX_CONCURRENT_OPS) 
+            .buffer_unordered(MAX_CONCURRENT_OPS)
             .collect()
             .await;
 
         let mut map = HashMap::new();
         for res in results {
             match res {
-                Ok(Some((k, v))) => { map.insert(k, v); }
+                Ok(Some((k, v))) => {
+                    map.insert(k, v);
+                }
                 Ok(None) => {}
                 Err(e) => return Err(e),
             }
