@@ -25,7 +25,7 @@ pub struct OpConfig {
 
 /// 1Password (op) based provider configuration
 #[derive(Args, Debug, Clone, Default)]
-#[group(id = "op_token", multiple = false, required = true)]
+#[group(id = "op_token", multiple = false, required = false)]
 pub struct OpToken {
     /// 1Password service account token
     #[arg(

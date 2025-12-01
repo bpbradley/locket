@@ -34,7 +34,7 @@ pub struct OpConnectConfig {
 }
 
 #[derive(Args, Debug, Clone, Default)]
-#[group(id = "connect_token", multiple = false, required = true)]
+#[group(id = "connect_token", multiple = false, required = false)]
 pub struct OpConnectToken {
     /// 1Password Connect API token
     #[arg(

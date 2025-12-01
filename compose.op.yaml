@@ -3,21 +3,14 @@ name: demo
 services:
   locket:
     user: "1000:1000" #default is 65532:65532 if not provided
-    image: ghcr.io/bpbradley/locket:latest
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    image: ghcr.io/bpbradley/locket:op
     secrets:
       - op_token
-    command:
-      - "--provider=op-connect"
-      - "--log-level=debug"
-      - "--mode=park"
-      - "--connect.token-file=/run/secrets/op_token"
-      - "--secret=test_secret=op://Mordin/SecretPassword/password"
     environment:
-      OP_CONNECT_HOST: $OP_CONNECT_HOST
+      OP_SERVICE_ACCOUNT_TOKEN_FILE: /run/secrets/op_token
+      secret_TEST_SECRET: "op://Mordin/SecretPassword/password"
+    command:
+      - "--log-level=debug"
     volumes:
       - ./secrets/templates:/templates:ro
       - secrets-store:/run/secrets
@@ -32,7 +25,7 @@ services:
       - secrets-store:/run/secrets
 secrets:
   op_token:
-    file: /etc/connect/token
+    file: /etc/op/token
 volumes:
   secrets-store:
     driver: local
