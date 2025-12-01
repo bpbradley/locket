@@ -372,7 +372,6 @@ impl SecretsProvider for OpConnectProvider {
             .map(|key| async move {
                 match self.fetch_single(&key).await {
                     Ok(val) => Ok(Some((key, val))),
-                    Err(ProviderError::NotFound(_)) => Err(ProviderError::NotFound(key)),
                     Err(e) => Err(e),
                 }
             })
