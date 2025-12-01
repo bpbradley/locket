@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Represents a loaded text resource that may contain secret references.
 ///
@@ -18,19 +18,12 @@ impl<'a> Template<'a> {
 
     /// Returns true if the template contains any `{{ ... }}` tags.
     pub fn has_tags(&self) -> bool {
-        self.iter_tags().any(|(_, key)| !key.trim().is_empty())
+        self.iter_tags().next().is_some()
     }
 
     /// Scans the template and returns a unique set of secret reference keys found within tags.
-    ///
-    /// The keys are returned trimmed of leading/trailing whitespace.
-    /// i.e. `{{ op://vault/item/field }}` -> `op://vault/item/field`
     pub fn keys(&self) -> HashSet<&'a str> {
-        let mut keys = HashSet::new();
-        for (_, inner) in self.iter_tags() {
-            keys.insert(inner.trim());
-        }
-        keys
+        self.iter_tags().map(|(_, key)| key).collect()
     }
 
     /// Render the template by replacing tags with values provided in the `map`.
@@ -44,12 +37,7 @@ impl<'a> Template<'a> {
         let mut output: Option<String> = None;
         let mut last_idx = 0;
 
-        for (range, inner) in self.iter_tags() {
-            let key = inner.trim();
-            if key.is_empty() {
-                continue;
-            }
-
+        for (range, key) in self.iter_tags() {
             if output.is_none() {
                 match values.get(key) {
                     Some(val) => {
@@ -137,8 +125,11 @@ impl<'a> Iterator for TagIterator<'a> {
 
             // Extract content
             let inner = &self.source[tag_start + 2..tag_end - 2];
-            return Some((tag_start..tag_end, inner));
-        }
+            let key = sanitize_key(inner);
+            if !key.is_empty() {
+                return Some((tag_start..tag_end, key));
+            }
+        } 
 
         // No closing tag found
         // Treat as end of valid stream. The 'Template::render' logic will
@@ -147,10 +138,26 @@ impl<'a> Iterator for TagIterator<'a> {
     }
 }
 
+fn sanitize_key(raw: &str) -> &str {
+    let trimmed = raw.trim();
+
+    // Check for double quotes
+    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        // Strip quotes AND trim the inner content
+        return trimmed[1..trimmed.len() - 1].trim();
+    }
+
+    // Check for single quotes
+    if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2 {
+        return trimmed[1..trimmed.len() - 1].trim();
+    }
+
+    trimmed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn extract_keys_simple() {
@@ -246,5 +253,56 @@ mod tests {
             Cow::Borrowed(s) => assert_eq!(s, "Just some config"),
             Cow::Owned(_) => panic!("Should not allocate for tagless string"),
         }
+    }
+
+    #[test]
+    fn extract_keys_with_quotes() {
+        let raw = r#"
+            A: {{ "op://key1" }}
+            B: {{ 'op://key2' }}
+            C: {{ op://key3 }}
+        "#;
+        let tpl = Template::new(raw);
+        let keys = tpl.keys();
+
+        assert_eq!(keys.len(), 3);
+        assert!(keys.contains("op://key1"));
+        assert!(keys.contains("op://key2"));
+        assert!(keys.contains("op://key3"));
+    }
+
+    #[test]
+    fn render_with_mixed_quotes() {
+        let raw = r#"{{ "key1" }} | {{ 'key2' }} | {{ key3 }}"#;
+        let tpl = Template::new(raw);
+
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("key1".into(), "val1".into());
+        map.insert("key2".into(), "val2".into());
+        map.insert("key3".into(), "val3".into());
+
+        let out = tpl.render(&map);
+        assert_eq!(out, "val1 | val2 | val3");
+    }
+
+    #[test]
+    fn quotes_with_whitespace() {
+        let raw = r#"{{ " key1 " }} | {{ ' key2' }}"#;
+        let tpl = Template::new(raw);
+
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("key1".into(), "val1".into());
+        map.insert("key2".into(), "val2".into());
+
+        let out = tpl.render(&map);
+        assert_eq!(out, "val1 | val2");
+    }
+    
+    #[test]
+    fn empty_quotes_ignored() {
+        let raw = r#"{{ "" }} {{ '' }} {{ }} "#;
+        let tpl = Template::new(raw);
+        assert!(tpl.keys().is_empty());
+        assert!(!tpl.has_tags());
     }
 }
