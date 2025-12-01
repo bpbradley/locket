@@ -3,11 +3,11 @@
 //! Providers will inject secrets from templates
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
+use connect::{OpConnectConfig, OpConnectProvider};
+use op::{OpConfig, OpProvider};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use op::{OpConfig, OpProvider};
-use connect::{OpConnectConfig, OpConnectProvider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
