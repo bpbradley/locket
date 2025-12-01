@@ -1,9 +1,9 @@
 //! 1password (op) based provider implementation
 
-use crate::provider::{ProviderError, SecretsProvider};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use clap::Args;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 pub struct OpConfig {
     /// 1Password token configuration
     #[command(flatten)]
-    token: OpToken,
+    tok: OpToken,
 
     /// Optional: Path to 1Password config directory
     /// Defaults to standard op config locations if not provided,
@@ -25,46 +25,35 @@ pub struct OpConfig {
 #[group(id = "op_token", multiple = false, required = true)]
 pub struct OpToken {
     /// 1Password service account token
-    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
-    token: Option<SecretString>,
+    #[arg(
+        long = "op.token",
+        env = "OP_SERVICE_ACCOUNT_TOKEN",
+        hide_env_values = true
+    )]
+    op_val: Option<SecretString>,
 
     /// Path to file containing 1Password service account token
-    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
-    token_file: Option<PathBuf>,
+    #[arg(long = "op.token-file", env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
+    op_file: Option<PathBuf>,
 }
 
 impl OpToken {
-    pub fn resolve(&self) -> Result<SecretString, ProviderError> {
-        match (&self.token, &self.token_file) {
-            (Some(tok), None) => Ok(tok.clone()),
-            (None, Some(path)) => {
-                let txt = std::fs::read_to_string(path)?;
-                let trimmed = txt.trim();
-                if trimmed.is_empty() {
-                    Err(ProviderError::InvalidConfig(format!(
-                        "token file {} is empty",
-                        path.display()
-                    )))
-                } else {
-                    Ok(SecretString::new(trimmed.to_owned().into()))
-                }
-            }
-            _ => Err(ProviderError::InvalidConfig(
-                "missing credentials for op".into(),
-            )),
-        }
+    pub fn resolve(&self) -> Result<AuthToken, ProviderError> {
+        AuthToken::try_new(self.op_val.clone(), self.op_file.clone(), "op")
     }
 }
 
 pub struct OpProvider {
-    token: SecretString,
+    #[allow(dead_code)] // TODO: this provider is just a stub for now with op cli removed
+    token: AuthToken,
+    #[allow(dead_code)]
     config: Option<PathBuf>,
 }
 
 impl OpProvider {
     pub fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
         Ok(Self {
-            token: cfg.token.resolve()?,
+            token: cfg.tok.resolve()?,
             config: cfg.config_dir,
         })
     }

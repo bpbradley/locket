@@ -4,7 +4,9 @@
 use crate::provider::op::{OpConfig, OpProvider};
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
+use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -63,6 +65,7 @@ pub trait SecretsProvider: Send + Sync {
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum ProviderKind {
     Op,
+    OpConnect,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -81,6 +84,9 @@ impl ProviderSelection {
     pub fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
         match self.kind {
             ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone())?)),
+            ProviderKind::OpConnect => {
+                Ok(Box::new(OpConnectProvider::new(self.cfg.connect.clone())?))
+            }
         }
     }
 }
@@ -89,9 +95,70 @@ impl ProviderSelection {
 pub struct ProviderConfig {
     #[command(flatten, next_help_heading = "1Password (op)")]
     pub op: OpConfig,
+    #[command(flatten, next_help_heading = "1Password Connect")]
+    pub connect: OpConnectConfig,
+}
+
+/// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
+///
+/// It can be trivially constructed by passing a secret string, or it will attempt to resolve the token from the file if provided.
+#[derive(Debug, Clone, Default)]
+pub struct AuthToken {
+    token: SecretString,
+}
+
+impl AuthToken {
+    /// Simple wrapper for SecretString
+    pub fn new(token: SecretString) -> Self {
+        Self { token }
+    }
+    /// Attempt to create an AuthToken from either a direct token or a file path. If a token is directly passed, it takes precedence.
+    /// Context must be provided for error messages.
+    pub fn try_new(
+        token: Option<SecretString>,
+        file: Option<PathBuf>,
+        context: &str,
+    ) -> Result<Self, ProviderError> {
+        match (&token, &file) {
+            (Some(tok), _) => Ok(Self { token: tok.clone() }),
+            (None, Some(path)) => {
+                let content = std::fs::read_to_string(path).map_err(|e| {
+                    ProviderError::InvalidConfig(format!(
+                        "failed to read {} token file {:?}: {}",
+                        context, path, e
+                    ))
+                })?;
+
+                let trimmed = content.trim();
+                if trimmed.is_empty() {
+                    return Err(ProviderError::InvalidConfig(format!(
+                        "{} token file {:?} is empty",
+                        context, path
+                    )));
+                }
+
+                Ok(Self {
+                    token: SecretString::new(trimmed.to_owned().into()),
+                })
+            }
+            _ => Err(ProviderError::InvalidConfig(format!(
+                "{}: missing authentication token",
+                context
+            ))),
+        }
+    }
+}
+
+/// Allows exposing the inner secret string using ExposeSecret from `secrecy` crate
+impl ExposeSecret<str> for AuthToken {
+    fn expose_secret(&self) -> &str {
+        self.token.expose_secret()
+    }
 }
 
 // Re-export alias that is more expressive while internally remaining descriptive
 pub use ProviderSelection as Provider;
 
+mod connect;
 pub mod op;
+pub use connect::{OpConnectConfig, OpConnectProvider};

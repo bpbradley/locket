@@ -20,7 +20,7 @@ pub struct Cli {
 pub enum Command {
     /// Start the secret sidecar agent.
     /// All secrets will be collected and materialized according to configuration.
-    Run(RunArgs),
+    Run(Box<RunArgs>),
 
     /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
     /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.

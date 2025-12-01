@@ -243,7 +243,7 @@ impl Secrets {
         self
     }
 
-    pub async fn process_secret(
+    pub async fn try_inject(
         &self,
         item: &dyn Injectable,
         provider: &dyn SecretsProvider,
@@ -291,19 +291,25 @@ impl Secrets {
         Ok(())
     }
 
-    pub async fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
-        let policy = self.opts.policy;
+    pub async fn process(
+        &self,
+        item: &dyn Injectable,
+        provider: &dyn SecretsProvider,
+    ) -> Result<(), SecretError> {
+        match self.try_inject(item, provider).await {
+            Ok(_) => Ok(()),
+            Err(e) => self.handle_policy(item, e, self.opts.policy),
+        }
+    }
 
+    pub async fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
         // Combine sources
         let values = self.iter_values().map(|v| v as &dyn Injectable);
         let files = self.fs.iter_files().map(|f| f as &dyn Injectable);
 
         // TODO: Parallelize?
         for item in values.chain(files) {
-            match self.process_secret(item, provider).await {
-                Ok(_) => {}
-                Err(e) => self.handle_policy(item, e, policy)?,
-            }
+            self.process(item, provider).await?;
         }
         Ok(())
     }
@@ -530,7 +536,7 @@ impl Secrets {
         if src.exists() {
             self.fs.upsert(src);
             if let Some(file) = self.fs.iter_files().find(|f| f.src() == src) {
-                self.process_secret(file, provider).await?;
+                self.process(file, provider).await?;
             }
         }
         Ok(())
