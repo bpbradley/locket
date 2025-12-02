@@ -5,7 +5,7 @@
 1. [Overview](#overview)
 1. [Quick Start](#overview)
 1. [Full Configuration](./docs/run.md)
-1. [Permissions](#permissions)
+1. [Security](#security)
 1. [Examples](#example-hot-reloading-traefik-configurations-with-secrets)
 1. [Supported Providers](#supported-providers)
 1. [Roadmap](#roadmap)
