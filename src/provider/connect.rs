@@ -14,11 +14,11 @@ use tokio::sync::Mutex;
 use tracing::debug;
 use url::Url;
 
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Args, Debug, Clone)]
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
-    pub host: Option<String>,
+    pub host: String,
 
     /// 1Password Connect Token
     #[command(flatten)]
@@ -31,6 +31,16 @@ pub struct OpConnectConfig {
         default_value_t = 20
     )]
     pub max_concurrent: usize,
+}
+
+impl Default for OpConnectConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            token: OpConnectToken::default(),
+            max_concurrent: 20,
+        }
+    }
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -76,13 +86,9 @@ pub struct OpConnectProvider {
 
 impl OpConnectProvider {
     pub fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
-        let host_str = cfg
-            .host
-            .ok_or_else(|| ProviderError::InvalidConfig("missing OP_CONNECT_HOST".into()))?;
-
         let token = cfg.token.resolve()?;
 
-        let host = Url::parse(&host_str)
+        let host = Url::parse(&cfg.host)
             .map_err(|e| ProviderError::InvalidConfig(format!("bad host url: {}", e)))?;
 
         let client = Client::builder()

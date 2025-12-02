@@ -26,7 +26,7 @@
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` | *None* | Secrets provider<br><br> **Options:**<br> - `op`: 1Password Service Account<br> - `op-connect`: 1Password Connect Provider |
+| `--provider` | `SECRETS_PROVIDER` | *None* | Secrets provider<br><br> **Options:**<br> - `op`: 1Password Service Account<br> - `op-connect`: 1Password Connect Provider<br> - `bws`: Bitwarden Secrets Provider |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
@@ -42,3 +42,12 @@
 | `--connect.token` | `OP_CONNECT_TOKEN` | *None* | 1Password Connect API token |
 | `--connect.token-file` | `OP_CONNECT_TOKEN_FILE` | *None* | Path to file containing 1Password Connect API token |
 | `--connect.max-concurrent` | `OP_CONNECT_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Connect API |
+### Bitwarden Secrets Provider
+
+| Command | Env | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--bws.api` | `BWS_API_URL` | `https://api.bitwarden.com` | Bitwarden API URL |
+| `--bws.identity` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
+| `--bws.max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
+| `--bws.token` | `BWS_ACCESS_TOKEN` | *None* |  |
+| `--bws.token-file` | `BWS_ACCESS_TOKEN_FILE` | *None* |  |
