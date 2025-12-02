@@ -37,10 +37,14 @@ services:
   locket:
     image: ghcr.io/bpbradley/locket:latest
     user: "65532:65532" # The default user is 65532:65532 (nonroot) when not specified
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Configurations can be supplied via command like below, or via env variables.
     command:
         - "--provider=op"
-        - "--token-file=/run/secrets/op_token"
+        - "--op.token-file=/run/secrets/op_token"
         - "--map=/templates:/run/secrets" # Supports multiple maps, if needed.
         - "--secret=db_pass={{ op://vault/db/pass }}"
         - "--secret=db_host={{ op://vault/db/host }}"
@@ -79,30 +83,33 @@ volumes:
       type: tmpfs
       device: tmpfs
 ```
-## Permissions
+## Security
 
 The image runs as user `65532` (`nonroot`) by default. This was adopted from the standards
-set in Google's popular rootless/distroless images.
+set in Google's popular rootless/distroless images. In addition, locket does not serve inbound requests and requires no elevated privilege. So it is safe to add any additional security measures to docker compose configuration.
 
-If you must run as a different user (e.g. uid: 1000), you will encounter strict security checks from the 1Password CLI (op). It requires that the current user has a valid entry in /etc/passwd and owns its configuration directory.
-
-To support custom UIDs, you must mount two additional items
+It may be useful to explicitly set permissions on the tmpfs driver, to avoid any ambiguity. However, docker will typically set this up correctly when the volume is created, depending on what services depend on it.
 
 ```yaml
 services:
   locket:
+    image: ghcr.io/bpbradley/locket
     user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
-      # 1. Identity: Provide a user entry for UID 1000
-      # i.e. `op:x:1000:1000::/home/nonroot:/bin/sh`
-      - ./passwd:/etc/passwd:ro
-      # 2. Config: Provide a writable config directory owned by UID 1000
-      - ./op-data:/config
+      - secrets-store:/run/secrets:ro
+
+volumes:
+  secrets-store:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=1000,gid=1000,mode=700
 ```
-
-> [!NOTE] 
-> This will be fixed in v1.0.0 when the `op` cli dependency is removed
-
 ## Example: Hot-Reloading Traefik configurations with Secrets
 
 Traefik supports Dynamic Configuration via files, which it watches for changes. By pairing Traefik with Locket, you can inject secrets (like Dashboard credentials, TLS certificates, or middleware auth) into your configuration files and have Traefik hot-reload them automatically without a restart.
@@ -183,21 +190,24 @@ volumes:
 
 ## Providers
 
-1. 1password.
+1. 1password Connect (`--provider=op-connect`)
+2. 1password Service Accounts (`--provider=op`)
 
-Yes, it is a lonely list. More providers will be supported prior to v1.0.0. The architecture was specifically designed to make sure this would be easy to expand later™
+> [!TIP]
+> Each provider has its own docker image, if a slim version is preferred. The `latest` tag bundles all providers and their respective dependencies. But a provider specific tag like `locket:connect` is only about 4MB and has no extra dependencies besides what is needed for the connect provider.
+
+> [!NOTE]
+> The `op` (service account) provider is a bit more feature rich than the connect provider (currently), and is easier to setup, but it does require the bundled `op` cli dependency right now, because 1password does not offer a Rust SDK
 
 ## Roadmap
 
 ### Before v1.0.0
 
-1. Decouple from `op` cli dependency in secrets provider. This was done as a convience while developing the broader architecture, but it carries some annoying caveats
-1. Implement support for at least two more providers, as 1password is the only currently supported provider.
+1. Have support for at least 4 providers
 1. Add support for relative paths for more use as a standalone CLI.
 
 ### Beyond
 
-1. **Docker Labels**: Configure secrets via container labels so that a single locket instance could provide for many apps via service discovery.
 1. **exec Command**: A wrapper mode (`locket exec --env .env -- docker compose up -d`) that injects secrets into the child process environment without writing files.
+1. **Templating Engine**: Adding attributes to the secret reference which can transform secrets before injection. For example `{{ secret_reference | base64 }}` to encode the secret as base64, or `{{ secret_reference | totp }}` to interpret the secret as a totp code.
 1. **Swarm Operator**: Native integration for Docker Swarm secrets.
-

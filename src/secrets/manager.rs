@@ -1,11 +1,13 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
+use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretsOpts {
@@ -34,6 +36,10 @@ pub struct SecretsOpts {
     )]
     /// Policy for handling injection failures
     pub policy: InjectFailurePolicy,
+    /// Maximum allowable size for a template file. Files larger than this will be rejected.
+    /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
+    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M", value_parser = parse_size)]
+    pub max_file_size: u64,
 }
 
 /// Filesystem events for SecretFs
@@ -136,6 +142,7 @@ impl Default for SecretsOpts {
             mapping: vec![PathMapping::default()],
             value_dir: PathBuf::from("/run/secrets"),
             policy: InjectFailurePolicy::CopyUnmodified,
+            max_file_size: 10 * 1024 * 1024,
         }
     }
 }
@@ -205,7 +212,7 @@ pub struct Secrets {
 
 impl Secrets {
     pub fn new(opts: SecretsOpts) -> Self {
-        let fs = SecretFs::new(opts.mapping.clone());
+        let fs = SecretFs::new(opts.mapping.clone(), opts.max_file_size);
         Self {
             opts,
             fs,
@@ -241,21 +248,103 @@ impl Secrets {
         self
     }
 
-    /// Inject all known secrets (values + files).
-    pub fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
-        let policy = self.opts.policy;
+    pub async fn try_inject(
+        &self,
+        item: &dyn Injectable,
+        provider: &dyn SecretsProvider,
+    ) -> Result<(), SecretError> {
+        let content = item.content()?;
 
-        // value-backed secrets
-        for v in self.iter_values() {
-            v.inject(policy, provider, &self.writer)?;
+        let tpl = Template::new(&content);
+        let keys = tpl.keys();
+        let has_keys = !keys.is_empty();
+
+        let candidates: Vec<&str> = if has_keys {
+            keys.into_iter().collect()
+        } else {
+            vec![content.trim()]
+        };
+
+        let references: Vec<&str> = candidates
+            .into_iter()
+            .filter(|k| provider.accepts_key(k))
+            .collect();
+
+        if references.is_empty() {
+            debug!(dst=?item.dst(), "no resolveable secrets found; passing through");
+            self.writer.atomic_write(item.dst(), content.as_bytes())?;
+            return Ok(());
         }
 
-        // file-backed secrets
-        for f in self.fs.iter_files() {
-            f.inject(policy, provider, &self.writer)?;
-        }
+        info!(dst=?item.dst(), count=references.len(), "fetching secrets");
+        let secrets_map = provider.fetch_map(&references).await?;
+
+        let output = if has_keys {
+            tpl.render(&secrets_map)
+        } else {
+            match secrets_map.get(content.trim()) {
+                Some(val) => Cow::Borrowed(val.as_str()),
+                None => {
+                    warn!(dst=?item.dst(), "provider returned success but secret value was missing");
+                    content
+                }
+            }
+        };
+
+        self.writer.atomic_write(item.dst(), output.as_bytes())?;
 
         Ok(())
+    }
+
+    pub async fn process(
+        &self,
+        item: &dyn Injectable,
+        provider: &dyn SecretsProvider,
+    ) -> Result<(), SecretError> {
+        match self.try_inject(item, provider).await {
+            Ok(_) => Ok(()),
+            Err(e) => self.handle_policy(item, e, self.opts.policy),
+        }
+    }
+
+    pub async fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
+        // Combine sources
+        let values = self.iter_values().map(|v| v as &dyn Injectable);
+        let files = self.fs.iter_files().map(|f| f as &dyn Injectable);
+
+        // TODO: Parallelize?
+        for item in values.chain(files) {
+            self.process(item, provider).await?;
+        }
+        Ok(())
+    }
+
+    fn handle_policy(
+        &self,
+        item: &dyn Injectable,
+        err: SecretError,
+        policy: InjectFailurePolicy,
+    ) -> Result<(), SecretError> {
+        match policy {
+            InjectFailurePolicy::Error => Err(err),
+            InjectFailurePolicy::CopyUnmodified => {
+                warn!(
+                    src = ?item.label(),
+                    dst = ?item.dst(),
+                    error = ?err,
+                    "injection failed; policy=copy-unmodified. Reverting to raw copy."
+                );
+                let raw = item.content().unwrap_or(Cow::Borrowed(""));
+                if !raw.is_empty() {
+                    self.writer.atomic_write(item.dst(), raw.as_bytes())?;
+                }
+                Ok(())
+            }
+            InjectFailurePolicy::Ignore => {
+                warn!(src = ?item.label(), dst = ?item.dst(), error = ?err, "injection failed; ignoring");
+                Ok(())
+            }
+        }
     }
 
     pub fn collisions(&self) -> Result<(), SecretError> {
@@ -294,9 +383,7 @@ impl Secrets {
             if next_path.starts_with(curr_path) {
                 return Err(SecretError::StructureConflict {
                     blocker: curr_src.clone(),
-                    blocker_path: curr_path.to_path_buf(),
                     blocked: next_src.clone(),
-                    blocked_path: next_path.to_path_buf(),
                 });
             }
         }
@@ -315,7 +402,10 @@ impl Secrets {
         }
 
         for file in &removed {
-            file.remove()?;
+            let dst = file.dst();
+            if dst.exists() {
+                std::fs::remove_file(dst)?;
+            }
             debug!("event: removed secret file: {:?}", file.dst());
         }
 
@@ -369,7 +459,7 @@ impl Secrets {
         }
     }
 
-    fn on_move(
+    async fn on_move(
         &mut self,
         provider: &dyn SecretsProvider,
         old: &Path,
@@ -407,6 +497,10 @@ impl Secrets {
                     warn!(error=?e, "move failed; falling back to reinjection");
                     // Rollback memory state so we can start fresh
                     self.fs.remove(new);
+
+                    if from.exists() {
+                        let _ = std::fs::remove_file(&from);
+                    }
                 }
             }
         }
@@ -414,46 +508,57 @@ impl Secrets {
         // Fallback to remove + write
         debug!(?old, ?new, "fallback move via remove + write");
         self.on_remove(old)?;
-        self.on_write(provider, new)?;
+        self.on_write(provider, new).await?;
 
         Ok(())
     }
 
-    fn on_write(&mut self, provider: &dyn SecretsProvider, src: &Path) -> Result<(), SecretError> {
+    async fn on_write(
+        &mut self,
+        provider: &dyn SecretsProvider,
+        src: &Path,
+    ) -> Result<(), SecretError> {
         if src.is_dir() {
             debug!(?src, "directory write event; scanning for children");
-            for entry in walkdir::WalkDir::new(src)
+            let entries: Vec<PathBuf> = walkdir::WalkDir::new(src)
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
-            {
+                .map(|e| e.path().to_path_buf())
+                .collect();
+
+            for entry in entries {
                 // Recursion.. Treat every child file as its own Write event.
                 // Should only ever be one level deep here, since we are already
                 // inside a directory write event.
-                self.on_write(provider, entry.path())?;
+                Box::pin(self.on_write(provider, &entry)).await?;
             }
             return Ok(());
         }
         // Tiny race condition here, if file is removed while we are processing it..
         // Only a possible issue with inject failure policy of Error.
         // Otherwise, this will lead to eventual consistency on the next processing event
-        if src.exists()
-            && let Some(file) = self.fs.upsert(src)
-        {
-            file.inject(self.opts.policy, provider, &self.writer)?;
+        if src.exists() {
+            self.fs.upsert(src);
+            if let Some(file) = self.fs.iter_files().find(|f| f.src() == src) {
+                self.process(file, provider).await?;
+            }
         }
         Ok(())
     }
 
-    pub fn handle_fs_event(
+    pub async fn handle_fs_event(
         &mut self,
         provider: &dyn SecretsProvider,
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_write(provider, &normalize(src)),
+            FsEvent::Write(src) => self.on_write(provider, &normalize(src)).await,
             FsEvent::Remove(src) => self.on_remove(&normalize(src)),
-            FsEvent::Move { from, to } => self.on_move(provider, &normalize(from), &normalize(to)),
+            FsEvent::Move { from, to } => {
+                self.on_move(provider, &normalize(from), &normalize(to))
+                    .await
+            }
         }
     }
 }
@@ -488,6 +593,38 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
         })?;
 
     Ok(PathMapping::new(src, dst))
+}
+
+/// Parse a human-friendly size string into bytes.
+fn parse_size(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+
+    // Find where the number ends and the suffix begins
+    let digit_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let (num_str, suffix) = s.split_at(digit_end);
+
+    if num_str.is_empty() {
+        return Err("No number provided".to_string());
+    }
+
+    let num: u64 = num_str
+        .parse()
+        .map_err(|e| format!("Invalid number: {}", e))?;
+
+    let multiplier = match suffix.trim().to_ascii_lowercase().as_str() {
+        "" | "b" | "byte" | "bytes" => 1,
+        "k" | "kb" | "kib" => 1024,
+        "m" | "mb" | "mib" => 1024 * 1024,
+        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+        _ => {
+            return Err(format!(
+                "Unknown size suffix: '{}'. Supported: k, m, g",
+                suffix
+            ));
+        }
+    };
+
+    Ok(num.saturating_mul(multiplier))
 }
 
 /// Construct a SecretValue from label + template.
@@ -604,5 +741,19 @@ mod tests {
     fn sanitize_unicode_and_symbols() {
         assert_eq!(sanitize_name("πß?%"), "____");
         assert_eq!(sanitize_name("..//--__"), "..__--__");
+    }
+
+    #[test]
+    fn test_size_parsing() {
+        assert_eq!(parse_size("100").unwrap(), 100);
+        assert_eq!(parse_size("1k").unwrap(), 1024);
+        assert_eq!(parse_size("1KB").unwrap(), 1024);
+        assert_eq!(parse_size("10M").unwrap(), 10 * 1024 * 1024);
+        assert_eq!(parse_size("1G").unwrap(), 1024 * 1024 * 1024);
+
+        // Edge cases
+        assert!(parse_size("").is_err());
+        assert!(parse_size("mb").is_err());
+        assert!(parse_size("10x").is_err());
     }
 }

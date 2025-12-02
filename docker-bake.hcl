@@ -5,11 +5,11 @@ variable "IMAGE"         { default = "locket" }
 variable "PLATFORMS"     { default = "linux/amd64" }
 
 group "release" {
-  targets = ["base", "op", "aio"]
+  targets = ["connect", "op", "aio"]
 }
 
 group "all" {
-  targets = ["base", "op", "aio", "debug"]
+  targets = ["connect", "op", "aio", "debug"]
 }
 
 target "_common" {
@@ -42,23 +42,34 @@ function "tags_main" {
   )
 }
 
-target "base" {
-  inherits = ["_common"]
-  target = "base"
-  tags = tags_for("base")
-  labels = { "org.opencontainers.image.version" = VERSION }
-}
-
 target "op" {
   inherits = ["_common"]
   target = "op"
+  args = {
+    FEATURES = "op"
+    DEFAULT_PROVIDER = "op"
+  } 
   tags = tags_for("op")
+  labels = { "org.opencontainers.image.version" = VERSION }
+}
+
+target "connect" {
+  inherits = ["_common"]
+  target = "base"
+  args = {
+    FEATURES = "connect"
+    DEFAULT_PROVIDER = "op-connect"
+  } 
+  tags = tags_for("connect")
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
 target "aio" {
   inherits = ["_common"]
   target = "aio"
+  args = {
+    FEATURES = "op,connect"
+  }
   tags = tags_main()
   labels = { "org.opencontainers.image.version" = VERSION }
 }
@@ -66,6 +77,9 @@ target "aio" {
 target "debug" {
   inherits = ["_common"]
   target = "debug"
+  args = {
+    FEATURES = "op,connect"
+  }
   tags = [
     "${REGISTRY}/${IMAGE}:${VERSION}-debug",
     "${REGISTRY}/${IMAGE}:debug"

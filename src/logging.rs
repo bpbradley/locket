@@ -57,13 +57,18 @@ impl Logger {
             log_level,
         }
     }
-    fn env_filter(&self) -> EnvFilter {
-        EnvFilter::try_from_default_env()
-            .or_else(|_| EnvFilter::try_new(self.log_level.as_str()))
-            .unwrap_or_else(|_| EnvFilter::new("info"))
+    fn filter(&self) -> EnvFilter {
+        // Respect RUST_LOG if set
+        if let Ok(filter) = EnvFilter::try_from_default_env() {
+            return filter;
+        }
+        // Otherwise, scope to requested log level
+        let level = self.log_level.as_str();
+        let directives = format!("info,locket={}", level);
+        EnvFilter::new(directives)
     }
     pub fn init(&self) -> anyhow::Result<()> {
-        let filter = self.env_filter();
+        let filter = self.filter();
         match self.log_format {
             LogFormat::Json => tracing_subscriber::registry()
                 .with(filter)

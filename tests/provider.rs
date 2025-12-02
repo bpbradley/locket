@@ -1,144 +1,156 @@
+use async_trait::async_trait;
 use locket::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{PathMapping, SecretError, SecretValues, Secrets, SecretsOpts},
+    secrets::{InjectFailurePolicy, PathMapping, SecretError, Secrets, SecretsOpts},
 };
-use std::env;
-use std::path::Path;
+use std::collections::HashMap;
+use tempfile::tempdir;
+use tracing::debug;
 
-#[derive(Clone, Default)]
+// Holds a static map of "Remote" secrets to serve.
+#[derive(Debug, Clone, Default)]
 struct MockProvider {
-    inject_should_fail: bool,
+    data: HashMap<String, String>,
 }
 
+impl MockProvider {
+    fn new(data: Vec<(&str, &str)>) -> Self {
+        let mut map = HashMap::new();
+        for (k, v) in data {
+            map.insert(k.to_string(), v.to_string());
+        }
+        Self { data: map }
+    }
+}
+
+#[async_trait]
 impl SecretsProvider for MockProvider {
-    fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError> {
-        if self.inject_should_fail {
-            return Err(ProviderError::Other("inject failed (mock)".into()));
+    fn accepts_key(&self, key: &str) -> bool {
+        key.starts_with("mock://")
+    }
+
+    async fn fetch_map(
+        &self,
+        references: &[&str],
+    ) -> Result<HashMap<String, String>, ProviderError> {
+        let mut result = HashMap::new();
+        for &key in references {
+            if let Some(val) = self.data.get(key) {
+                result.insert(key.to_string(), val.clone());
+            } else {
+                return Err(ProviderError::NotFound(key.to_string()));
+            }
         }
-        let data = std::fs::read(src).map_err(ProviderError::Io)?;
-        std::fs::write(dst, data).map_err(ProviderError::Io)?;
-        Ok(())
+        Ok(result)
     }
 }
 
-#[test]
-fn inject_all_success_for_files_and_values() {
-    let tmp = tempfile::tempdir().unwrap();
-    let tpl = tmp.path().join("templates");
-    std::fs::create_dir_all(&tpl).unwrap();
-    std::fs::write(tpl.join("a.txt"), b"hello").unwrap();
-    let out = tmp.path().join("out");
+fn setup(
+    tpl_name: &str,
+    tpl_content: &str,
+) -> (tempfile::TempDir, std::path::PathBuf, SecretsOpts) {
+    let tmp = tempdir().unwrap();
+    let tpl_dir = tmp.path().join("templates");
+    let out_dir = tmp.path().join("secrets");
+    std::fs::create_dir_all(&tpl_dir).unwrap();
+    std::fs::create_dir_all(&out_dir).unwrap();
+
+    std::fs::write(tpl_dir.join(tpl_name), tpl_content).unwrap();
+
     let opts = SecretsOpts::default()
-        .with_value_dir(out.clone())
-        .with_mapping(vec![PathMapping::new(tpl.clone(), out.clone())]);
-    let mut secrets = Secrets::new(opts);
+        .with_mapping(vec![PathMapping::new(&tpl_dir, &out_dir)])
+        .with_value_dir(out_dir.clone());
 
-    secrets.add_value("Greeting", "Hi {{name}}");
-
-    let provider = MockProvider::default();
-    secrets.inject_all(&provider).unwrap();
-    let got_file = std::fs::read(out.join("a.txt")).unwrap();
-    assert_eq!(got_file, b"hello");
-    let got_value = std::fs::read(out.join("greeting")).unwrap();
-    assert_eq!(got_value, b"Hi {{name}}");
+    (tmp, out_dir, opts)
 }
 
-#[test]
-fn inject_all_fallback_copy_on_error() {
-    let tmp = tempfile::tempdir().unwrap();
-    let tpl = tmp.path().join("templates");
-    std::fs::create_dir_all(&tpl).unwrap();
-    std::fs::write(tpl.join("bin.dat"), b"RAW").unwrap();
-    let out = tmp.path().join("out");
-    let opts = SecretsOpts::default()
-        .with_value_dir(out.clone())
-        .with_mapping(vec![PathMapping::new(tpl.clone(), out.clone())]);
+#[tokio::test]
+async fn test_happy_path_template_rendering() {
+    // A file with two secrets
+    let (_tmp, out_dir, opts) = setup(
+        "config.yaml",
+        "user: {{ mock://user }}\npass: {{ mock://pass }}",
+    );
+
+    // Provider has both secrets
+    let provider = MockProvider::new(vec![("mock://user", "admin"), ("mock://pass", "secret123")]);
+
     let secrets = Secrets::new(opts);
 
-    let provider = MockProvider {
-        inject_should_fail: true,
-    };
-    secrets.inject_all(&provider).unwrap();
-    let got = std::fs::read(out.join("bin.dat")).unwrap();
-    assert_eq!(got, b"RAW");
+    secrets.inject_all(&provider).await.unwrap();
+
+    let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
+    assert_eq!(result, "user: admin\npass: secret123");
 }
 
-#[test]
-fn inject_all_error_without_fallback() {
-    let tmp = tempfile::tempdir().unwrap();
-    let tpl = tmp.path().join("templates");
-    std::fs::create_dir_all(&tpl).unwrap();
-    std::fs::write(tpl.join("bin.dat"), b"X").unwrap();
-    let out = tmp.path().join("out");
-    let opts = SecretsOpts::default()
-        .with_value_dir(out.clone())
-        .with_mapping(vec![PathMapping::new(tpl.clone(), out.clone())])
-        .with_policy(locket::secrets::InjectFailurePolicy::Error);
+#[tokio::test]
+async fn test_whole_file_replacement() {
+    let (_tmp, out_dir, opts) = setup("id_rsa", "mock://ssh/key");
+
+    let key_content = "-----BEGIN RSA PRIVATE KEY-----...";
+    let provider = MockProvider::new(vec![("mock://ssh/key", key_content)]);
     let secrets = Secrets::new(opts);
-    let provider = MockProvider {
-        inject_should_fail: true,
-    };
-    let err = secrets.inject_all(&provider).unwrap_err();
-    match err {
-        SecretError::InjectionFailed { .. } => { /* expected variant */ }
-        other => panic!("expected InjectionFailed, got: {other}"),
+
+    secrets.inject_all(&provider).await.unwrap();
+
+    let result = std::fs::read_to_string(out_dir.join("id_rsa")).unwrap();
+    assert_eq!(result, key_content); // Should be replaced entirely
+}
+
+#[tokio::test]
+async fn test_policy_error_aborts() {
+    // Template requests a missing secret
+    let (_tmp, _out, mut opts) = setup("config.yaml", "Key: {{ mock://missing }}");
+
+    opts.policy = InjectFailurePolicy::Error;
+
+    let provider = MockProvider::new(vec![]); // Empty provider
+    let secrets = Secrets::new(opts);
+
+    let result = secrets.inject_all(&provider).await;
+
+    assert!(result.is_err());
+
+    match result.unwrap_err() {
+        SecretError::Provider(ProviderError::NotFound(k)) => assert_eq!(k, "mock://missing"),
+        e => panic!("Unexpected error type: {:?}", e),
     }
 }
 
-#[test]
-fn inject_all_value_sources() {
-    let _g = TestEnv::set_vars(vec![("secret_GREETING", "Hello {{name}}!")]);
-    let tmp = tempfile::tempdir().unwrap();
-    let out = tmp.path().join("out");
-    let opts = SecretsOpts::default()
-        .with_value_dir(out.clone())
-        .with_mapping(vec![PathMapping::new(
-            tmp.path().join("templates"),
-            out.clone(),
-        )]);
-    let secrets = Secrets::new(opts).with_values(SecretValues::default().load());
-    let provider = MockProvider::default();
-    secrets.inject_all(&provider).unwrap();
-    let got = std::fs::read(out.join("greeting")).unwrap();
-    assert_eq!(got, b"Hello {{name}}!");
+#[tokio::test]
+async fn test_policy_copy_unmodified() {
+    // Template requests missing secret
+    let (_tmp, out_dir, mut opts) = setup("config.yaml", "Key: {{ mock://missing }}");
+
+    opts.policy = InjectFailurePolicy::CopyUnmodified;
+
+    let provider = MockProvider::new(vec![]);
+    let secrets = Secrets::new(opts);
+
+    // Should succeed (return Ok) despite missing secret
+    secrets.inject_all(&provider).await.unwrap();
+
+    // Should contain original template text
+    let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
+    assert_eq!(result, "Key: {{ mock://missing }}");
 }
 
-struct TestEnv {
-    saved: Vec<(String, Option<String>)>,
-}
-impl TestEnv {
-    fn set_vars(vars: Vec<(&str, &str)>) -> Self {
-        let keys: Vec<String> = vars.iter().map(|(k, _)| k.to_string()).collect();
-        let mut saved = Vec::new();
-        // save any existing
-        for k in &keys {
-            saved.push((k.clone(), env::var(k).ok()));
-        }
-        for (k, _) in env::vars() {
-            if k.starts_with("secret_") {
-                unsafe { env::remove_var(k) };
-            }
-        }
-        // set requested
-        for (k, v) in vars {
-            unsafe { env::set_var(k, v) };
-        }
-        Self { saved }
-    }
-}
-impl Drop for TestEnv {
-    fn drop(&mut self) {
-        for (k, _) in env::vars() {
-            if k.starts_with("secret_") {
-                unsafe { env::remove_var(k) };
-            }
-        }
-        // restore saved
-        for (k, v) in self.saved.drain(..) {
-            match v {
-                Some(val) => unsafe { env::set_var(&k, val) },
-                None => unsafe { env::remove_var(&k) },
-            }
-        }
-    }
+#[tokio::test]
+async fn test_ignore_unknown_providers() {
+    // File contains keys for a different provider (e.g. op://)
+    // Our mock only accepts mock://
+    let content = "A: {{ op://vault/item }}\nB: {{ mock://valid }}";
+    let (_tmp, out_dir, opts) = setup("mixed.yaml", content);
+
+    let provider = MockProvider::new(vec![("mock://valid", "value")]);
+    let secrets = Secrets::new(opts);
+
+    secrets.inject_all(&provider).await.unwrap();
+
+    let result = std::fs::read_to_string(out_dir.join("mixed.yaml")).unwrap();
+
+    // "op://" should be ignored (passed through) because accepts_key returned false
+    // "mock://" should be rendered
+    debug!("Result: {}", result);
+    assert_eq!(result, "A: {{ op://vault/item }}\nB: value");
 }

@@ -1,114 +1,130 @@
 //! 1password (op) based provider implementation
 
-use crate::provider::{ProviderError, SecretsProvider};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use async_trait::async_trait;
 use clap::Args;
+use futures::stream::{self, StreamExt};
 use secrecy::{ExposeSecret, SecretString};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::Stdio;
+use tokio::process::Command;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConfig {
     /// 1Password token configuration
     #[command(flatten)]
-    token: OpToken,
+    tok: OpToken,
 
     /// Optional: Path to 1Password config directory
     /// Defaults to standard op config locations if not provided,
     /// e.g. $XDG_CONFIG_HOME/op
-    #[arg(long, env = "OP_CONFIG_DIR")]
+    #[arg(long = "op.config-dir", env = "OP_CONFIG_DIR")]
     config_dir: Option<PathBuf>,
 }
 
 /// 1Password (op) based provider configuration
 #[derive(Args, Debug, Clone, Default)]
-#[group(id = "op_token", multiple = false, required = true)]
+#[group(id = "op_token", multiple = false, required = false)]
 pub struct OpToken {
     /// 1Password service account token
-    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
-    token: Option<SecretString>,
+    #[arg(
+        long = "op.token",
+        env = "OP_SERVICE_ACCOUNT_TOKEN",
+        hide_env_values = true
+    )]
+    op_val: Option<SecretString>,
 
     /// Path to file containing 1Password service account token
-    #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
-    token_file: Option<PathBuf>,
+    #[arg(long = "op.token-file", env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
+    op_file: Option<PathBuf>,
 }
 
 impl OpToken {
-    pub fn resolve(&self) -> Result<SecretString, ProviderError> {
-        match (&self.token, &self.token_file) {
-            (Some(tok), None) => Ok(tok.clone()),
-            (None, Some(path)) => {
-                let txt = std::fs::read_to_string(path)?;
-                let trimmed = txt.trim();
-                if trimmed.is_empty() {
-                    Err(ProviderError::InvalidConfig(format!(
-                        "token file {} is empty",
-                        path.display()
-                    )))
-                } else {
-                    Ok(SecretString::new(trimmed.to_owned().into()))
-                }
-            }
-            _ => Err(ProviderError::InvalidConfig(
-                "missing credentials for op".into(),
-            )),
-        }
+    pub fn resolve(&self) -> Result<AuthToken, ProviderError> {
+        AuthToken::try_new(self.op_val.clone(), self.op_file.clone(), "op")
     }
 }
 
 pub struct OpProvider {
-    token: SecretString,
+    token: AuthToken,
     config: Option<PathBuf>,
 }
 
 impl OpProvider {
     pub fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
         Ok(Self {
-            token: cfg.token.resolve()?,
+            token: cfg.tok.resolve()?,
             config: cfg.config_dir,
         })
     }
 }
 
+#[async_trait]
 impl SecretsProvider for OpProvider {
-    fn inject(&self, src: &Path, dst: &Path) -> Result<(), ProviderError> {
-        let mut cmd = Command::new("op");
-        if let Some(config) = &self.config {
-            cmd.arg("--config").arg(config);
-        }
-        let output = cmd
-            .arg("inject")
-            .arg("-i")
-            .arg(src)
-            .arg("-o")
-            .arg(dst)
-            .arg("--force")
-            .env_clear()
-            .env("OP_SERVICE_ACCOUNT_TOKEN", self.token.expose_secret())
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
-            .env("HOME", std::env::var("HOME").unwrap_or_default())
-            .env(
-                "XDG_CONFIG_HOME",
-                std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
-            )
-            .stderr(Stdio::piped())
-            .stdout(Stdio::null())
-            .output()?;
+    fn accepts_key(&self, key: &str) -> bool {
+        key.starts_with("op://")
+    }
 
-        if output.status.success() {
-            Ok(())
-        } else {
-            let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            // keep logs sane; avoid massive stderr
-            const MAX_ERR: usize = 8 * 1024;
-            if stderr.len() > MAX_ERR {
-                stderr.truncate(MAX_ERR);
-                stderr.push_str("…[truncated]");
-            }
-            Err(ProviderError::Exec {
-                program: "op",
-                status: output.status.code(),
-                stderr,
+    async fn fetch_map(
+        &self,
+        references: &[&str],
+    ) -> Result<HashMap<String, String>, ProviderError> {
+        const MAX_CONCURRENT_OPS: usize = 10;
+        let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
+
+        let results: Vec<Result<Option<(String, String)>, ProviderError>> = stream::iter(refs)
+            .map(|key| async move {
+                let mut cmd = Command::new("op");
+                cmd.arg("read")
+                    .arg("--no-newline")
+                    .arg(&key)
+                    .env_clear()
+                    .env("PATH", std::env::var("PATH").unwrap_or_default())
+                    .env("HOME", std::env::var("HOME").unwrap_or_default())
+                    .env(
+                        "XDG_CONFIG_HOME",
+                        std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
+                    )
+                    .env("OP_SERVICE_ACCOUNT_TOKEN", self.token.expose_secret())
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+
+                if let Some(path) = &self.config {
+                    cmd.env("OP_CONFIG_DIR", path);
+                }
+
+                let output = cmd.output().await.map_err(ProviderError::Io)?;
+
+                if output.status.success() {
+                    let secret = String::from_utf8(output.stdout)
+                        .map_err(|e| ProviderError::InvalidConfig(format!("utf8 error: {}", e)))?;
+                    Ok(Some((key, secret)))
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Err(ProviderError::Other(format!(
+                        "op error for {}: {}",
+                        key,
+                        stderr.trim()
+                    )))
+                }
             })
+            .buffer_unordered(MAX_CONCURRENT_OPS)
+            .collect()
+            .await;
+
+        let mut map = HashMap::new();
+        for res in results {
+            match res {
+                Ok(Some((k, v))) => {
+                    map.insert(k, v);
+                }
+                Ok(None) => {}
+                Err(e) => return Err(e),
+            }
         }
+
+        Ok(map)
     }
 }
