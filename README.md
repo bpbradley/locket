@@ -7,7 +7,7 @@
 1. [Full Configuration](./docs/run.md)
 1. [Security](#security)
 1. [Examples](#example-hot-reloading-traefik-configurations-with-secrets)
-1. [Supported Providers](#supported-providers)
+1. [Supported Providers](#providers)
 1. [Roadmap](#roadmap)
 
 ## Overview
