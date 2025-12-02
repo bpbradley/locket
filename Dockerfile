@@ -7,7 +7,10 @@ RUN apk add --no-cache musl-dev build-base pkgconfig \
 COPY Cargo.toml Cargo.lock ./
 COPY . .
 
+ARG FEATURES="op,connect"
+
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
+  --no-default-features --features "${FEATURES}" \
  && strip target/x86_64-unknown-linux-musl/release/locket
 
 FROM alpine:3.22 AS rootfs
@@ -30,6 +33,10 @@ RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
 
 FROM scratch AS base
 LABEL org.opencontainers.image.title="locket (base)"
+
+ARG DEFAULT_PROVIDER
+ENV SECRETS_PROVIDER=${DEFAULT_PROVIDER}
+
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
     TMPDIR=/tmp \
@@ -67,7 +74,6 @@ FROM base AS op
 LABEL org.opencontainers.image.title="locket (op)"
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
-ENV SECRETS_PROVIDER=op
 
 # Redundant right now as `op` is the only provider.
 # But eventually the idea is that we would copy extra tools neeeded
