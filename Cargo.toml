@@ -1,6 +1,6 @@
 [package]
 name = "locket"
-version = "0.12.0-rc0"
+version = "0.12.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
