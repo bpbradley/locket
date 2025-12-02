@@ -3,9 +3,9 @@ use locket::{
     provider::{ProviderError, SecretsProvider},
     secrets::{InjectFailurePolicy, PathMapping, SecretError, Secrets, SecretsOpts},
 };
-use tracing::debug;
 use std::collections::HashMap;
 use tempfile::tempdir;
+use tracing::debug;
 
 // Holds a static map of "Remote" secrets to serve.
 #[derive(Debug, Clone, Default)]
@@ -73,13 +73,10 @@ async fn test_happy_path_template_rendering() {
     );
 
     // Provider has both secrets
-    let provider = MockProvider::new(vec![
-        ("mock://user", "admin"),
-        ("mock://pass", "secret123"),
-    ]);
+    let provider = MockProvider::new(vec![("mock://user", "admin"), ("mock://pass", "secret123")]);
 
     let secrets = Secrets::new(opts);
-    
+
     secrets.inject_all(&provider).await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
@@ -104,7 +101,7 @@ async fn test_whole_file_replacement() {
 async fn test_policy_error_aborts() {
     // Template requests a missing secret
     let (_tmp, _out, mut opts) = setup("config.yaml", "Key: {{ mock://missing }}");
-    
+
     opts.policy = InjectFailurePolicy::Error;
 
     let provider = MockProvider::new(vec![]); // Empty provider
@@ -124,7 +121,7 @@ async fn test_policy_error_aborts() {
 async fn test_policy_copy_unmodified() {
     // Template requests missing secret
     let (_tmp, out_dir, mut opts) = setup("config.yaml", "Key: {{ mock://missing }}");
-    
+
     opts.policy = InjectFailurePolicy::CopyUnmodified;
 
     let provider = MockProvider::new(vec![]);
@@ -151,7 +148,7 @@ async fn test_ignore_unknown_providers() {
     secrets.inject_all(&provider).await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("mixed.yaml")).unwrap();
-    
+
     // "op://" should be ignored (passed through) because accepts_key returned false
     // "mock://" should be rendered
     debug!("Result: {}", result);
