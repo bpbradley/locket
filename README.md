@@ -44,7 +44,7 @@ services:
     # Configurations can be supplied via command like below, or via env variables.
     command:
         - "--provider=op"
-        - "--token-file=/run/secrets/op_token"
+        - "--op.token-file=/run/secrets/op_token"
         - "--map=/templates:/run/secrets" # Supports multiple maps, if needed.
         - "--secret=db_pass={{ op://vault/db/pass }}"
         - "--secret=db_host={{ op://vault/db/host }}"
