@@ -13,6 +13,20 @@ use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
+compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
+
+#[cfg(feature = "bws")]
+mod bws;
+#[cfg(feature = "connect")]
+mod connect;
+mod macros;
+#[cfg(feature = "op")]
+mod op;
+
+// Re-export alias that is more expressive while internally remaining descriptive
+pub use ProviderSelection as Provider;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     /// Network or API errors
@@ -176,17 +190,3 @@ impl ExposeSecret<str> for AuthToken {
         self.token.expose_secret()
     }
 }
-
-// Re-export alias that is more expressive while internally remaining descriptive
-pub use ProviderSelection as Provider;
-
-#[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
-compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
-
-#[cfg(feature = "bws")]
-mod bws;
-#[cfg(feature = "connect")]
-mod connect;
-mod macros;
-#[cfg(feature = "op")]
-mod op;
