@@ -4,7 +4,7 @@ use clap::Args;
 use futures::stream::{self, StreamExt};
 use percent_encoding::percent_decode_str;
 use reqwest::{Client, StatusCode};
-use secrecy::{ExposeSecret};
+use secrecy::ExposeSecret;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

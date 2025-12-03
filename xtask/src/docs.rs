@@ -176,13 +176,15 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
     let env = arg
         .get_env()
         .map(|e| format!("`{}`", e.to_string_lossy()))
-        .ok_or_else(|| io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "Argument missing env option: `{}`",
-                arg.get_long().unwrap_or_else(|| arg.get_id().as_str())
-            ),
-        ))?;
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "Argument missing env option: `{}`",
+                    arg.get_long().unwrap_or_else(|| arg.get_id().as_str())
+                ),
+            )
+        })?;
 
     let default = if !arg.get_default_values().is_empty() {
         let vals: Vec<_> = arg

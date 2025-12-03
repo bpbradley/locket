@@ -8,7 +8,7 @@ use bitwarden::{
 };
 use clap::Args;
 use futures::stream::{self, StreamExt};
-use secrecy::{ExposeSecret};
+use secrecy::ExposeSecret;
 use std::collections::HashMap;
 use tokio::sync::OnceCell;
 use uuid::Uuid;

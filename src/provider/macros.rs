@@ -1,4 +1,3 @@
-
 /// Macro to define an authentication token struct with Clap arguments
 /// for either direct value or file path.
 /// This is necessary to avoid boilerplate for a pattern that each
@@ -6,9 +5,9 @@
 /// flattened structs.
 macro_rules! define_auth_token {
     (
-        struct_name: $struct_name:ident, 
-        prefix: $prefix:literal, 
-        env: $env:literal, 
+        struct_name: $struct_name:ident,
+        prefix: $prefix:literal,
+        env: $env:literal,
         group_id: $group_id:literal,
         doc_string: $doc_string:literal
     ) => {
@@ -17,7 +16,7 @@ macro_rules! define_auth_token {
             #[group(id = $group_id, multiple = false, required = false)]
             pub struct $struct_name {
                 #[arg(
-                    long = concat!($prefix, ".token"), 
+                    long = concat!($prefix, ".token"),
                     env = $env,
                     hide_env_values = true,
                     help = $doc_string
@@ -25,7 +24,7 @@ macro_rules! define_auth_token {
                 [< $prefix _val >]: Option<secrecy::SecretString>,
 
                 #[arg(
-                    long = concat!($prefix, ".token-file"), 
+                    long = concat!($prefix, ".token-file"),
                     env = concat!($env, "_FILE"),
                     help = concat!("Path to file containing ", $doc_string)
                 )]
@@ -37,7 +36,7 @@ macro_rules! define_auth_token {
 
                 fn try_from(value: $struct_name) -> Result<Self, Self::Error> {
                     crate::provider::AuthToken::try_new(
-                        value.[< $prefix _val >], 
+                        value.[< $prefix _val >],
                         value.[< $prefix _file >],
                         $doc_string,
                     )
