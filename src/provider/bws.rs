@@ -1,4 +1,4 @@
-use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use bitwarden::{
     Client,
@@ -8,11 +8,18 @@ use bitwarden::{
 };
 use clap::Args;
 use futures::stream::{self, StreamExt};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::{ExposeSecret};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
+
+define_auth_token!(
+    struct_name: BwsToken,
+    prefix: "bws",
+    env: "BWS_MACHINE_TOKEN",
+    group_id: "bws_token",
+    doc_string: "Bitwarden Secrets Manager machine token"
+);
 
 #[derive(Args, Debug, Clone)]
 pub struct BwsConfig {
@@ -38,7 +45,7 @@ pub struct BwsConfig {
         env = "BWS_MAX_CONCURRENT",
         default_value_t = 20
     )]
-    pub max_concurrent: usize,
+    pub bws_max_concurrent: usize,
 
     #[command(flatten)]
     pub token: BwsToken,
@@ -49,31 +56,9 @@ impl Default for BwsConfig {
         Self {
             api_url: "https://api.bitwarden.com".to_string(),
             identity_url: "https://identity.bitwarden.com".to_string(),
-            max_concurrent: 20,
+            bws_max_concurrent: 20,
             token: BwsToken::default(),
         }
-    }
-}
-
-#[derive(Args, Debug, Clone, Default)]
-#[group(id = "bws_token", multiple = false, required = true)]
-pub struct BwsToken {
-    /// Bitwarden Secrets Manager Machine token
-    #[arg(long = "bws.token", env = "BWS_ACCESS_TOKEN", hide_env_values = true)]
-    val: Option<SecretString>,
-
-    /// Path to file containing Bitwarden Secrets Manager Machine token
-    #[arg(long = "bws.token-file", env = "BWS_ACCESS_TOKEN_FILE")]
-    file: Option<PathBuf>,
-}
-
-impl BwsToken {
-    pub fn resolve(&self) -> Result<AuthToken, ProviderError> {
-        AuthToken::try_new(
-            self.val.clone(),
-            self.file.clone(),
-            "Bitwarden Secrets Manager",
-        )
     }
 }
 
@@ -90,7 +75,7 @@ pub struct BwsProvider {
 impl BwsProvider {
     pub fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
         Ok(Self {
-            token: cfg.token.resolve()?,
+            token: cfg.token.clone().try_into()?, // Need to clone for now because I need config in members.
             config: cfg,
             client: OnceCell::new(),
         })
@@ -159,7 +144,7 @@ impl SecretsProvider for BwsProvider {
 
                 Ok((key, resp.value))
             })
-            .buffer_unordered(self.config.max_concurrent)
+            .buffer_unordered(self.config.bws_max_concurrent)
             .collect()
             .await;
 

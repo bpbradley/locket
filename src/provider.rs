@@ -163,7 +163,7 @@ impl AuthToken {
                 })
             }
             _ => Err(ProviderError::InvalidConfig(format!(
-                "{}: missing authentication token",
+                "Missing: {}",
                 context
             ))),
         }
@@ -183,6 +183,7 @@ pub use ProviderSelection as Provider;
 #[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
 compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
 
+mod macros;
 #[cfg(feature = "bws")]
 mod bws;
 #[cfg(feature = "connect")]

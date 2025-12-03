@@ -1,14 +1,22 @@
 //! 1password (op) based provider implementation
 
-use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::{ExposeSecret};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
+
+define_auth_token!(
+    struct_name: OpToken,
+    prefix: "op",
+    env: "OP_SERVICE_ACCOUNT_TOKEN",
+    group_id: "op_token",
+    doc_string: "1Password Service Account token"
+);
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct OpConfig {
@@ -23,29 +31,6 @@ pub struct OpConfig {
     config_dir: Option<PathBuf>,
 }
 
-/// 1Password (op) based provider configuration
-#[derive(Args, Debug, Clone, Default)]
-#[group(id = "op_token", multiple = false, required = false)]
-pub struct OpToken {
-    /// 1Password service account token
-    #[arg(
-        long = "op.token",
-        env = "OP_SERVICE_ACCOUNT_TOKEN",
-        hide_env_values = true
-    )]
-    op_val: Option<SecretString>,
-
-    /// Path to file containing 1Password service account token
-    #[arg(long = "op.token-file", env = "OP_SERVICE_ACCOUNT_TOKEN_FILE")]
-    op_file: Option<PathBuf>,
-}
-
-impl OpToken {
-    pub fn resolve(&self) -> Result<AuthToken, ProviderError> {
-        AuthToken::try_new(self.op_val.clone(), self.op_file.clone(), "op")
-    }
-}
-
 pub struct OpProvider {
     token: AuthToken,
     config: Option<PathBuf>,
@@ -53,8 +38,9 @@ pub struct OpProvider {
 
 impl OpProvider {
     pub fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
+        let token: AuthToken = cfg.tok.try_into()?;
         Ok(Self {
-            token: cfg.tok.resolve()?,
+            token,
             config: cfg.config_dir,
         })
     }
