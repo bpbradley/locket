@@ -58,9 +58,11 @@ impl Default for BwsConfig {
 #[derive(Args, Debug, Clone, Default)]
 #[group(id = "bws_token", multiple = false, required = true)]
 pub struct BwsToken {
+    /// Bitwarden Secrets Manager Machine token
     #[arg(long = "bws.token", env = "BWS_ACCESS_TOKEN", hide_env_values = true)]
     val: Option<SecretString>,
 
+    /// Path to file containing Bitwarden Secrets Manager Machine token
     #[arg(long = "bws.token-file", env = "BWS_ACCESS_TOKEN_FILE")]
     file: Option<PathBuf>,
 }

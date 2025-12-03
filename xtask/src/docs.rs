@@ -176,7 +176,13 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
     let env = arg
         .get_env()
         .map(|e| format!("`{}`", e.to_string_lossy()))
-        .unwrap_or_else(|| "*None*".to_string());
+        .ok_or_else(|| io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "Argument missing env option: `{}`",
+                arg.get_long().unwrap_or_else(|| arg.get_id().as_str())
+            ),
+        ))?;
 
     let default = if !arg.get_default_values().is_empty() {
         let vals: Vec<_> = arg
@@ -189,11 +195,17 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
         "*None*".to_string()
     };
 
-    let mut help = arg
-        .get_help()
-        .map(|h| h.to_string())
-        .unwrap_or_default()
-        .replace("\n", " ");
+    let help_msg = arg.get_help().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "Argument missing help message: `{}`",
+                arg.get_long().unwrap_or_else(|| arg.get_id().as_str())
+            ),
+        )
+    })?;
+
+    let mut help = help_msg.to_string().replace("\n", " ");
 
     let possible_values = arg.get_possible_values();
     if !possible_values.is_empty() {
