@@ -1,5 +1,25 @@
 name: tests
 services:
+  locket-aio:
+    image: ghcr.io/bpbradley/locket:latest
+    user: "1000:1000"
+    container_name: locket-aio
+    secrets:
+      - connect_token
+    volumes:
+      - ./secrets/op:/templates:ro
+      - out-aio:/run/secrets/locket
+    env_file: .env
+    command:
+      - "--provider=op-connect"
+      - "--log-level=debug"
+      - "--connect.token-file=/run/secrets/connect_token"
+      - "--map=/templates/config:/run/secrets/locket/config"
+      - "--map=/templates/secret.txt:/run/secrets/locket/secret.txt"
+      - "--secret=my_secret=op://Mordin/TestKey/private key?ssh-format=openssh"
+      - "--secret=my_other_secret={{ op://Mordin/TestKey/private key?ssh-format=openssh }}"
+      - "--mode=park"
+      - "--inject-policy=error"
   locket-connect:
     image: ghcr.io/bpbradley/locket:connect
     user: "1000:1000"
@@ -67,11 +87,14 @@ services:
         condition: service_healthy
       locket-bws:
         condition: service_healthy
+      locket-aio:
+        condition: service_healthy
     volumes:
       - ./verify.sh:/verify.sh:ro
       - out-connect:/out/1password-connect:ro
       - out-op:/out/1password-cli:ro
       - out-bws:/out/bitwarden:ro
+      - out-aio:/out/aio:ro
     command: ["/bin/sh", "/verify.sh"]
 
 secrets:
@@ -87,3 +110,4 @@ volumes:
   out-connect: { driver: local, driver_opts: { type: tmpfs, device: tmpfs, o: "uid=1000,gid=1000,mode=0700" } }
   out-op: { driver: local, driver_opts: { type: tmpfs, device: tmpfs, o: "uid=1000,gid=1000,mode=0700" } }
   out-bws: { driver: local, driver_opts: { type: tmpfs, device: tmpfs, o: "uid=1000,gid=1000,mode=0700" } }
+  out-aio: { driver: local, driver_opts: { type: tmpfs, device: tmpfs, o: "uid=1000,gid=1000,mode=0700" } }
