@@ -15,18 +15,22 @@ pub struct SecretsOpts {
     /// to destination paths (where secrets are materialized and reflected)
     /// in the form `SRC:DST` or `SRC=DST`. Multiple mappings can be
     /// provided, separated by commas, or supplied multiple times as arguments.
-    /// e.g. `--map /templates:/run/secrets/app --map /other_templates:/run/secrets/other`
+    /// e.g. `--map /templates:/run/secrets/locket/app --map /other_templates:/run/secrets/locket/other`
     #[arg(
         long = "map", 
         value_parser = parse_mapping,
         env = "SECRET_MAP", 
         value_delimiter = ',',
-        default_value = "/templates:/run/secrets",
+        default_value = "/templates:/run/secrets/locket",
         hide_env_values = true
     )]
     pub mapping: Vec<PathMapping>,
     /// Directory where secret values (literals) are materialized
-    #[arg(long = "out", env = "VALUE_OUTPUT_DIR", default_value = "/run/secrets")]
+    #[arg(
+        long = "out",
+        env = "VALUE_OUTPUT_DIR",
+        default_value = "/run/secrets/locket"
+    )]
     pub value_dir: PathBuf,
     #[arg(
         long = "inject-policy",
@@ -74,7 +78,7 @@ impl PathMapping {
 
 impl Default for PathMapping {
     fn default() -> Self {
-        Self::new("/templates", "/run/secrets")
+        Self::new("/templates", "/run/secrets/locket")
     }
 }
 
@@ -140,7 +144,7 @@ impl Default for SecretsOpts {
     fn default() -> Self {
         Self {
             mapping: vec![PathMapping::default()],
-            value_dir: PathBuf::from("/run/secrets"),
+            value_dir: PathBuf::from("/run/secrets/locket"),
             policy: InjectFailurePolicy::CopyUnmodified,
             max_file_size: 10 * 1024 * 1024,
         }

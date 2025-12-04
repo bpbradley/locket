@@ -55,7 +55,7 @@ COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 
 USER nonroot:nonroot
-VOLUME ["/tmp", "/run/secrets", "/templates"]
+VOLUME ["/run/secrets/locket", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
   CMD ["locket","healthcheck"]
 ENTRYPOINT ["locket","run"]
@@ -103,5 +103,5 @@ RUN addgroup -g 65532 nonroot \
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
-VOLUME ["/tmp", "/run/secrets", "/templates"]
+VOLUME ["/run/secrets/locket", "/templates"]
 ENTRYPOINT ["/bin/bash"]
