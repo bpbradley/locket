@@ -20,16 +20,16 @@ services:
       OP_CONNECT_HOST: $OP_CONNECT_HOST
     volumes:
       - ./secrets/templates:/templates:ro
-      - secrets-store:/run/secrets
+      - secrets-store:/run/secrets/locket
   demo:
     image: busybox
     user: "1000:1000"
-    command: ["cat", "/run/secrets/test_secret"]
+    command: ["cat", "/run/secrets/locket/test_secret"]
     depends_on:
       locket:
         condition: service_healthy
     volumes:
-      - secrets-store:/run/secrets
+      - secrets-store:/run/secrets/locket
 secrets:
   op_token:
     file: /etc/connect/token

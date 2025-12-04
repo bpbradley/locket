@@ -18,8 +18,8 @@ The basic premise is:
 1. Move your sensitive data to a dedicated secret manager (only 1password supported today, more to come), 
 1. Adjust your config files to carry *secret references* instead of raw sensitive data, which are safe to commit directly to revision control (i.e `{{ op://vault/keys/privatekey?ssh-format=openssh }}`)
 1. Configure locket to use your secrets provider `--provider=op` or with env: `SECRETS_PROVIDER=op`. Or just use the docker image tag `locket:op`
-1. Mount your templates containing secret references for locket to read, i.e. `./templates:/templates:ro`, and mount an output directory for the secrets to be placed (usually a named tmpfs volume, or some secure location) `secrets-store:/run/secrets/`
-1. Finally, map the template->output for each required mapping. You can map arbitrarily many directories->directories or files->files. `--map /templates:/run/secrets`
+1. Mount your templates containing secret references for locket to read, i.e. `./templates:/templates:ro`, and mount an output directory for the secrets to be placed (usually a named tmpfs volume, or some secure location) `secrets-store:/run/secrets/locket`
+1. Finally, map the template->output for each required mapping. You can map arbitrarily many directories->directories or files->files. `--map /templates:/run/secrets/locket`
 
 Your secrets will all be injected according to the provided configuration, and any dependant applications will have materialized secrets available.
 
@@ -45,7 +45,7 @@ services:
     command:
         - "--provider=op"
         - "--op.token-file=/run/secrets/op_token"
-        - "--map=/templates:/run/secrets" # Supports multiple maps, if needed.
+        - "--map=/templates:/run/secrets/locket" # Supports multiple maps, if needed.
         - "--secret=db_pass={{ op://vault/db/pass }}"
         - "--secret=db_host={{ op://vault/db/host }}"
         - "--secret=key={{ op://vault/keys/privatekey?ssh-format=openssh }}"
@@ -55,7 +55,7 @@ services:
         # Mount in your actual secret templates, with secret references
       - ./config/templates:/templates:ro
         # Mount in your output directory, where you want secrets materialized
-      - secrets-store:/run/secrets
+      - secrets-store:/run/secrets/locket
   app:
     image: my-app:latest
     depends_on:
@@ -63,12 +63,12 @@ services:
             condition: healthy # locket is healthy once all secrets are injected
     volumes:
       # Mount the shared volume wherever you want the secrets in the container
-      - secrets-store:/run/secrets:ro
+      - secrets-store:/run/secrets/locket:ro
     environment:
         # We can directly reference the materialized secrets as files
-        DB_PASSWORD_FILE: /run/secrets/db_pass
-        DB_HOST_FILE: /run/secrets/
-        SECRET_KEY: /run/secrets/key
+        DB_PASSWORD_FILE: /run/secrets/locket/db_pass
+        DB_HOST_FILE: /run/secrets/locket/db_host
+        SECRET_KEY: /run/secrets/locket/key
 
 secrets:
   op_token:
@@ -100,7 +100,7 @@ services:
     cap_drop:
       - ALL
     volumes:
-      - secrets-store:/run/secrets:ro
+      - secrets-store:/run/secrets/locket:ro
 
 volumes:
   secrets-store:
@@ -148,11 +148,11 @@ services:
     secrets:
       - op_token
     command:
-      - "--map=/templates:/run/secrets"
+      - "--map=/templates:/run/secrets/locket"
       - "--mode=watch"
     volumes:
       - ./templates:/templates:ro
-      - secrets-store:/run/secrets
+      - secrets-store:/run/secrets/locket
 
   traefik:
     image: traefik:v3
