@@ -112,9 +112,9 @@ impl ProviderSelection {
             #[cfg(feature = "op")]
             ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone()).await?)),
             #[cfg(feature = "connect")]
-            ProviderKind::OpConnect => {
-                Ok(Box::new(OpConnectProvider::new(self.cfg.connect.clone())?))
-            }
+            ProviderKind::OpConnect => Ok(Box::new(
+                OpConnectProvider::new(self.cfg.connect.clone()).await?,
+            )),
             #[cfg(feature = "bws")]
             ProviderKind::Bws => Ok(Box::new(BwsProvider::new(self.cfg.bws.clone()).await?)),
         }

@@ -96,7 +96,7 @@ impl BwsProvider {
             .auth()
             .login_access_token(&auth_req)
             .await
-            .map_err(|e| ProviderError::Unauthorized(format!("Bitwarden login failed: {}", e)))?;
+            .map_err(|e| ProviderError::Unauthorized(format!("BWS login failed: {:#?}", e)))?;
 
         Ok(Self {
             client,

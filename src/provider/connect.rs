@@ -66,7 +66,7 @@ pub struct OpConnectProvider {
 }
 
 impl OpConnectProvider {
-    pub fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
+    pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.token.try_into()?;
         let host_str = cfg
             .host
@@ -79,6 +79,42 @@ impl OpConnectProvider {
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
+
+        let check_url = host
+            .join("/v1/vaults")
+            .map_err(|e| ProviderError::Other(e.to_string()))?;
+
+        let resp = client
+            .get(check_url)
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(anyhow::Error::new(e)))?;
+
+        let status = resp.status();
+
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            let error_msg = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| v["message"].as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| {
+                    if text.trim().is_empty() {
+                        status.to_string()
+                    } else {
+                        text
+                    }
+                });
+            return match status {
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                    Err(ProviderError::Unauthorized(error_msg))
+                }
+                _ => Err(ProviderError::Other(format!(
+                    "connect error: {}",
+                    error_msg
+                ))),
+            };
+        }
 
         Ok(Self {
             client,
