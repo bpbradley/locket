@@ -37,8 +37,33 @@ pub struct OpProvider {
 }
 
 impl OpProvider {
-    pub fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
+    pub async fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.tok.try_into()?;
+
+        // Try to authenticate with the provided token
+        let mut cmd = Command::new("op");
+        cmd.arg("whoami")
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("HOME", std::env::var("HOME").unwrap_or_default())
+            .env(
+                "XDG_CONFIG_HOME",
+                std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
+            )
+            .env("OP_SERVICE_ACCOUNT_TOKEN", token.expose_secret())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let output = cmd.output().await.map_err(ProviderError::Io)?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ProviderError::Unauthorized(format!(
+                "op login failed: {}",
+                stderr.trim()
+            )));
+        }
+
         Ok(Self {
             token,
             config: cfg.config_dir,

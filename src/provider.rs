@@ -110,7 +110,7 @@ impl ProviderSelection {
     pub async fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
         match self.kind {
             #[cfg(feature = "op")]
-            ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone())?)),
+            ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone()).await?)),
             #[cfg(feature = "connect")]
             ProviderKind::OpConnect => {
                 Ok(Box::new(OpConnectProvider::new(self.cfg.connect.clone())?))
