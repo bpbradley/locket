@@ -49,5 +49,6 @@
 | `--bws.api` | `BWS_API_URL` | `https://api.bitwarden.com` | Bitwarden API URL |
 | `--bws.identity` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
 | `--bws.max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
+| `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
 | `--bws.token` | `BWS_MACHINE_TOKEN` | *None* | Bitwarden Secrets Manager machine token |
 | `--bws.token-file` | `BWS_MACHINE_TOKEN_FILE` | *None* | Path to file containing Bitwarden Secrets Manager machine token |

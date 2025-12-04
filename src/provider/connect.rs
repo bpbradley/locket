@@ -25,7 +25,7 @@ define_auth_token!(
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
-    pub host: String,
+    pub host: Option<String>,
 
     /// 1Password Connect Token
     #[command(flatten)]
@@ -43,7 +43,7 @@ pub struct OpConnectConfig {
 impl Default for OpConnectConfig {
     fn default() -> Self {
         Self {
-            host: String::new(),
+            host: None,
             token: OpConnectToken::default(),
             connect_max_concurrent: 20,
         }
@@ -66,16 +66,55 @@ pub struct OpConnectProvider {
 }
 
 impl OpConnectProvider {
-    pub fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
+    pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.token.try_into()?;
+        let host_str = cfg
+            .host
+            .ok_or_else(|| ProviderError::InvalidConfig("missing OP_CONNECT_HOST".into()))?;
 
-        let host = Url::parse(&cfg.host)
+        let host = Url::parse(&host_str)
             .map_err(|e| ProviderError::InvalidConfig(format!("bad host url: {}", e)))?;
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
+
+        let check_url = host
+            .join("/v1/vaults")
+            .map_err(|e| ProviderError::Other(e.to_string()))?;
+
+        let resp = client
+            .get(check_url)
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(anyhow::Error::new(e)))?;
+
+        let status = resp.status();
+
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            let error_msg = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| v["message"].as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| {
+                    if text.trim().is_empty() {
+                        status.to_string()
+                    } else {
+                        text
+                    }
+                });
+            return match status {
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                    Err(ProviderError::Unauthorized(error_msg))
+                }
+                _ => Err(ProviderError::Other(format!(
+                    "connect error: {}",
+                    error_msg
+                ))),
+            };
+        }
 
         Ok(Self {
             client,

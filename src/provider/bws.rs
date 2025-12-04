@@ -10,7 +10,6 @@ use clap::Args;
 use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
 use std::collections::HashMap;
-use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 define_auth_token!(
@@ -47,6 +46,14 @@ pub struct BwsConfig {
     )]
     pub bws_max_concurrent: usize,
 
+    /// BWS User Agent
+    #[arg(
+        long = "bws.user-agent",
+        env = "BWS_USER_AGENT",
+        default_value = "locket"
+    )]
+    pub bws_user_agent: String,
+
     #[command(flatten)]
     pub token: BwsToken,
 }
@@ -57,60 +64,44 @@ impl Default for BwsConfig {
             api_url: "https://api.bitwarden.com".to_string(),
             identity_url: "https://identity.bitwarden.com".to_string(),
             bws_max_concurrent: 20,
+            bws_user_agent: "locket".to_string(),
             token: BwsToken::default(),
         }
     }
 }
 
 pub struct BwsProvider {
-    config: BwsConfig,
-    token: AuthToken,
-    // Lazy-initialized client.
-    // We use OnceCell because authentication is async, but 'new' is sync.
-    // TODO: consider reworking provider trait to allow async initialization.
-    // This would allow better error handling on auth failure at startup
-    client: OnceCell<Client>,
+    client: Client,
+    max_concurrent: usize,
 }
 
 impl BwsProvider {
-    pub fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
-        Ok(Self {
-            token: cfg.token.clone().try_into()?, // Need to clone for now because I need config in members.
-            config: cfg,
-            client: OnceCell::new(),
-        })
-    }
+    pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
+        let token: AuthToken = cfg.token.try_into()?;
+        let settings = ClientSettings {
+            identity_url: cfg.identity_url,
+            api_url: cfg.api_url,
+            user_agent: cfg.bws_user_agent,
+            device_type: DeviceType::SDK,
+        };
 
-    /// Initializes and authenticates the Bitwarden client.
-    /// This runs exactly once, the first time fetch_map is called.
-    async fn get_client(&self) -> Result<&Client, ProviderError> {
-        self.client
-            .get_or_try_init(|| async {
-                let settings = ClientSettings {
-                    identity_url: self.config.identity_url.clone(),
-                    api_url: self.config.api_url.clone(),
-                    user_agent: "locket".to_string(),
-                    device_type: DeviceType::SDK,
-                };
+        let client = Client::new(Some(settings));
 
-                let client = Client::new(Some(settings));
+        let auth_req = AccessTokenLoginRequest {
+            access_token: token.expose_secret().to_string(),
+            state_file: None, // We are stateless; no cache file
+        };
 
-                let auth_req = AccessTokenLoginRequest {
-                    access_token: self.token.expose_secret().to_string(),
-                    state_file: None, // We are stateless; no cache file
-                };
-
-                client
-                    .auth()
-                    .login_access_token(&auth_req)
-                    .await
-                    .map_err(|e| {
-                        ProviderError::Unauthorized(format!("Bitwarden login failed: {}", e))
-                    })?;
-
-                Ok(client)
-            })
+        client
+            .auth()
+            .login_access_token(&auth_req)
             .await
+            .map_err(|e| ProviderError::Unauthorized(format!("BWS login failed: {:#?}", e)))?;
+
+        Ok(Self {
+            client,
+            max_concurrent: cfg.bws_max_concurrent,
+        })
     }
 }
 
@@ -126,7 +117,7 @@ impl SecretsProvider for BwsProvider {
         &self,
         references: &[&str],
     ) -> Result<HashMap<String, String>, ProviderError> {
-        let client = self.get_client().await?;
+        let client = &self.client;
 
         let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
 
@@ -144,7 +135,7 @@ impl SecretsProvider for BwsProvider {
 
                 Ok((key, resp.value))
             })
-            .buffer_unordered(self.config.bws_max_concurrent)
+            .buffer_unordered(self.max_concurrent)
             .collect()
             .await;
 
