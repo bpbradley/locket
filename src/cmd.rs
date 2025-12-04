@@ -74,8 +74,8 @@ pub struct RunArgs {
 }
 
 impl RunArgs {
-    pub fn provider(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
-        Ok(self.provider.build()?)
+    pub async fn provider(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
+        Ok(self.provider.build().await?)
     }
     pub fn secrets(&self) -> anyhow::Result<Secrets> {
         self.secrets.validate()?;

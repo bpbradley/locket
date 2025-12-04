@@ -25,7 +25,7 @@ define_auth_token!(
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
-    pub host: String,
+    pub host: Option<String>,
 
     /// 1Password Connect Token
     #[command(flatten)]
@@ -43,7 +43,7 @@ pub struct OpConnectConfig {
 impl Default for OpConnectConfig {
     fn default() -> Self {
         Self {
-            host: String::new(),
+            host: None,
             token: OpConnectToken::default(),
             connect_max_concurrent: 20,
         }
@@ -68,8 +68,11 @@ pub struct OpConnectProvider {
 impl OpConnectProvider {
     pub fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.token.try_into()?;
+        let host_str = cfg
+            .host
+            .ok_or_else(|| ProviderError::InvalidConfig("missing OP_CONNECT_HOST".into()))?;
 
-        let host = Url::parse(&cfg.host)
+        let host = Url::parse(&host_str)
             .map_err(|e| ProviderError::InvalidConfig(format!("bad host url: {}", e)))?;
 
         let client = Client::builder()

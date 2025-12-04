@@ -107,7 +107,7 @@ pub struct ProviderSelection {
 
 impl ProviderSelection {
     /// Build a runtime provider from configuration
-    pub fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
+    pub async fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
         match self.kind {
             #[cfg(feature = "op")]
             ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone())?)),
@@ -116,7 +116,7 @@ impl ProviderSelection {
                 Ok(Box::new(OpConnectProvider::new(self.cfg.connect.clone())?))
             }
             #[cfg(feature = "bws")]
-            ProviderKind::Bws => Ok(Box::new(BwsProvider::new(self.cfg.bws.clone())?)),
+            ProviderKind::Bws => Ok(Box::new(BwsProvider::new(self.cfg.bws.clone()).await?)),
         }
     }
 }

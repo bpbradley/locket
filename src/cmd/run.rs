@@ -16,7 +16,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         error!(error=%e, "failed to clear status file on startup");
     });
 
-    let provider = match args.provider() {
+    let provider = match args.provider().await {
         Ok(p) => p,
         Err(e) => {
             error!(error=%e, "invalid provider configuration");
