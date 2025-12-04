@@ -42,7 +42,8 @@ cmd = "docker compose -f compose.debug.yaml run --rm locket"
 
 [docker-test]
 description = "Run test of docker image"
-cmd = "docker compose -f compose.sample.yaml -p demo up"
+path = "tests/docker"
+cmd = "docker compose -f compose.tests.yaml -p tests up"
 
 [release-rc]
 description = "Create a release candidate from the current version"

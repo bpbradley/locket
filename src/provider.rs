@@ -2,6 +2,8 @@
 //!
 //! Providers will inject secrets from templates
 use async_trait::async_trait;
+#[cfg(feature = "bws")]
+use bws::{BwsConfig, BwsProvider};
 use clap::{Args, ValueEnum};
 #[cfg(feature = "connect")]
 use connect::{OpConnectConfig, OpConnectProvider};
@@ -10,6 +12,20 @@ use op::{OpConfig, OpProvider};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+#[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
+compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
+
+#[cfg(feature = "bws")]
+mod bws;
+#[cfg(feature = "connect")]
+mod connect;
+mod macros;
+#[cfg(feature = "op")]
+mod op;
+
+// Re-export alias that is more expressive while internally remaining descriptive
+pub use ProviderSelection as Provider;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -73,6 +89,9 @@ pub enum ProviderKind {
     /// 1Password Connect Provider
     #[cfg(feature = "connect")]
     OpConnect,
+    /// Bitwarden Secrets Provider
+    #[cfg(feature = "bws")]
+    Bws,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -96,6 +115,8 @@ impl ProviderSelection {
             ProviderKind::OpConnect => {
                 Ok(Box::new(OpConnectProvider::new(self.cfg.connect.clone())?))
             }
+            #[cfg(feature = "bws")]
+            ProviderKind::Bws => Ok(Box::new(BwsProvider::new(self.cfg.bws.clone())?)),
         }
     }
 }
@@ -108,6 +129,9 @@ pub struct ProviderConfig {
     #[cfg(feature = "connect")]
     #[command(flatten, next_help_heading = "1Password Connect")]
     pub connect: OpConnectConfig,
+    #[cfg(feature = "bws")]
+    #[command(flatten, next_help_heading = "Bitwarden Secrets Provider")]
+    pub bws: BwsConfig,
 }
 
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
@@ -153,7 +177,7 @@ impl AuthToken {
                 })
             }
             _ => Err(ProviderError::InvalidConfig(format!(
-                "{}: missing authentication token",
+                "Missing: {}",
                 context
             ))),
         }
@@ -166,14 +190,3 @@ impl ExposeSecret<str> for AuthToken {
         self.token.expose_secret()
     }
 }
-
-// Re-export alias that is more expressive while internally remaining descriptive
-pub use ProviderSelection as Provider;
-
-#[cfg(not(any(feature = "op", feature = "connect")))]
-compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
-
-#[cfg(feature = "connect")]
-mod connect;
-#[cfg(feature = "op")]
-mod op;

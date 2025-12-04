@@ -16,9 +16,10 @@ categories = ["command-line-utilities", "config"]
 members = [".", "xtask"]
 
 [features]
-default = ["op", "connect"]
-op = ["tokio/process"]
-connect = ["dep:reqwest", "dep:url", "dep:percent-encoding"]
+default = ["op", "connect", "bws"]
+op = ["tokio/process", "dep:futures"]
+connect = ["dep:reqwest", "dep:url", "dep:percent-encoding", "dep:futures"]
+bws = ["dep:bitwarden", "dep:uuid", "dep:futures", "dep:rustls-webpki"]
 
 [dependencies]
 anyhow = "1"
@@ -35,11 +36,18 @@ secrecy = "0.10.3"
 sysexits = "0.10"
 indexmap = "2"
 async-trait = "0.1"
+paste = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal"] }
-futures = { version = "0.3"}
-reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false, optional = true }
+futures = { version = "0.3", optional = true}
+reqwest = { version = "0.12", features = ["json", "rustls-tls-webpki-roots"], default-features = false, optional = true }
 url = { version = "2", optional = true }
 percent-encoding = { version = "2.3", optional = true }
+bitwarden = { version = "1", features=["secrets"], optional = true }
+uuid = { version = "1", optional = true }
+
+# bitwarden sdk needs to update their crate. Cannot build without this.
+# https://github.com/bitwarden/sdk-sm/issues/1244
+rustls-webpki = { version = "0.102", features = ["std"], optional = true }
 
 [dev-dependencies]
 assert_fs = "1"
@@ -53,4 +61,3 @@ codegen-units = 1
 lto = true
 opt-level = "z"
 strip = true
-

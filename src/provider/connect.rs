@@ -1,24 +1,31 @@
-use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
 use percent_encoding::percent_decode_str;
 use reqwest::{Client, StatusCode};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::ExposeSecret;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::debug;
 use url::Url;
 
-#[derive(Args, Debug, Clone, Default)]
+define_auth_token!(
+    struct_name: OpConnectToken,
+    prefix: "connect",
+    env: "OP_CONNECT_TOKEN",
+    group_id: "connect_token",
+    doc_string: "1Password Connect API token"
+);
+
+#[derive(Args, Debug, Clone)]
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
-    pub host: Option<String>,
+    pub host: String,
 
     /// 1Password Connect Token
     #[command(flatten)]
@@ -30,32 +37,16 @@ pub struct OpConnectConfig {
         env = "OP_CONNECT_MAX_CONCURRENT",
         default_value_t = 20
     )]
-    pub max_concurrent: usize,
+    pub connect_max_concurrent: usize,
 }
 
-#[derive(Args, Debug, Clone, Default)]
-#[group(id = "connect_token", multiple = false, required = false)]
-pub struct OpConnectToken {
-    /// 1Password Connect API token
-    #[arg(
-        long = "connect.token",
-        env = "OP_CONNECT_TOKEN",
-        hide_env_values = true
-    )]
-    connect_val: Option<SecretString>,
-
-    /// Path to file containing 1Password Connect API token
-    #[arg(long = "connect.token-file", env = "OP_CONNECT_TOKEN_FILE")]
-    connect_file: Option<PathBuf>,
-}
-
-impl OpConnectToken {
-    pub fn resolve(&self) -> Result<AuthToken, ProviderError> {
-        AuthToken::try_new(
-            self.connect_val.clone(),
-            self.connect_file.clone(),
-            "OpConnect",
-        )
+impl Default for OpConnectConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            token: OpConnectToken::default(),
+            connect_max_concurrent: 20,
+        }
     }
 }
 
@@ -76,13 +67,9 @@ pub struct OpConnectProvider {
 
 impl OpConnectProvider {
     pub fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
-        let host_str = cfg
-            .host
-            .ok_or_else(|| ProviderError::InvalidConfig("missing OP_CONNECT_HOST".into()))?;
+        let token: AuthToken = cfg.token.try_into()?;
 
-        let token = cfg.token.resolve()?;
-
-        let host = Url::parse(&host_str)
+        let host = Url::parse(&cfg.host)
             .map_err(|e| ProviderError::InvalidConfig(format!("bad host url: {}", e)))?;
 
         let client = Client::builder()
@@ -95,7 +82,7 @@ impl OpConnectProvider {
             host,
             token,
             cache: Arc::new(Mutex::new(ResolutionCache::default())),
-            max_concurrent: cfg.max_concurrent,
+            max_concurrent: cfg.connect_max_concurrent,
         })
     }
 

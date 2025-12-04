@@ -7,7 +7,7 @@ RUN apk add --no-cache musl-dev build-base pkgconfig \
 COPY Cargo.toml Cargo.lock ./
 COPY . .
 
-ARG FEATURES="op,connect"
+ARG FEATURES="op,connect, bws"
 
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
   --no-default-features --features "${FEATURES}" \

@@ -26,13 +26,13 @@
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` | *None* | Secrets provider<br><br> **Options:**<br> - `op`: 1Password Service Account<br> - `op-connect`: 1Password Connect Provider |
+| `--provider` | `SECRETS_PROVIDER` | *None* | Secrets provider<br><br> **Options:**<br> - `op`: 1Password Service Account<br> - `op-connect`: 1Password Connect Provider<br> - `bws`: Bitwarden Secrets Provider |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` | *None* | 1Password service account token |
-| `--op.token-file` | `OP_SERVICE_ACCOUNT_TOKEN_FILE` | *None* | Path to file containing 1Password service account token |
+| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` | *None* | 1Password Service Account token |
+| `--op.token-file` | `OP_SERVICE_ACCOUNT_TOKEN_FILE` | *None* | Path to file containing 1Password Service Account token |
 | `--op.config-dir` | `OP_CONFIG_DIR` | *None* | Optional: Path to 1Password config directory Defaults to standard op config locations if not provided, e.g. $XDG_CONFIG_HOME/op |
 ### 1Password Connect
 
@@ -42,3 +42,12 @@
 | `--connect.token` | `OP_CONNECT_TOKEN` | *None* | 1Password Connect API token |
 | `--connect.token-file` | `OP_CONNECT_TOKEN_FILE` | *None* | Path to file containing 1Password Connect API token |
 | `--connect.max-concurrent` | `OP_CONNECT_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Connect API |
+### Bitwarden Secrets Provider
+
+| Command | Env | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--bws.api` | `BWS_API_URL` | `https://api.bitwarden.com` | Bitwarden API URL |
+| `--bws.identity` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
+| `--bws.max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
+| `--bws.token` | `BWS_MACHINE_TOKEN` | *None* | Bitwarden Secrets Manager machine token |
+| `--bws.token-file` | `BWS_MACHINE_TOKEN_FILE` | *None* | Path to file containing Bitwarden Secrets Manager machine token |
