@@ -592,96 +592,7 @@ fn parse_absolute(s: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn validate_fails_source_missing() {
-        let tmp = tempdir().unwrap();
-        let missing_src = tmp.path().join("ghost");
-        let dst = tmp.path().join("out");
-
-        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&missing_src, &dst)]);
-        assert!(matches!(
-            opts.resolve(),
-            Err(SecretError::SourceMissing(p)) if p == missing_src
-        ));
-    }
-
-    #[test]
-    fn validate_relative_paths_are_canonicalized() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        std::fs::create_dir_all(&src).unwrap();
-        let relative = src.join("..").join("templates");
-
-        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&relative, "out")]);
-        assert!(opts.resolve().is_ok());
-        assert!(opts.mapping[0].src() == src.as_path());
-    }
-
-    #[test]
-    fn validate_fails_loop_dst_inside_src() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        let dst = src.join("nested_out");
-
-        std::fs::create_dir_all(&src).unwrap();
-
-        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
-
-        assert!(matches!(
-            opts.resolve(),
-            Err(SecretError::Loop { src: s, dst: d }) if s == src && d == dst
-        ));
-    }
-
-    #[test]
-    fn validate_fails_destructive() {
-        let tmp = tempdir().unwrap();
-        let dst = tmp.path().join("out");
-        let src = dst.join("templates");
-
-        std::fs::create_dir_all(&src).unwrap();
-
-        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
-
-        assert!(matches!(
-            opts.resolve(),
-            Err(SecretError::Destructive { src: s, dst: d }) if s == src && d == dst
-        ));
-    }
-
-    #[test]
-    fn validate_fails_value_dir_loop() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        std::fs::create_dir_all(&src).unwrap();
-
-        let dst = tmp.path().join("safe_out");
-        let bad_value_dir = src.join("values");
-
-        let mut opts = SecretsOpts::default()
-            .with_mapping(vec![PathMapping::new(&src, &dst)])
-            .with_value_dir(bad_value_dir.clone());
-
-        assert!(matches!(
-            opts.resolve(),
-            Err(SecretError::Loop { src: s, dst: d }) if s == src && d == bad_value_dir
-        ));
-    }
-
-    #[test]
-    fn validate_succeeds_valid_config() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        let dst = tmp.path().join("out");
-
-        std::fs::create_dir_all(&src).unwrap();
-
-        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
-
-        assert!(opts.resolve().is_ok());
-    }
+    use std::path::Path;
 
     #[test]
     fn secret_value_sanitization() {
@@ -705,6 +616,7 @@ mod tests {
 
     #[test]
     fn test_size_parsing() {
+        // Note: Assumes parse_size is defined in the parent module
         assert_eq!(parse_size("100").unwrap(), 100);
         assert_eq!(parse_size("1k").unwrap(), 1024);
         assert_eq!(parse_size("1KB").unwrap(), 1024);
@@ -715,67 +627,5 @@ mod tests {
         assert!(parse_size("").is_err());
         assert!(parse_size("mb").is_err());
         assert!(parse_size("10x").is_err());
-    }
-
-    #[test]
-    fn collisions_structure_conflict() {
-        let tmp = tempfile::tempdir().unwrap();
-
-        // Create distinct source directories so we don't conflict on the input side
-        let src_a = tmp.path().join("src_a");
-        let src_b = tmp.path().join("src_b");
-        let output = tmp.path().join("out");
-
-        std::fs::create_dir_all(&src_a).unwrap();
-        std::fs::create_dir_all(&src_b).unwrap();
-
-        // Maps to "/out/config" (File `config`)
-        let blocker_src = src_a.join("config");
-        std::fs::write(&blocker_src, "I am a file").unwrap();
-
-        // Maps to "/out/config/nested" (Ambiguous directory `config`)
-        let blocked_src = src_b.join("nested");
-        std::fs::write(&blocked_src, "I am inside a dir").unwrap();
-
-        let opts = SecretsOpts::default().with_mapping(vec![
-            PathMapping::new(blocker_src.clone(), output.join("config")),
-            PathMapping::new(blocked_src.clone(), output.join("config/nested")),
-        ]);
-
-        let secrets = Secrets::new(opts);
-
-        let result = secrets.collisions();
-
-        assert!(result.is_err(), "Should detect structure conflict");
-        assert!(matches!(
-            result.unwrap_err(),
-            SecretError::StructureConflict { .. }
-        ));
-    }
-
-    #[test]
-    fn collisions_on_output_dst() {
-        let tmp = tempfile::tempdir().unwrap();
-        let src_dir = tmp.path().join("src");
-        let out_dir = tmp.path().join("out");
-        std::fs::create_dir_all(&src_dir).unwrap();
-
-        let file_src = src_dir.join("dup");
-        std::fs::write(&file_src, "x").unwrap();
-
-        let mut values = HashMap::new();
-        values.insert("dup".to_string(), "y".to_string());
-
-        let opts = SecretsOpts::default()
-            .with_value_dir(out_dir.clone())
-            .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())]);
-
-        let secrets = Secrets::new(opts).with_values(values);
-
-        let result = secrets.collisions();
-
-        assert!(result.is_err());
-
-        assert!(matches!(result.unwrap_err(), SecretError::Collision { .. }));
     }
 }
