@@ -1,7 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
-use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
 use crate::secrets::path::{PathExt, PathMapping};
+use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
@@ -79,7 +79,7 @@ impl SecretsOpts {
         for m in &mut self.mapping {
             // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
             // This should already be enforced on the user input, but we double check just in case.
-            // This will force the path to be canonicalized in a way that resolves symlinks and 
+            // This will force the path to be canonicalized in a way that resolves symlinks and
             // requires that the path exists.
             m.resolve()?;
             sources.push(m.src());
@@ -529,10 +529,7 @@ impl Secrets {
         match ev {
             FsEvent::Write(src) => self.on_write(provider, &src.clean()).await,
             FsEvent::Remove(src) => self.on_remove(&src.clean()),
-            FsEvent::Move { from, to } => {
-                self.on_move(provider, &from.clean(), &to.clean())
-                    .await
-            }
+            FsEvent::Move { from, to } => self.on_move(provider, &from.clean(), &to.clean()).await,
         }
     }
 }
@@ -599,7 +596,7 @@ mod tests {
         let root = Path::new("/");
 
         let v = SecretValue::new(root, "", "Db_Password");
-        assert_eq!(v.label, "Db_Password"); 
+        assert_eq!(v.label, "Db_Password");
 
         let v = SecretValue::new(root, "", "A/B/C");
         assert_eq!(v.label, "A_B_C");

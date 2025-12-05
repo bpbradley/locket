@@ -3,7 +3,7 @@ use locket::{
     provider::{ProviderError, SecretsProvider},
     secrets::{InjectFailurePolicy, PathMapping, SecretError, Secrets, SecretsOpts},
 };
-use std::{collections::HashMap};
+use std::collections::HashMap;
 use tempfile::tempdir;
 use tracing::debug;
 

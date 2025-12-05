@@ -1,10 +1,10 @@
-use std::path::{Component, Path, PathBuf};
 use crate::secrets::SecretError;
+use std::path::{Component, Path, PathBuf};
 
 /// Extension trait for Path to provide additional functionality
 /// and convenience methods for use within SecretFs and locket Path handling.
 pub trait PathExt {
-    /// Cleans the path by removing redundant components like `\\`, `.`, and `..` 
+    /// Cleans the path by removing redundant components like `\\`, `.`, and `..`
     fn clean(&self) -> PathBuf;
     /// Converts the path to an absolute path based on the current working directory
     /// This method does not touch the disk so it will not ensure the file exists,
@@ -18,8 +18,7 @@ pub trait PathExt {
     fn canon(&self) -> Result<PathBuf, SecretError>;
 }
 
-impl PathExt for Path
-{
+impl PathExt for Path {
     fn clean(&self) -> PathBuf {
         let mut components = self.components().peekable();
         let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
@@ -47,15 +46,13 @@ impl PathExt for Path
         ret
     }
     fn absolute(&self) -> PathBuf {
-        let anchored = std::path::absolute(self).unwrap_or_else(|_| {
-            self.to_path_buf()
-        });
+        let anchored = std::path::absolute(self).unwrap_or_else(|_| self.to_path_buf());
         anchored.clean()
     }
     fn canon(&self) -> Result<PathBuf, SecretError> {
         self.canonicalize().map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => SecretError::SourceMissing(self.to_path_buf()),
-            _ => SecretError::Io(e), 
+            _ => SecretError::Io(e),
         })
     }
 }

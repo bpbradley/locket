@@ -1,7 +1,7 @@
 use crate::{
     health::StatusFile,
     logging::Logger,
-    provider::{Provider},
+    provider::Provider,
     secrets::{SecretValues, SecretsOpts},
     watch::WatcherOpts,
     write::FileWriter,

@@ -1,6 +1,6 @@
 // run.rs
 use super::{RunArgs, RunMode};
-use crate::{health::StatusFile, signal, watch::FsWatcher, secrets::Secrets};
+use crate::{health::StatusFile, secrets::Secrets, signal, watch::FsWatcher};
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -11,11 +11,11 @@ pub async fn run(args: RunArgs) -> ExitCode {
     }
     debug!(?args, "effective config");
 
-    let RunArgs { 
+    let RunArgs {
         mut secrets,
-        status_file, 
-        values, 
-        writer, 
+        status_file,
+        values,
+        writer,
         provider,
         watcher,
         mode,
@@ -36,8 +36,8 @@ pub async fn run(args: RunArgs) -> ExitCode {
     };
 
     if let Err(e) = secrets.resolve() {
-         error!(error=%e, "failed to resolve secret configuration");
-         return ExitCode::Config;
+        error!(error=%e, "failed to resolve secret configuration");
+        return ExitCode::Config;
     }
 
     let mut secrets = Secrets::new(secrets)
