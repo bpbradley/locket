@@ -3,6 +3,7 @@ use clap::ValueEnum;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use crate::secrets::utils;
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -93,8 +94,8 @@ pub struct SecretFile {
 impl SecretFile {
     pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>, max_file_size: u64) -> Self {
         Self {
-            src: src.as_ref().components().collect(),
-            dst: dst.as_ref().components().collect(),
+            src: utils::clean(src),
+            dst: utils::clean(dst),
             max_file_size,
         }
     }
@@ -137,7 +138,7 @@ pub struct SecretValue {
 impl SecretValue {
     pub fn new(dst: impl AsRef<Path>, template: impl AsRef<str>, label: impl AsRef<str>) -> Self {
         Self {
-            dst: dst.as_ref().components().collect(),
+            dst: utils::clean(dst),
             template: template.as_ref().to_string(),
             label: label.as_ref().to_string(),
         }

@@ -1,6 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
+use crate::secrets::utils;
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
@@ -29,7 +30,8 @@ pub struct SecretsOpts {
     #[arg(
         long = "out",
         env = "VALUE_OUTPUT_DIR",
-        default_value = "/run/secrets/locket"
+        default_value = "/run/secrets/locket",
+        value_parser = parse_absolute,
     )]
     pub value_dir: PathBuf,
     #[arg(
@@ -64,8 +66,8 @@ pub struct PathMapping {
 impl PathMapping {
     pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
         Self {
-            src: src.as_ref().components().collect(),
-            dst: dst.as_ref().components().collect(),
+            src: utils::clean(src),
+            dst: utils::clean(dst),
         }
     }
     pub fn src(&self) -> &Path {
@@ -557,31 +559,14 @@ impl Secrets {
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_write(provider, &normalize(src)).await,
-            FsEvent::Remove(src) => self.on_remove(&normalize(src)),
+            FsEvent::Write(src) => self.on_write(provider, &utils::clean(src)).await,
+            FsEvent::Remove(src) => self.on_remove(&utils::clean(src)),
             FsEvent::Move { from, to } => {
-                self.on_move(provider, &normalize(from), &normalize(to))
+                self.on_move(provider, &utils::clean(from), &utils::clean(to))
                     .await
             }
         }
     }
-}
-
-fn normalize(path: impl AsRef<Path>) -> PathBuf {
-    path.as_ref().components().collect()
-}
-
-fn sanitize_name(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for ch in raw.chars() {
-        let lc = ch.to_ascii_lowercase();
-        if lc.is_ascii_lowercase() || lc.is_ascii_digit() || matches!(lc, '.' | '_' | '-') {
-            out.push(lc);
-        } else {
-            out.push('_');
-        }
-    }
-    out
 }
 
 /// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
@@ -631,9 +616,13 @@ fn parse_size(s: &str) -> Result<u64, String> {
     Ok(num.saturating_mul(multiplier))
 }
 
+fn parse_absolute(s: &str) -> Result<PathBuf, String> {
+    Ok(utils::clean(s))
+}
+
 /// Construct a SecretValue from label + template.
 fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
-    let sanitized = sanitize_name(label);
+    let sanitized = utils::sanitize_name(label);
     let dst = output_root.join(&sanitized);
     SecretValue::new(dst, template, sanitized)
 }
@@ -736,15 +725,15 @@ mod tests {
 
     #[test]
     fn sanitize_basic() {
-        assert_eq!(sanitize_name("Db_Password"), "db_password");
-        assert_eq!(sanitize_name("A/B/C"), "a_b_c");
-        assert_eq!(sanitize_name("weird name"), "weird_name");
+        assert_eq!(utils::sanitize_name("Db_Password"), "db_password");
+        assert_eq!(utils::sanitize_name("A/B/C"), "a_b_c");
+        assert_eq!(utils::sanitize_name("weird name"), "weird_name");
     }
 
     #[test]
     fn sanitize_unicode_and_symbols() {
-        assert_eq!(sanitize_name("πß?%"), "____");
-        assert_eq!(sanitize_name("..//--__"), "..__--__");
+        assert_eq!(utils::sanitize_name("πß?%"), "____");
+        assert_eq!(utils::sanitize_name("..//--__"), "..__--__");
     }
 
     #[test]
