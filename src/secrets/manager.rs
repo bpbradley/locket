@@ -1,7 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
-use crate::secrets::path::PathExt;
+use crate::secrets::path::{PathExt, PathMapping};
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
@@ -56,34 +56,6 @@ pub enum FsEvent {
     Move { from: PathBuf, to: PathBuf },
 }
 
-/// Mapping of source path to destination path for secret files
-#[derive(Debug, Clone)]
-pub struct PathMapping {
-    src: PathBuf,
-    dst: PathBuf,
-}
-
-impl PathMapping {
-    pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
-        Self {
-            src: src.as_ref().absolute(),
-            dst: dst.as_ref().absolute(),
-        }
-    }
-    pub fn src(&self) -> &Path {
-        &self.src
-    }
-    pub fn dst(&self) -> &Path {
-        &self.dst
-    }
-}
-
-impl Default for PathMapping {
-    fn default() -> Self {
-        Self::new("/templates", "/run/secrets/locket")
-    }
-}
-
 impl SecretsOpts {
     pub fn new() -> Self {
         Self::default()
@@ -100,20 +72,20 @@ impl SecretsOpts {
         self.policy = policy;
         self
     }
-    pub fn validate(&self) -> Result<(), SecretError> {
+    pub fn resolve(&mut self) -> Result<(), SecretError> {
         let mut sources = Vec::new();
         let mut destinations = Vec::new();
 
-        for m in &self.mapping {
+        for m in &mut self.mapping {
             // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
-            // This should already be enforced on the user input using fs.canonicalize during parsing,
-            // but we double check here to be safe.
-            if !m.src.exists() {
-                return Err(SecretError::SourceMissing(m.src.clone()));
-            }
-            sources.push(&m.src);
+            // This should already be enforced on the user input, but we double check just in case.
+            // This will force the path to be canonicalized in a way that resolves symlinks and 
+            // requires that the path exists.
+            m.resolve()?;
+            sources.push(m.src());
             destinations.push(m.dst());
         }
+        self.value_dir = self.value_dir.absolute();
         destinations.push(&self.value_dir);
 
         // Check for feedback loops and self-destruct scenarios
@@ -576,9 +548,9 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
                 s
             )
         })?;
-    let canon = Path::new(src).canonicalize()
-        .map_err(|e| format!("Failed to canonicalize '{}': {}", src, e))?;
-    Ok(PathMapping::new(&canon, dst))
+    let mapping = PathMapping::try_new(src, dst)
+        .map_err(|e| format!("Failed to create PathMapping '{}': {}", src, e))?;
+    Ok(mapping)
 }
 
 /// Parse a human-friendly size string into bytes.
@@ -628,9 +600,9 @@ mod tests {
         let missing_src = tmp.path().join("ghost");
         let dst = tmp.path().join("out");
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&missing_src, &dst)]);
+        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&missing_src, &dst)]);
         assert!(matches!(
-            opts.validate(),
+            opts.resolve(),
             Err(SecretError::SourceMissing(p)) if p == missing_src
         ));
     }
@@ -642,8 +614,8 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         let relative = src.join("..").join("templates");
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&relative, "out")]);
-        assert!(opts.validate().is_ok());
+        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&relative, "out")]);
+        assert!(opts.resolve().is_ok());
         assert!(opts.mapping[0].src() == src.as_path());
     }
 
@@ -655,10 +627,10 @@ mod tests {
 
         std::fs::create_dir_all(&src).unwrap();
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
+        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
 
         assert!(matches!(
-            opts.validate(),
+            opts.resolve(),
             Err(SecretError::Loop { src: s, dst: d }) if s == src && d == dst
         ));
     }
@@ -671,10 +643,10 @@ mod tests {
 
         std::fs::create_dir_all(&src).unwrap();
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
+        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
 
         assert!(matches!(
-            opts.validate(),
+            opts.resolve(),
             Err(SecretError::Destructive { src: s, dst: d }) if s == src && d == dst
         ));
     }
@@ -688,12 +660,12 @@ mod tests {
         let dst = tmp.path().join("safe_out");
         let bad_value_dir = src.join("values");
 
-        let opts = SecretsOpts::default()
+        let mut opts = SecretsOpts::default()
             .with_mapping(vec![PathMapping::new(&src, &dst)])
             .with_value_dir(bad_value_dir.clone());
 
         assert!(matches!(
-            opts.validate(),
+            opts.resolve(),
             Err(SecretError::Loop { src: s, dst: d }) if s == src && d == bad_value_dir
         ));
     }
@@ -706,9 +678,9 @@ mod tests {
 
         std::fs::create_dir_all(&src).unwrap();
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
+        let mut opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
 
-        assert!(opts.validate().is_ok());
+        assert!(opts.resolve().is_ok());
     }
 
     #[test]
@@ -743,5 +715,67 @@ mod tests {
         assert!(parse_size("").is_err());
         assert!(parse_size("mb").is_err());
         assert!(parse_size("10x").is_err());
+    }
+
+    #[test]
+    fn collisions_structure_conflict() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create distinct source directories so we don't conflict on the input side
+        let src_a = tmp.path().join("src_a");
+        let src_b = tmp.path().join("src_b");
+        let output = tmp.path().join("out");
+
+        std::fs::create_dir_all(&src_a).unwrap();
+        std::fs::create_dir_all(&src_b).unwrap();
+
+        // Maps to "/out/config" (File `config`)
+        let blocker_src = src_a.join("config");
+        std::fs::write(&blocker_src, "I am a file").unwrap();
+
+        // Maps to "/out/config/nested" (Ambiguous directory `config`)
+        let blocked_src = src_b.join("nested");
+        std::fs::write(&blocked_src, "I am inside a dir").unwrap();
+
+        let opts = SecretsOpts::default().with_mapping(vec![
+            PathMapping::new(blocker_src.clone(), output.join("config")),
+            PathMapping::new(blocked_src.clone(), output.join("config/nested")),
+        ]);
+
+        let secrets = Secrets::new(opts);
+
+        let result = secrets.collisions();
+
+        assert!(result.is_err(), "Should detect structure conflict");
+        assert!(matches!(
+            result.unwrap_err(),
+            SecretError::StructureConflict { .. }
+        ));
+    }
+
+    #[test]
+    fn collisions_on_output_dst() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        let file_src = src_dir.join("dup");
+        std::fs::write(&file_src, "x").unwrap();
+
+        let mut values = HashMap::new();
+        values.insert("dup".to_string(), "y".to_string());
+
+        let opts = SecretsOpts::default()
+            .with_value_dir(out_dir.clone())
+            .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())]);
+
+        let secrets = Secrets::new(opts).with_values(values);
+
+        let result = secrets.collisions();
+
+        assert!(result.is_err());
+
+        assert!(matches!(result.unwrap_err(), SecretError::Collision { .. }));
     }
 }

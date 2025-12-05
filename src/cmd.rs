@@ -1,8 +1,8 @@
 use crate::{
     health::StatusFile,
     logging::Logger,
-    provider::{Provider, SecretsProvider},
-    secrets::{SecretValues, Secrets, SecretsOpts},
+    provider::{Provider},
+    secrets::{SecretValues, SecretsOpts},
     watch::WatcherOpts,
     write::FileWriter,
 };
@@ -71,18 +71,6 @@ pub struct RunArgs {
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
     provider: Provider,
-}
-
-impl RunArgs {
-    pub async fn provider(&self) -> anyhow::Result<Box<dyn SecretsProvider>> {
-        Ok(self.provider.build().await?)
-    }
-    pub fn secrets(&self) -> anyhow::Result<Secrets> {
-        self.secrets.validate()?;
-        Ok(Secrets::new(self.secrets.clone())
-            .with_values(self.values.load())
-            .with_writer(self.writer.clone()))
-    }
 }
 
 #[derive(Args, Debug)]
