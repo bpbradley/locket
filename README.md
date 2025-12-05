@@ -192,12 +192,13 @@ volumes:
 
 1. 1password Connect (`--provider=op-connect`)
 2. 1password Service Accounts (`--provider=op`)
+3. Bitwarden Secrets Manager (`--providers=bws`)
 
 > [!TIP]
 > Each provider has its own docker image, if a slim version is preferred. The `latest` tag bundles all providers and their respective dependencies. But a provider specific tag like `locket:connect` is only about 4MB and has no extra dependencies besides what is needed for the connect provider.
 
 > [!NOTE]
-> The `op` (service account) provider is a bit more feature rich than the connect provider (currently), and is easier to setup, but it does require the bundled `op` cli dependency right now, because 1password does not offer a Rust SDK
+> The `op` (service account) provider is a bit more feature rich than the connect provider (currently), and is easier to setup, but it does require the bundled `op` cli dependency right now, because 1password does not offer a Rust SDK. This means it is quite a lot slower than other providers, and carries some quirks with use as non-default users.
 
 ## Roadmap
 
