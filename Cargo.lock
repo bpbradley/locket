@@ -1443,6 +1443,7 @@ dependencies = [
  "percent-encoding",
  "reqwest",
  "rustls-webpki 0.102.8",
+ "sanitize-filename",
  "secrecy",
  "serde",
  "serde_json",
@@ -2189,6 +2190,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sanitize-filename"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc984f4f9ceb736a7bb755c3e3bd17dc56370af2600c9780dcc48c66453da34d"
+dependencies = [
+ "regex",
 ]
 
 [[package]]

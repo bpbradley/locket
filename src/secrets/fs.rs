@@ -1,5 +1,5 @@
 use crate::secrets::{
-    manager::PathMapping,
+    path::PathMapping,
     types::{Injectable, SecretFile},
 };
 use std::collections::BTreeMap;

@@ -1,5 +1,5 @@
 use locket::secrets::{PathMapping, SecretError, Secrets, SecretsOpts};
-use std::{collections::HashMap, vec};
+use std::collections::HashMap;
 
 #[test]
 fn collisions_structure_conflict() {

@@ -1,6 +1,6 @@
 // run.rs
 use super::{RunArgs, RunMode};
-use crate::{health::StatusFile, signal, watch::FsWatcher};
+use crate::{health::StatusFile, secrets::Secrets, signal, watch::FsWatcher};
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -11,12 +11,23 @@ pub async fn run(args: RunArgs) -> ExitCode {
     }
     debug!(?args, "effective config");
 
-    let status: &StatusFile = &args.status_file;
+    let RunArgs {
+        mut secrets,
+        status_file,
+        values,
+        writer,
+        provider,
+        watcher,
+        mode,
+        ..
+    } = args;
+
+    let status: &StatusFile = &status_file;
     status.clear().unwrap_or_else(|e| {
         error!(error=%e, "failed to clear status file on startup");
     });
 
-    let provider = match args.provider().await {
+    let provider = match provider.build().await {
         Ok(p) => p,
         Err(e) => {
             error!(error=%e, "invalid provider configuration");
@@ -24,13 +35,14 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    let mut secrets = match args.secrets() {
-        Ok(s) => s,
-        Err(e) => {
-            error!(error=%e, "failed collecting secrets from config");
-            return ExitCode::Config;
-        }
-    };
+    if let Err(e) = secrets.resolve() {
+        error!(error=%e, "failed to resolve secret configuration");
+        return ExitCode::Config;
+    }
+
+    let mut secrets = Secrets::new(secrets)
+        .with_values(values.load())
+        .with_writer(writer);
 
     match secrets.collisions() {
         Ok(()) => {}
@@ -51,7 +63,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         return ExitCode::IoErr;
     }
 
-    match args.mode {
+    match mode {
         RunMode::OneShot => ExitCode::Ok,
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
@@ -61,7 +73,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let mut watcher = FsWatcher::new(args.watcher, &mut secrets, provider.as_ref());
+            let mut watcher = FsWatcher::new(watcher, &mut secrets, provider.as_ref());
             match watcher.run().await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {

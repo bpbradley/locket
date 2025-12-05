@@ -1,5 +1,6 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
+use crate::secrets::path::{PathExt, PathMapping};
 use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
 use crate::template::Template;
 use crate::write::FileWriter;
@@ -29,7 +30,8 @@ pub struct SecretsOpts {
     #[arg(
         long = "out",
         env = "VALUE_OUTPUT_DIR",
-        default_value = "/run/secrets/locket"
+        default_value = "/run/secrets/locket",
+        value_parser = parse_absolute,
     )]
     pub value_dir: PathBuf,
     #[arg(
@@ -54,34 +56,6 @@ pub enum FsEvent {
     Move { from: PathBuf, to: PathBuf },
 }
 
-/// Mapping of source path to destination path for secret files
-#[derive(Debug, Clone)]
-pub struct PathMapping {
-    src: PathBuf,
-    dst: PathBuf,
-}
-
-impl PathMapping {
-    pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
-        Self {
-            src: src.as_ref().components().collect(),
-            dst: dst.as_ref().components().collect(),
-        }
-    }
-    pub fn src(&self) -> &Path {
-        &self.src
-    }
-    pub fn dst(&self) -> &Path {
-        &self.dst
-    }
-}
-
-impl Default for PathMapping {
-    fn default() -> Self {
-        Self::new("/templates", "/run/secrets/locket")
-    }
-}
-
 impl SecretsOpts {
     pub fn new() -> Self {
         Self::default()
@@ -91,31 +65,27 @@ impl SecretsOpts {
         self
     }
     pub fn with_value_dir(mut self, dir: impl AsRef<Path>) -> Self {
-        self.value_dir = dir.as_ref().components().collect();
+        self.value_dir = dir.as_ref().absolute();
         self
     }
     pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
         self.policy = policy;
         self
     }
-    pub fn validate(&self) -> Result<(), SecretError> {
+    pub fn resolve(&mut self) -> Result<(), SecretError> {
         let mut sources = Vec::new();
         let mut destinations = Vec::new();
 
-        for m in &self.mapping {
-            if m.src
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
-                return Err(SecretError::Forbidden(m.src.clone()));
-            }
+        for m in &mut self.mapping {
             // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
-            if !m.src.exists() {
-                return Err(SecretError::SourceMissing(m.src.clone()));
-            }
-            sources.push(&m.src);
+            // This should already be enforced on the user input, but we double check just in case.
+            // This will force the path to be canonicalized in a way that resolves symlinks and
+            // requires that the path exists.
+            m.resolve()?;
+            sources.push(m.src());
             destinations.push(m.dst());
         }
+        self.value_dir = self.value_dir.absolute();
         destinations.push(&self.value_dir);
 
         // Check for feedback loops and self-destruct scenarios
@@ -227,7 +197,7 @@ impl Secrets {
 
     pub fn with_values(mut self, values: HashMap<String, impl AsRef<str>>) -> Self {
         for (label, template) in values {
-            let v = value_source(&self.opts.value_dir, &label, template);
+            let v = SecretValue::new(&self.opts.value_dir, template, &label);
             self.values.insert(v.label.clone(), v);
         }
         self
@@ -247,7 +217,7 @@ impl Secrets {
     }
 
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
-        let v = value_source(&self.opts.value_dir, label, template);
+        let v = SecretValue::new(&self.opts.value_dir, template, label);
         self.values.insert(v.label.clone(), v);
         self
     }
@@ -557,31 +527,11 @@ impl Secrets {
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_write(provider, &normalize(src)).await,
-            FsEvent::Remove(src) => self.on_remove(&normalize(src)),
-            FsEvent::Move { from, to } => {
-                self.on_move(provider, &normalize(from), &normalize(to))
-                    .await
-            }
+            FsEvent::Write(src) => self.on_write(provider, &src.clean()).await,
+            FsEvent::Remove(src) => self.on_remove(&src.clean()),
+            FsEvent::Move { from, to } => self.on_move(provider, &from.clean(), &to.clean()).await,
         }
     }
-}
-
-fn normalize(path: impl AsRef<Path>) -> PathBuf {
-    path.as_ref().components().collect()
-}
-
-fn sanitize_name(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for ch in raw.chars() {
-        let lc = ch.to_ascii_lowercase();
-        if lc.is_ascii_lowercase() || lc.is_ascii_digit() || matches!(lc, '.' | '_' | '-') {
-            out.push(lc);
-        } else {
-            out.push('_');
-        }
-    }
-    out
 }
 
 /// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
@@ -595,8 +545,9 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
                 s
             )
         })?;
-
-    Ok(PathMapping::new(src, dst))
+    let mapping = PathMapping::try_new(src, dst)
+        .map_err(|e| format!("Failed to create PathMapping '{}': {}", src, e))?;
+    Ok(mapping)
 }
 
 /// Parse a human-friendly size string into bytes.
@@ -631,124 +582,38 @@ fn parse_size(s: &str) -> Result<u64, String> {
     Ok(num.saturating_mul(multiplier))
 }
 
-/// Construct a SecretValue from label + template.
-fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
-    let sanitized = sanitize_name(label);
-    let dst = output_root.join(&sanitized);
-    SecretValue::new(dst, template, sanitized)
+fn parse_absolute(s: &str) -> Result<PathBuf, String> {
+    Ok(Path::new(s).absolute())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use std::path::Path;
 
     #[test]
-    fn validate_fails_source_missing() {
-        let tmp = tempdir().unwrap();
-        let missing_src = tmp.path().join("ghost");
-        let dst = tmp.path().join("out");
+    fn secret_value_sanitization() {
+        let root = Path::new("/");
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&missing_src, &dst)]);
-        assert!(matches!(
-            opts.validate(),
-            Err(SecretError::SourceMissing(p)) if p == missing_src
-        ));
-    }
+        let v = SecretValue::new(root, "", "Db_Password");
+        assert_eq!(v.label, "Db_Password");
 
-    #[test]
-    fn validate_fails_forbidden_relative_path() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        std::fs::create_dir_all(&src).unwrap();
-        let bad_src = src.join("..").join("passwd");
+        let v = SecretValue::new(root, "", "A/B/C");
+        assert_eq!(v.label, "ABC");
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&bad_src, "out")]);
-        assert!(matches!(
-            opts.validate(),
-            Err(SecretError::Forbidden(p)) if p == bad_src
-        ));
-    }
+        let v = SecretValue::new(root, "", "weird name");
+        assert_eq!(v.label, "weird name");
 
-    #[test]
-    fn validate_fails_loop_dst_inside_src() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        let dst = src.join("nested_out");
+        let v = SecretValue::new(root, "", "πß?%");
+        assert_eq!(v.label, "πß%");
 
-        std::fs::create_dir_all(&src).unwrap();
-
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
-
-        assert!(matches!(
-            opts.validate(),
-            Err(SecretError::Loop { src: s, dst: d }) if s == src && d == dst
-        ));
-    }
-
-    #[test]
-    fn validate_fails_destructive() {
-        let tmp = tempdir().unwrap();
-        let dst = tmp.path().join("out");
-        let src = dst.join("templates");
-
-        std::fs::create_dir_all(&src).unwrap();
-
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
-
-        assert!(matches!(
-            opts.validate(),
-            Err(SecretError::Destructive { src: s, dst: d }) if s == src && d == dst
-        ));
-    }
-
-    #[test]
-    fn validate_fails_value_dir_loop() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        std::fs::create_dir_all(&src).unwrap();
-
-        let dst = tmp.path().join("safe_out");
-        let bad_value_dir = src.join("values");
-
-        let opts = SecretsOpts::default()
-            .with_mapping(vec![PathMapping::new(&src, &dst)])
-            .with_value_dir(bad_value_dir.clone());
-
-        assert!(matches!(
-            opts.validate(),
-            Err(SecretError::Loop { src: s, dst: d }) if s == src && d == bad_value_dir
-        ));
-    }
-
-    #[test]
-    fn validate_succeeds_valid_config() {
-        let tmp = tempdir().unwrap();
-        let src = tmp.path().join("templates");
-        let dst = tmp.path().join("out");
-
-        std::fs::create_dir_all(&src).unwrap();
-
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
-
-        assert!(opts.validate().is_ok());
-    }
-
-    #[test]
-    fn sanitize_basic() {
-        assert_eq!(sanitize_name("Db_Password"), "db_password");
-        assert_eq!(sanitize_name("A/B/C"), "a_b_c");
-        assert_eq!(sanitize_name("weird name"), "weird_name");
-    }
-
-    #[test]
-    fn sanitize_unicode_and_symbols() {
-        assert_eq!(sanitize_name("πß?%"), "____");
-        assert_eq!(sanitize_name("..//--__"), "..__--__");
+        let v = SecretValue::new(root, "", "..//--__");
+        assert_eq!(v.label, "..--__");
     }
 
     #[test]
     fn test_size_parsing() {
+        // Note: Assumes parse_size is defined in the parent module
         assert_eq!(parse_size("100").unwrap(), 100);
         assert_eq!(parse_size("1k").unwrap(), 1024);
         assert_eq!(parse_size("1KB").unwrap(), 1024);

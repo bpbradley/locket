@@ -1,4 +1,5 @@
 use crate::provider::ProviderError;
+use crate::secrets::path::PathExt;
 use clap::ValueEnum;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -37,9 +38,6 @@ pub enum SecretError {
 
     #[error("source {src:?} is inside destination {dst:?}")]
     Destructive { src: PathBuf, dst: PathBuf },
-
-    #[error("Relative paths are forbidden in source: {0:?}")]
-    Forbidden(PathBuf),
 
     #[error("dst has no parent: {0}")]
     NoParent(PathBuf),
@@ -93,8 +91,8 @@ pub struct SecretFile {
 impl SecretFile {
     pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>, max_file_size: u64) -> Self {
         Self {
-            src: src.as_ref().components().collect(),
-            dst: dst.as_ref().components().collect(),
+            src: src.as_ref().clean(),
+            dst: dst.as_ref().clean(),
             max_file_size,
         }
     }
@@ -135,12 +133,21 @@ pub struct SecretValue {
 }
 
 impl SecretValue {
-    pub fn new(dst: impl AsRef<Path>, template: impl AsRef<str>, label: impl AsRef<str>) -> Self {
+    pub fn new(root: impl AsRef<Path>, template: impl AsRef<str>, label: impl AsRef<str>) -> Self {
+        let sanitized = Self::sanitize(label.as_ref());
+        let dst = root.as_ref().join(&sanitized);
         Self {
-            dst: dst.as_ref().components().collect(),
+            dst: dst.clean(),
             template: template.as_ref().to_string(),
-            label: label.as_ref().to_string(),
+            label: sanitized,
         }
+    }
+    fn sanitize(label: &str) -> String {
+        let options = sanitize_filename::Options {
+            replacement: "",
+            ..sanitize_filename::Options::default()
+        };
+        sanitize_filename::sanitize_with_options(label, options)
     }
 }
 

@@ -7,7 +7,7 @@ RUN apk add --no-cache musl-dev build-base pkgconfig \
 COPY Cargo.toml Cargo.lock ./
 COPY . .
 
-ARG FEATURES="op,connect, bws"
+ARG FEATURES="op,connect,bws"
 
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
   --no-default-features --features "${FEATURES}" \
@@ -54,6 +54,7 @@ COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 
+WORKDIR /
 USER nonroot:nonroot
 VOLUME ["/run/secrets/locket", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
@@ -75,7 +76,7 @@ LABEL org.opencontainers.image.title="locket (op)"
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 
-# Redundant right now as `op` is the only provider.
+# Redundant right now as `op` is the only provider which requires extra tools.
 # But eventually the idea is that we would copy extra tools neeeded
 # for all the different providers here, so that one image can be used for
 # any provider.
