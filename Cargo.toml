@@ -48,7 +48,7 @@ uuid = { version = "1", optional = true }
 
 # bitwarden sdk needs to update their crate. Cannot build without this.
 # https://github.com/bitwarden/sdk-sm/issues/1244
-rustls-webpki = { version = "0.102", features = ["std"], optional = true }
+rustls-webpki = { version = "0.103", features = ["std"], optional = true }
 
 [dev-dependencies]
 assert_fs = "1"
