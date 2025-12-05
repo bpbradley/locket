@@ -38,7 +38,7 @@ cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buil
 
 [docker-test-dbg]
 description = "Run test of docker image"
-cmd = "docker compose -f compose.debug.yaml run --rm locket"
+cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoint /bin/sh locket"
 
 [docker-test]
 description = "Run test of docker image"
