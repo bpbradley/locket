@@ -144,7 +144,7 @@ impl SecretValue {
     }
     fn sanitize(label: &str) -> String {
         let options = sanitize_filename::Options {
-            replacement: "_",
+            replacement: "",
             ..sanitize_filename::Options::default()
         };
         sanitize_filename::sanitize_with_options(label, options)

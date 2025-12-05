@@ -599,16 +599,16 @@ mod tests {
         assert_eq!(v.label, "Db_Password");
 
         let v = SecretValue::new(root, "", "A/B/C");
-        assert_eq!(v.label, "A_B_C");
+        assert_eq!(v.label, "ABC");
 
         let v = SecretValue::new(root, "", "weird name");
         assert_eq!(v.label, "weird name");
 
         let v = SecretValue::new(root, "", "πß?%");
-        assert_eq!(v.label, "πß_%");
+        assert_eq!(v.label, "πß%");
 
         let v = SecretValue::new(root, "", "..//--__");
-        assert_eq!(v.label, "..__--__");
+        assert_eq!(v.label, "..--__");
     }
 
     #[test]
