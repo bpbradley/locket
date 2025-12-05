@@ -1,9 +1,9 @@
 use crate::provider::ProviderError;
+use crate::secrets::path::PathExt;
 use clap::ValueEnum;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use crate::secrets::utils;
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -94,8 +94,8 @@ pub struct SecretFile {
 impl SecretFile {
     pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>, max_file_size: u64) -> Self {
         Self {
-            src: utils::clean(src),
-            dst: utils::clean(dst),
+            src: src.as_ref().clean(),
+            dst: dst.as_ref().clean(),
             max_file_size,
         }
     }
@@ -136,12 +136,21 @@ pub struct SecretValue {
 }
 
 impl SecretValue {
-    pub fn new(dst: impl AsRef<Path>, template: impl AsRef<str>, label: impl AsRef<str>) -> Self {
+    pub fn new(root: impl AsRef<Path>, template: impl AsRef<str>, label: impl AsRef<str>) -> Self {
+        let sanitized = Self::sanitize(label.as_ref());
+        let dst = root.as_ref().join(&sanitized);
         Self {
-            dst: utils::clean(dst),
+            dst: dst.clean(),
             template: template.as_ref().to_string(),
-            label: label.as_ref().to_string(),
+            label: sanitized,
         }
+    }
+    fn sanitize(label: &str) -> String {
+        let options = sanitize_filename::Options {
+            replacement: "_",
+            ..sanitize_filename::Options::default()
+        };
+        sanitize_filename::sanitize_with_options(label, options)
     }
 }
 

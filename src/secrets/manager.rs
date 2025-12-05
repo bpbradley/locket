@@ -1,7 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::types::{InjectFailurePolicy, Injectable, SecretError, SecretValue};
-use crate::secrets::utils;
+use crate::secrets::path::PathExt;
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
@@ -66,8 +66,8 @@ pub struct PathMapping {
 impl PathMapping {
     pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
         Self {
-            src: utils::clean(src),
-            dst: utils::clean(dst),
+            src: src.as_ref().absolute(),
+            dst: dst.as_ref().absolute(),
         }
     }
     pub fn src(&self) -> &Path {
@@ -93,7 +93,7 @@ impl SecretsOpts {
         self
     }
     pub fn with_value_dir(mut self, dir: impl AsRef<Path>) -> Self {
-        self.value_dir = dir.as_ref().components().collect();
+        self.value_dir = dir.as_ref().absolute();
         self
     }
     pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
@@ -229,7 +229,7 @@ impl Secrets {
 
     pub fn with_values(mut self, values: HashMap<String, impl AsRef<str>>) -> Self {
         for (label, template) in values {
-            let v = value_source(&self.opts.value_dir, &label, template);
+            let v = SecretValue::new(&self.opts.value_dir, template, &label);
             self.values.insert(v.label.clone(), v);
         }
         self
@@ -249,7 +249,7 @@ impl Secrets {
     }
 
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
-        let v = value_source(&self.opts.value_dir, label, template);
+        let v = SecretValue::new(&self.opts.value_dir, template, label);
         self.values.insert(v.label.clone(), v);
         self
     }
@@ -559,10 +559,10 @@ impl Secrets {
         ev: FsEvent,
     ) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_write(provider, &utils::clean(src)).await,
-            FsEvent::Remove(src) => self.on_remove(&utils::clean(src)),
+            FsEvent::Write(src) => self.on_write(provider, &src.clean()).await,
+            FsEvent::Remove(src) => self.on_remove(&src.clean()),
             FsEvent::Move { from, to } => {
-                self.on_move(provider, &utils::clean(from), &utils::clean(to))
+                self.on_move(provider, &from.clean(), &to.clean())
                     .await
             }
         }
@@ -580,8 +580,9 @@ fn parse_mapping(s: &str) -> Result<PathMapping, String> {
                 s
             )
         })?;
-
-    Ok(PathMapping::new(src, dst))
+    let canon = Path::new(src).canonicalize()
+        .map_err(|e| format!("Failed to canonicalize '{}': {}", src, e))?;
+    Ok(PathMapping::new(&canon, dst))
 }
 
 /// Parse a human-friendly size string into bytes.
@@ -617,14 +618,7 @@ fn parse_size(s: &str) -> Result<u64, String> {
 }
 
 fn parse_absolute(s: &str) -> Result<PathBuf, String> {
-    Ok(utils::clean(s))
-}
-
-/// Construct a SecretValue from label + template.
-fn value_source(output_root: &Path, label: &str, template: impl AsRef<str>) -> SecretValue {
-    let sanitized = utils::sanitize_name(label);
-    let dst = output_root.join(&sanitized);
-    SecretValue::new(dst, template, sanitized)
+    Ok(Path::new(s).absolute())
 }
 
 #[cfg(test)]
@@ -724,16 +718,23 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_basic() {
-        assert_eq!(utils::sanitize_name("Db_Password"), "db_password");
-        assert_eq!(utils::sanitize_name("A/B/C"), "a_b_c");
-        assert_eq!(utils::sanitize_name("weird name"), "weird_name");
-    }
+    fn secret_value_sanitization() {
+        let root = Path::new("/");
 
-    #[test]
-    fn sanitize_unicode_and_symbols() {
-        assert_eq!(utils::sanitize_name("πß?%"), "____");
-        assert_eq!(utils::sanitize_name("..//--__"), "..__--__");
+        let v = SecretValue::new(root, "", "Db_Password");
+        assert_eq!(v.label, "Db_Password"); 
+
+        let v = SecretValue::new(root, "", "A/B/C");
+        assert_eq!(v.label, "A_B_C");
+
+        let v = SecretValue::new(root, "", "weird name");
+        assert_eq!(v.label, "weird name");
+
+        let v = SecretValue::new(root, "", "πß?%");
+        assert_eq!(v.label, "πß_%");
+
+        let v = SecretValue::new(root, "", "..//--__");
+        assert_eq!(v.label, "..__--__");
     }
 
     #[test]
