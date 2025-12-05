@@ -3,6 +3,10 @@ services:
   locket-aio:
     image: ghcr.io/bpbradley/locket:latest
     user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     container_name: locket-aio
     secrets:
       - connect_token
@@ -23,6 +27,10 @@ services:
   locket-connect:
     image: ghcr.io/bpbradley/locket:connect
     user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     container_name: locket-connect
     secrets:
       - connect_token
@@ -42,6 +50,10 @@ services:
   locket-op:
     image: ghcr.io/bpbradley/locket:op
     user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     container_name: locket-op
     secrets:
       - op_token
@@ -62,6 +74,10 @@ services:
   locket-bws:
     image: ghcr.io/bpbradley/locket:bws
     user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     container_name: locket-bws
     secrets:
       - bws_token

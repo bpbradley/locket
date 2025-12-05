@@ -1,9 +1,9 @@
-# Locket
+# locket
 
 > *A secrets management agent. Keeps your secrets safe, but out of sight.*
 
 1. [Overview](#overview)
-1. [Quick Start](#overview)
+1. [Quick Start](#quick-start)
 1. [Full Configuration](./docs/run.md)
 1. [Security](#security)
 1. [Examples](#example-hot-reloading-traefik-configurations-with-secrets)
@@ -15,9 +15,9 @@ Locket is a small CLI tool, packaged as a tiny rootless and distroless Docker im
 
 The basic premise is:
 
-1. Move your sensitive data to a dedicated secret manager (only 1password supported today, more to come), 
+1. Move your sensitive data to a dedicated secret manager ([Supported Providers](#providers))
 1. Adjust your config files to carry *secret references* instead of raw sensitive data, which are safe to commit directly to revision control (i.e `{{ op://vault/keys/privatekey?ssh-format=openssh }}`)
-1. Configure locket to use your secrets provider `--provider=op` or with env: `SECRETS_PROVIDER=op`. Or just use the docker image tag `locket:op`
+1. Configure locket to use your secrets provider `--provider=bws` or with env: `SECRETS_PROVIDER=bws`. Or just use the docker image tag `locket:bws`
 1. Mount your templates containing secret references for locket to read, i.e. `./templates:/templates:ro`, and mount an output directory for the secrets to be placed (usually a named tmpfs volume, or some secure location) `secrets-store:/run/secrets/locket`
 1. Finally, map the template->output for each required mapping. You can map arbitrarily many directories->directories or files->files. `--map /templates:/run/secrets/locket`
 
@@ -43,7 +43,7 @@ services:
       - ALL
     # Configurations can be supplied via command like below, or via env variables.
     command:
-        - "--provider=op"
+        - "--provider=op-connect"
         - "--op.token-file=/run/secrets/op_token"
         - "--map=/templates:/run/secrets/locket" # Supports multiple maps, if needed.
         - "--secret=db_pass={{ op://vault/db/pass }}"
@@ -110,6 +110,7 @@ volumes:
       device: tmpfs
       o: uid=1000,gid=1000,mode=700
 ```
+
 ## Example: Hot-Reloading Traefik configurations with Secrets
 
 Traefik supports Dynamic Configuration via files, which it watches for changes. By pairing Traefik with Locket, you can inject secrets (like Dashboard credentials, TLS certificates, or middleware auth) into your configuration files and have Traefik hot-reload them automatically without a restart.
@@ -190,22 +191,19 @@ volumes:
 
 ## Providers
 
-1. 1password Connect (`--provider=op-connect`)
-2. 1password Service Accounts (`--provider=op`)
-3. Bitwarden Secrets Manager (`--providers=bws`)
+1. [1password Connect](./docs/providers/connect.md)
+2. [1password Service Accounts](./docs/providers/op.md)
+3. [Bitwarden Secrets Manager](./docs/providers/bws.md)
 
 > [!TIP]
 > Each provider has its own docker image, if a slim version is preferred. The `latest` tag bundles all providers and their respective dependencies. But a provider specific tag like `locket:connect` is only about 4MB and has no extra dependencies besides what is needed for the connect provider.
-
-> [!NOTE]
-> The `op` (service account) provider is a bit more feature rich than the connect provider (currently), and is easier to setup, but it does require the bundled `op` cli dependency right now, because 1password does not offer a Rust SDK. This means it is quite a lot slower than other providers, and carries some quirks with use as non-default users.
 
 ## Roadmap
 
 ### Before v1.0.0
 
 1. Have support for at least 4 providers
-1. Add support for relative paths for more use as a standalone CLI.
+1. Add support for [Docker Provider API](https://docs.docker.com/compose/how-tos/provider-services/)
 
 ### Beyond
 
