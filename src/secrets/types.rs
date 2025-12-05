@@ -39,9 +39,6 @@ pub enum SecretError {
     #[error("source {src:?} is inside destination {dst:?}")]
     Destructive { src: PathBuf, dst: PathBuf },
 
-    #[error("Relative paths are forbidden in source: {0:?}")]
-    Forbidden(PathBuf),
-
     #[error("dst has no parent: {0}")]
     NoParent(PathBuf),
 }

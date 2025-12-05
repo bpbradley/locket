@@ -105,13 +105,9 @@ impl SecretsOpts {
         let mut destinations = Vec::new();
 
         for m in &self.mapping {
-            if m.src
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
-                return Err(SecretError::Forbidden(m.src.clone()));
-            }
             // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
+            // This should already be enforced on the user input using fs.canonicalize during parsing,
+            // but we double check here to be safe.
             if !m.src.exists() {
                 return Err(SecretError::SourceMissing(m.src.clone()));
             }
@@ -640,17 +636,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_fails_forbidden_relative_path() {
+    fn validate_relative_paths_are_canonicalized() {
         let tmp = tempdir().unwrap();
         let src = tmp.path().join("templates");
         std::fs::create_dir_all(&src).unwrap();
-        let bad_src = src.join("..").join("passwd");
+        let relative = src.join("..").join("templates");
 
-        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&bad_src, "out")]);
-        assert!(matches!(
-            opts.validate(),
-            Err(SecretError::Forbidden(p)) if p == bad_src
-        ));
+        let opts = SecretsOpts::default().with_mapping(vec![PathMapping::new(&relative, "out")]);
+        assert!(opts.validate().is_ok());
+        assert!(opts.mapping[0].src() == src.as_path());
     }
 
     #[test]
