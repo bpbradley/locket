@@ -4,6 +4,9 @@
     "config:recommended",
     "group:allNonMajor"
   ],
+  "ignorePaths": [
+    ".github/workflows/release.yml"
+  ],
   "customManagers": [
     {
       "customType": "regex",
