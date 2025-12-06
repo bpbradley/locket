@@ -41,7 +41,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
     }
 
     let mut secrets = Secrets::new(secrets)
-        .with_values(values.load())
+        .with_secrets(values)
         .with_writer(writer);
 
     match secrets.collisions() {
