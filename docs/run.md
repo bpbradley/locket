@@ -15,8 +15,7 @@
 | `--out` | `VALUE_OUTPUT_DIR` | `/run/secrets/locket` | Directory where secret values (literals) are materialized |
 | `--inject-policy` | `INJECT_POLICY` | `copy-unmodified` | Policy for handling injection failures<br><br> **Options:**<br> - `error`: Injection failures are treated as errors and will abort the process<br> - `copy-unmodified`: On injection failure, copy the unmodified secret to destination<br> - `ignore`: On injection failure, just log a warning and proceed with the secret ignored |
 | `--max-file-size` | `MAX_FILE_SIZE` | `10M` | Maximum allowable size for a template file. Files larger than this will be rejected. Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes) |
-| `--env-prefix` | `VALUE_PREFIX` | `secret_` | Environment variables prefixed with this string will be treated as secret values |
-| `--secret` | `SECRET_VALUE` | *None* | Additional secret values specified as LABEL=SECRET_TEMPLATE Multiple values can be provided, separated by semicolons. Or supplied multiple times as arguments. e.g. `--secret db_password={{op://vault/credentials/db_password}} --secret api_key={{op://vault/keys/api_key}}` |
+| `--secret` | `LOCKET_SECRETS` | *None* | Secret Sources |
 | `--debounce-ms` | `WATCH_DEBOUNCE_MS` | `500` | Debounce duration in milliseconds for filesystem events. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise |
 | `--file-mode` | `LOCKET_FILE_MODE` | `600` | File permission mode |
 | `--dir-mode` | `LOCKET_DIR_MODE` | `700` | Directory permission mode |
