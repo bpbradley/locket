@@ -31,8 +31,8 @@ struct Parameter {
 pub async fn metadata(_project: String) -> sysexits::ExitCode {
     let cmd = Cli::command();
 
-    let compose_cmd = find_subcommand(&cmd, "compose")
-        .expect("CLI definition missing 'compose' subcommand");
+    let compose_cmd =
+        find_subcommand(&cmd, "compose").expect("CLI definition missing 'compose' subcommand");
 
     let up_meta = build_command_metadata(find_subcommand(compose_cmd, "up"));
     let down_meta = build_command_metadata(find_subcommand(compose_cmd, "down"));
