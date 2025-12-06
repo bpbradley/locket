@@ -1,4 +1,5 @@
 pub mod cmd;
+pub mod compose;
 pub mod health;
 pub mod logging;
 pub mod provider;

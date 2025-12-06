@@ -8,6 +8,10 @@ use crate::{
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+pub mod compose;
+pub mod healthcheck;
+pub mod run;
+
 #[derive(Parser, Debug)]
 #[command(name = "locket")]
 #[command(version, about = "Materialize secrets from environment or templates", long_about = None)]
@@ -25,6 +29,9 @@ pub enum Command {
     /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
     /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.
     Healthcheck(HealthArgs),
+
+    /// Docker Compose provider API
+    Compose(ComposeArgs),
 }
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
@@ -80,5 +87,23 @@ pub struct HealthArgs {
     pub status_file: StatusFile,
 }
 
-pub mod healthcheck;
-pub mod run;
+#[derive(Args, Debug)]
+pub struct ComposeArgs {
+    /// Compose Project Name
+    #[arg(long = "project-name", env = "COMPOSE_PROJECT_NAME")]
+    pub project_name: String,
+
+    /// Docker Compose provider API command
+    #[command(subcommand)]
+    pub cmd: ComposeCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ComposeCommand {
+    /// Handler for Docker Compose 'up' command
+    Up(compose::up::UpArgs),
+    /// Handler for Docker Compose 'down' command
+    Down,
+    /// Handler for Docker Compose 'metadata' command
+    Metadata,
+}
