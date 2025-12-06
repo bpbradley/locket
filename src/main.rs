@@ -8,6 +8,6 @@ async fn main() -> ExitCode {
     match cli.cmd {
         Command::Run(args) => run::run(*args).await,
         Command::Healthcheck(args) => healthcheck::healthcheck(args),
-        Command::Compose(args) => compose::compose(args).await,
+        Command::Compose(args) => compose::compose(*args).await,
     }
 }

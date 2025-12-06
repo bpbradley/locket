@@ -5,6 +5,7 @@ use futures::stream::{self, StreamExt};
 use percent_encoding::percent_decode_str;
 use reqwest::{Client, StatusCode};
 use secrecy::ExposeSecret;
+use secrecy::SecretString;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -288,7 +289,7 @@ impl OpConnectProvider {
         Ok(uuid)
     }
 
-    async fn fetch_single(&self, raw_path: &str) -> Result<String, ProviderError> {
+    async fn fetch_single(&self, raw_path: &str) -> Result<SecretString, ProviderError> {
         let url = Url::parse(raw_path)
             .map_err(|e| ProviderError::InvalidConfig(format!("bad reference URL: {}", e)))?;
 
@@ -371,7 +372,7 @@ impl OpConnectProvider {
             .as_str()
             .ok_or_else(|| ProviderError::NotFound("field has no value".into()))?;
 
-        Ok(raw_value.to_string())
+        Ok(SecretString::new(raw_value.into()))
     }
 }
 
@@ -384,7 +385,7 @@ impl SecretsProvider for OpConnectProvider {
     async fn fetch_map(
         &self,
         references: &[&str],
-    ) -> Result<HashMap<String, String>, ProviderError> {
+    ) -> Result<HashMap<String, SecretString>, ProviderError> {
         // We must first resolve any vault or item names to UUIDs.
         // So we first collect all unique names, and pre-resolve them
         // into cache so that we don't need to resolve these again in the future
@@ -394,16 +395,17 @@ impl SecretsProvider for OpConnectProvider {
 
         let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
 
-        let results: Vec<Result<Option<(String, String)>, ProviderError>> = stream::iter(refs)
-            .map(|key| async move {
-                match self.fetch_single(&key).await {
-                    Ok(val) => Ok(Some((key, val))),
-                    Err(e) => Err(e),
-                }
-            })
-            .buffer_unordered(self.max_concurrent)
-            .collect::<Vec<_>>()
-            .await;
+        let results: Vec<Result<Option<(String, SecretString)>, ProviderError>> =
+            stream::iter(refs)
+                .map(|key| async move {
+                    match self.fetch_single(&key).await {
+                        Ok(val) => Ok(Some((key, val))),
+                        Err(e) => Err(e),
+                    }
+                })
+                .buffer_unordered(self.max_concurrent)
+                .collect::<Vec<_>>()
+                .await;
 
         // Aggregate
         let mut map = HashMap::new();

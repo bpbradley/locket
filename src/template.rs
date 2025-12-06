@@ -26,12 +26,9 @@ impl<'a> Template<'a> {
         self.iter_tags().map(|(_, key)| key).collect()
     }
 
-    /// Render the template by replacing tags with values provided in the `map`.
-    ///
-    /// * If a key is present in the map, the entire tag `{{ key }}` is replaced by the value.
-    /// * If a key is NOT present in the map, the tag is left strictly unmodified
-    pub fn render<S>(&self, values: &std::collections::HashMap<String, S>) -> Cow<'a, str>
+    pub fn render_with<F, S>(&self, lookup: F) -> Cow<'a, str>
     where
+        F: Fn(&str) -> Option<S>,
         S: AsRef<str>,
     {
         let mut output: Option<String> = None;
@@ -39,10 +36,9 @@ impl<'a> Template<'a> {
 
         for (range, key) in self.iter_tags() {
             if output.is_none() {
-                match values.get(key) {
+                // Peek to see if we need to start allocating
+                match lookup(key) {
                     Some(val) => {
-                        // Match found. Diverge from the original source.
-                        // Initialize the buffer and catch up.
                         let mut s = String::with_capacity(self.source.len());
                         s.push_str(&self.source[0..range.start]);
                         s.push_str(val.as_ref());
@@ -50,23 +46,16 @@ impl<'a> Template<'a> {
                         output = Some(s);
                         continue;
                     }
-                    None => {
-                        // No match. Continue to defer allocation.
-                        continue;
-                    }
+                    None => continue,
                 }
             }
 
-            // Output is Some, we must render.
             if let Some(out) = output.as_mut() {
-                // Append text between the last processed tag and this one
                 out.push_str(&self.source[last_idx..range.start]);
-
-                match values.get(key) {
+                match lookup(key) {
                     Some(val) => out.push_str(val.as_ref()),
                     None => out.push_str(&self.source[range.clone()]),
                 }
-
                 last_idx = range.end;
             }
         }
@@ -80,6 +69,17 @@ impl<'a> Template<'a> {
             }
             None => Cow::Borrowed(self.source),
         }
+    }
+
+    /// Render the template by replacing tags with values provided in the `map`.
+    ///
+    /// * If a key is present in the map, the entire tag `{{ key }}` is replaced by the value.
+    /// * If a key is NOT present in the map, the tag is left strictly unmodified
+    pub fn render<S>(&self, values: &std::collections::HashMap<String, S>) -> Cow<'a, str>
+    where
+        S: AsRef<str>,
+    {
+        self.render_with(|k| values.get(k).map(|s| s.as_ref()))
     }
 
     /// Internal iterator over tags.

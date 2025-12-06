@@ -5,6 +5,7 @@ use crate::secrets::types::{InjectFailurePolicy, Secret, SecretError, SecretFile
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
+use secrecy::ExposeSecret;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -203,10 +204,10 @@ impl SecretManager {
         let secrets_map = provider.fetch_map(&references).await?;
 
         let output = if has_keys {
-            tpl.render(&secrets_map)
+            tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()))
         } else {
             match secrets_map.get(content.trim()) {
-                Some(val) => Cow::Borrowed(val.as_str()),
+                Some(val) => Cow::Borrowed(val.expose_secret()),
                 None => {
                     warn!(dst=?file.dest(), "provider returned success but secret value was missing");
                     content

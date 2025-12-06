@@ -3,6 +3,7 @@ use locket::{
     provider::{ProviderError, SecretsProvider},
     secrets::{InjectFailurePolicy, PathMapping, SecretError, SecretManager, SecretsOpts},
 };
+use secrecy::SecretString;
 use std::collections::HashMap;
 use tempfile::tempdir;
 use tracing::debug;
@@ -10,14 +11,14 @@ use tracing::debug;
 // Holds a static map of "Remote" secrets to serve.
 #[derive(Debug, Clone, Default)]
 struct MockProvider {
-    data: HashMap<String, String>,
+    data: HashMap<String, SecretString>,
 }
 
 impl MockProvider {
     fn new(data: Vec<(&str, &str)>) -> Self {
         let mut map = HashMap::new();
         for (k, v) in data {
-            map.insert(k.to_string(), v.to_string());
+            map.insert(k.to_string(), SecretString::new(v.into()));
         }
         Self { data: map }
     }
@@ -32,7 +33,7 @@ impl SecretsProvider for MockProvider {
     async fn fetch_map(
         &self,
         references: &[&str],
-    ) -> Result<HashMap<String, String>, ProviderError> {
+    ) -> Result<HashMap<String, SecretString>, ProviderError> {
         let mut result = HashMap::new();
         for &key in references {
             if let Some(val) = self.data.get(key) {

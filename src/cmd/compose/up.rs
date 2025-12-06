@@ -3,6 +3,7 @@ use crate::provider::Provider;
 use crate::secrets::Secret;
 use crate::template::Template;
 use clap::Args;
+use secrecy::ExposeSecret;
 use std::borrow::Cow;
 
 #[derive(Args, Debug)]
@@ -62,7 +63,10 @@ pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
 
         // If no references match the provider, we pass the raw value through.
         if references.is_empty() {
-            ComposeMsg::debug(format!("No resolveable secrets found for '{}'; passing through raw value", secret.key));
+            ComposeMsg::debug(format!(
+                "No resolveable secrets found for '{}'; passing through raw value",
+                secret.key
+            ));
             ComposeMsg::set_env(&secret.key, &raw_template);
             continue;
         }
@@ -71,19 +75,25 @@ pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
         let secret_map = match provider.fetch_map(&references).await {
             Ok(map) => map,
             Err(e) => {
-                ComposeMsg::error(format!("Failed to fetch secrets for '{}': {}", secret.key, e));
+                ComposeMsg::error(format!(
+                    "Failed to fetch secrets for '{}': {}",
+                    secret.key, e
+                ));
                 return sysexits::ExitCode::Unavailable;
             }
         };
 
         // Render Final Value
         let final_value = if has_keys {
-            tpl.render(&secret_map)
+            tpl.render_with(|k| secret_map.get(k).map(|s| s.expose_secret()))
         } else {
             match secret_map.get(raw_template.trim()) {
-                Some(val) => Cow::Borrowed(val.as_str()),
+                Some(val) => Cow::Borrowed(val.expose_secret()),
                 None => {
-                    ComposeMsg::debug(format!("Provider returned success but value was missing for '{}'", raw_template));
+                    ComposeMsg::debug(format!(
+                        "Provider returned success but value was missing for '{}'",
+                        raw_template
+                    ));
                     raw_template
                 }
             }

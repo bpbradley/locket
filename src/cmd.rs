@@ -31,7 +31,7 @@ pub enum Command {
     Healthcheck(HealthArgs),
 
     /// Docker Compose provider API
-    Compose(ComposeArgs),
+    Compose(Box<ComposeArgs>),
 }
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
@@ -107,7 +107,7 @@ pub struct ComposeArgs {
 #[derive(Subcommand, Debug)]
 pub enum ComposeCommand {
     /// Handler for Docker Compose 'up' command
-    Up(compose::up::UpArgs),
+    Up(Box<compose::up::UpArgs>),
     /// Handler for Docker Compose 'down' command
     Down,
     /// Handler for Docker Compose 'metadata' command
