@@ -1,7 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::path::{PathExt, PathMapping};
-use crate::secrets::types::{InjectFailurePolicy, SecretArg, SecretError, SecretFile};
+use crate::secrets::types::{InjectFailurePolicy, Secret, SecretError, SecretFile};
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
@@ -121,14 +121,14 @@ impl Default for SecretsOpts {
     }
 }
 
-pub struct Secrets {
+pub struct SecretManager {
     opts: SecretsOpts,
     fs: SecretFs,
     values: HashMap<String, SecretFile>,
     writer: FileWriter,
 }
 
-impl Secrets {
+impl SecretManager {
     pub fn new(opts: SecretsOpts) -> Self {
         let fs = SecretFs::new(opts.mapping.clone(), opts.max_file_size);
         Self {
@@ -139,7 +139,7 @@ impl Secrets {
         }
     }
 
-    pub fn with_secrets(mut self, args: Vec<SecretArg>) -> Self {
+    pub fn with_secrets(mut self, args: Vec<Secret>) -> Self {
         for arg in args {
             let key = arg.key.clone();
             let file = SecretFile::from_arg(arg, &self.opts.value_dir, self.opts.max_file_size);

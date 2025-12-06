@@ -1,4 +1,4 @@
-use locket::secrets::{PathMapping, SecretArg, SecretError, Secrets, SecretsOpts};
+use locket::secrets::{PathMapping, Secret, SecretError, SecretManager, SecretsOpts};
 use std::collections::HashMap;
 
 #[test]
@@ -26,7 +26,7 @@ fn collisions_structure_conflict() {
         PathMapping::new(blocked_src.clone(), output.join("config/nested")),
     ]);
 
-    let secrets = Secrets::new(opts);
+    let secrets = SecretManager::new(opts);
 
     let result = secrets.collisions();
 
@@ -54,11 +54,11 @@ fn collisions_on_output_dst() {
         .with_value_dir(out_dir.clone())
         .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())]);
 
-    let args: Vec<SecretArg> = SecretArg::try_from_map(values.clone()).unwrap();
+    let args: Vec<Secret> = Secret::try_from_map(values.clone()).unwrap();
 
-    let secrets = Secrets::new(opts).with_secrets(args);
+    let manager = SecretManager::new(opts).with_secrets(args);
 
-    let result = secrets.collisions();
+    let result = manager.collisions();
 
     assert!(result.is_err());
 

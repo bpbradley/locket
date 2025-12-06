@@ -1,6 +1,6 @@
 // run.rs
 use super::{RunArgs, RunMode};
-use crate::{health::StatusFile, secrets::Secrets, signal, watch::FsWatcher};
+use crate::{health::StatusFile, secrets::SecretManager, signal, watch::FsWatcher};
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -12,9 +12,9 @@ pub async fn run(args: RunArgs) -> ExitCode {
     debug!(?args, "effective config");
 
     let RunArgs {
-        mut secrets,
+        mut manager,
         status_file,
-        values,
+        secrets,
         writer,
         provider,
         watcher,
@@ -35,16 +35,16 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    if let Err(e) = secrets.resolve() {
+    if let Err(e) = manager.resolve() {
         error!(error=%e, "failed to resolve secret configuration");
         return ExitCode::Config;
     }
 
-    let mut secrets = Secrets::new(secrets)
-        .with_secrets(values)
+    let mut manager = SecretManager::new(manager)
+        .with_secrets(secrets)
         .with_writer(writer);
 
-    match secrets.collisions() {
+    match manager.collisions() {
         Ok(()) => {}
         Err(e) => {
             error!(error=%e, "secret destination collisions detected");
@@ -52,7 +52,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    if let Err(e) = secrets.inject_all(provider.as_ref()).await {
+    if let Err(e) = manager.inject_all(provider.as_ref()).await {
         error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
@@ -73,7 +73,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let mut watcher = FsWatcher::new(watcher, &mut secrets, provider.as_ref());
+            let mut watcher = FsWatcher::new(watcher, &mut manager, provider.as_ref());
             match watcher.run().await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {

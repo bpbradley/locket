@@ -2,7 +2,7 @@ use crate::{
     health::StatusFile,
     logging::Logger,
     provider::Provider,
-    secrets::{SecretArg, SecretsOpts},
+    secrets::{Secret, SecretsOpts},
     watch::WatcherOpts,
     write::FileWriter,
 };
@@ -57,7 +57,7 @@ pub struct RunArgs {
 
     /// Secret Management Configuration
     #[command(flatten)]
-    pub secrets: SecretsOpts,
+    pub manager: SecretsOpts,
 
     /// Secret Sources
     #[arg(
@@ -67,7 +67,7 @@ pub struct RunArgs {
         value_delimiter = ',',
         hide_env_values = true
     )]
-    pub values: Vec<SecretArg>,
+    pub secrets: Vec<Secret>,
 
     /// Filesystem watcher options
     #[command(flatten)]

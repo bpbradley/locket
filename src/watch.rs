@@ -2,7 +2,7 @@
 
 use crate::{
     provider::SecretsProvider,
-    secrets::{FsEvent, SecretError, Secrets},
+    secrets::{FsEvent, SecretError, SecretManager},
     signal,
 };
 use clap::Args;
@@ -59,7 +59,7 @@ enum ControlFlow {
 }
 
 pub struct FsWatcher<'a> {
-    secrets: &'a mut Secrets,
+    secrets: &'a mut SecretManager,
     provider: &'a dyn SecretsProvider,
     debounce: Duration,
     events: EventRegistry,
@@ -68,7 +68,7 @@ pub struct FsWatcher<'a> {
 impl<'a> FsWatcher<'a> {
     pub fn new(
         opts: WatcherOpts,
-        secrets: &'a mut Secrets,
+        secrets: &'a mut SecretManager,
         provider: &'a dyn SecretsProvider,
     ) -> Self {
         Self {

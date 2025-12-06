@@ -48,6 +48,51 @@ pub enum SecretError {
     Parse(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct Secret {
+    pub key: String,
+    pub source: SecretSource,
+}
+
+impl Secret {
+    fn from_kv(key: String, val: String) -> Result<Self, SecretError> {
+        // @file
+        let source = if let Some(path) = val.strip_prefix('@') {
+            SecretSource::file(path)?
+        } else {
+            SecretSource::literal(&key, val)
+        };
+        Ok(Self { key, source })
+    }
+
+    pub fn try_from_map(map: HashMap<String, String>) -> Result<Vec<Self>, SecretError> {
+        map.into_iter().map(|(k, v)| Self::from_kv(k, v)).collect()
+    }
+}
+
+impl FromStr for Secret {
+    type Err = SecretError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (key, val) = s
+            .split_once('=')
+            .ok_or_else(|| SecretError::Parse(format!("expected KEY=VALUE, got '{}'", s)))?;
+
+        // @ means load from file
+        let source = if let Some(path) = val.strip_prefix('@') {
+            SecretSource::File(PathBuf::from(path))
+        } else {
+            // Use key as the label for the literal
+            SecretSource::literal(key, val)
+        };
+
+        Ok(Self {
+            key: key.to_string(),
+            source,
+        })
+    }
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum InjectFailurePolicy {
     /// Injection failures are treated as errors and will abort the process
@@ -134,51 +179,6 @@ impl<'a> SourceReader<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct SecretArg {
-    pub key: String,
-    pub source: SecretSource,
-}
-
-impl SecretArg {
-    fn from_kv(key: String, val: String) -> Result<Self, SecretError> {
-        // @file
-        let source = if let Some(path) = val.strip_prefix('@') {
-            SecretSource::file(path)?
-        } else {
-            SecretSource::literal(&key, val)
-        };
-        Ok(Self { key, source })
-    }
-
-    pub fn try_from_map(map: HashMap<String, String>) -> Result<Vec<Self>, SecretError> {
-        map.into_iter().map(|(k, v)| Self::from_kv(k, v)).collect()
-    }
-}
-
-impl FromStr for SecretArg {
-    type Err = SecretError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (key, val) = s
-            .split_once('=')
-            .ok_or_else(|| SecretError::Parse(format!("expected KEY=VALUE, got '{}'", s)))?;
-
-        // @ means load from file
-        let source = if let Some(path) = val.strip_prefix('@') {
-            SecretSource::File(PathBuf::from(path))
-        } else {
-            // Use key as the label for the literal
-            SecretSource::literal(key, val)
-        };
-
-        Ok(Self {
-            key: key.to_string(),
-            source,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct SecretFile {
     source: SecretSource,
     dest: PathBuf,
@@ -206,7 +206,7 @@ impl SecretFile {
             max_size: u64::MAX,
         }
     }
-    pub fn from_arg(arg: SecretArg, root: &Path, max_size: u64) -> Self {
+    pub fn from_arg(arg: Secret, root: &Path, max_size: u64) -> Self {
         let safe_name = sanitize_filename::sanitize(&arg.key);
         Self {
             source: arg.source,

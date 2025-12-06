@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use locket::{
     provider::{ProviderError, SecretsProvider},
-    secrets::{InjectFailurePolicy, PathMapping, SecretError, Secrets, SecretsOpts},
+    secrets::{InjectFailurePolicy, PathMapping, SecretError, SecretManager, SecretsOpts},
 };
 use std::collections::HashMap;
 use tempfile::tempdir;
@@ -75,9 +75,9 @@ async fn test_happy_path_template_rendering() {
     // Provider has both secrets
     let provider = MockProvider::new(vec![("mock://user", "admin"), ("mock://pass", "secret123")]);
 
-    let secrets = Secrets::new(opts);
+    let manager = SecretManager::new(opts);
 
-    secrets.inject_all(&provider).await.unwrap();
+    manager.inject_all(&provider).await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
     assert_eq!(result, "user: admin\npass: secret123");
@@ -89,9 +89,9 @@ async fn test_whole_file_replacement() {
 
     let key_content = "-----BEGIN RSA PRIVATE KEY-----...";
     let provider = MockProvider::new(vec![("mock://ssh/key", key_content)]);
-    let secrets = Secrets::new(opts);
+    let manager = SecretManager::new(opts);
 
-    secrets.inject_all(&provider).await.unwrap();
+    manager.inject_all(&provider).await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("id_rsa")).unwrap();
     assert_eq!(result, key_content); // Should be replaced entirely
@@ -105,9 +105,9 @@ async fn test_policy_error_aborts() {
     opts.policy = InjectFailurePolicy::Error;
 
     let provider = MockProvider::new(vec![]); // Empty provider
-    let secrets = Secrets::new(opts);
+    let manager = SecretManager::new(opts);
 
-    let result = secrets.inject_all(&provider).await;
+    let result = manager.inject_all(&provider).await;
 
     assert!(result.is_err());
 
@@ -125,10 +125,10 @@ async fn test_policy_copy_unmodified() {
     opts.policy = InjectFailurePolicy::CopyUnmodified;
 
     let provider = MockProvider::new(vec![]);
-    let secrets = Secrets::new(opts);
+    let manager = SecretManager::new(opts);
 
     // Should succeed (return Ok) despite missing secret
-    secrets.inject_all(&provider).await.unwrap();
+    manager.inject_all(&provider).await.unwrap();
 
     // Should contain original template text
     let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
@@ -143,9 +143,9 @@ async fn test_ignore_unknown_providers() {
     let (_tmp, out_dir, opts) = setup("mixed.yaml", content);
 
     let provider = MockProvider::new(vec![("mock://valid", "value")]);
-    let secrets = Secrets::new(opts);
+    let manager = SecretManager::new(opts);
 
-    secrets.inject_all(&provider).await.unwrap();
+    manager.inject_all(&provider).await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("mixed.yaml")).unwrap();
 
