@@ -1,11 +1,11 @@
 [Return to Index](./CONFIGURATION.md)
 
+> [!TIP]
+> All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
+
 ## `locket run`
 
 Start the secret sidecar agent. All secrets will be collected and materialized according to configuration
-
-> [!TIP]
-> All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
 
 ### Options
 

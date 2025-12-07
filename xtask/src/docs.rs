@@ -84,22 +84,29 @@ impl DocGenerator {
             let mut sub_buffer = Vec::new();
 
             writeln!(
-                &mut sub_buffer, 
-                "[Return to Index](./{})\n", 
+                &mut sub_buffer,
+                "[Return to Index](./{})\n",
                 self.file.display()
             )?;
-            
+
+            writeln!(sub_buffer, "> [!TIP]")?;
+            writeln!(
+                sub_buffer,
+                "> All configuration options can be set via command line arguments OR \
+            environment variables. CLI arguments take precedence.\n"
+            )?;
+
             write_command_section(&mut sub_buffer, sub, &app_name)?;
 
             if has_visible_subcommands(sub) {
-                 for child in sub.get_subcommands() {
+                for child in sub.get_subcommands() {
                     if !child.is_hide_set() {
                         writeln!(&mut sub_buffer, "\n---\n")?;
-                        
+
                         let parent_name = format!("{} {}", app_name, name);
                         write_command_section(&mut sub_buffer, child, &parent_name)?;
                     }
-                 }
+                }
             }
 
             write_or_verify(&sub_path, &sub_buffer, self.check)?;
@@ -148,8 +155,8 @@ fn write_command_section(
     cmd: &Command,
     parent_name: &str,
 ) -> io::Result<()> {
-    let cmd_name = cmd.get_name(); 
-    
+    let cmd_name = cmd.get_name();
+
     let display_name = if parent_name == "locket" {
         format!("locket {}", cmd_name)
     } else {
@@ -157,18 +164,10 @@ fn write_command_section(
     };
 
     writeln!(writer, "## `{}`\n", display_name)?;
-    
+
     if let Some(about) = cmd.get_about() {
         writeln!(writer, "{}\n", about)?;
     }
-
-    writeln!(writer, "> [!TIP]")?;
-    writeln!(
-        writer,
-        "> All configuration options can be set via command line arguments OR \
-    environment variables. CLI arguments take precedence.\n"
-    )?;
-
     let mut groups: IndexMap<Option<String>, Vec<&Arg>> = IndexMap::new();
     for arg in cmd.get_arguments() {
         if arg.get_id() == "help" || arg.get_id() == "version" || arg.is_hide_set() {

@@ -1,11 +1,11 @@
 [Return to Index](./CONFIGURATION.md)
 
+> [!TIP]
+> All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
+
 ## `locket compose`
 
 Docker Compose provider API
-
-> [!TIP]
-> All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
 
 ### Options
 
@@ -18,9 +18,6 @@ Docker Compose provider API
 ## `locket compose up`
 
 Injects secrets into a Docker Compose service environment with `docker compose up`
-
-> [!TIP]
-> All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
 
 ### Options
 
@@ -61,9 +58,6 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 
 Handler for Docker Compose `down`, but no-op because secrets are not persisted
 
-> [!TIP]
-> All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
-
 _No options._
 
 
@@ -72,9 +66,6 @@ _No options._
 ## `locket compose metadata`
 
 Handler for Docker Compose `metadata` command so that docker can query plugin capabilities
-
-> [!TIP]
-> All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
 
 _No options._
 
