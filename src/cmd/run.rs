@@ -1,21 +1,68 @@
 // run.rs
-use super::{RunArgs, RunMode};
-use crate::{health::StatusFile, secrets::Secrets, signal, watch::FsWatcher};
+use crate::{
+    health::StatusFile,
+    logging::Logger,
+    provider::Provider,
+    secrets::{SecretManager, SecretsOpts},
+    signal,
+    watch::{FsWatcher, WatcherOpts},
+};
+use clap::{Args, ValueEnum};
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
+
+#[derive(Default, Copy, Clone, Debug, ValueEnum)]
+pub enum RunMode {
+    /// Collect and materialize all secrets once and then exit
+    OneShot,
+    /// Continuously watch for changes on configured templates and update secrets as needed
+    #[default]
+    Watch,
+    /// Run once and then park to keep the process alive
+    Park,
+}
+
+#[derive(Args, Debug)]
+pub struct RunArgs {
+    /// Mode of operation
+    #[arg(long = "mode", env = "LOCKET_RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
+    pub mode: RunMode,
+
+    /// Status file path used for healthchecks
+    #[command(flatten)]
+    pub status_file: StatusFile,
+
+    /// Secret Management Configuration
+    #[command(flatten)]
+    pub manager: SecretsOpts,
+
+    /// Filesystem watcher options
+    #[command(flatten)]
+    pub watcher: WatcherOpts,
+
+    /// Logging configuration
+    #[command(flatten)]
+    pub logger: Logger,
+
+    /// Secrets provider selection
+    #[command(flatten, next_help_heading = "Provider Configuration")]
+    provider: Provider,
+}
 
 pub async fn run(args: RunArgs) -> ExitCode {
     if let Err(e) = args.logger.init() {
         error!(error=%e, "init logging failed");
         return ExitCode::CantCreat;
     }
-    debug!(?args, "effective config");
+    info!(
+        "Starting locket v{} `run` service ",
+        env!("CARGO_PKG_VERSION")
+    );
+    debug!("effective config: {:#?}", args);
 
     let RunArgs {
-        mut secrets,
+        mut manager,
         status_file,
-        values,
-        writer,
         provider,
         watcher,
         mode,
@@ -35,16 +82,14 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    if let Err(e) = secrets.resolve() {
+    if let Err(e) = manager.resolve() {
         error!(error=%e, "failed to resolve secret configuration");
         return ExitCode::Config;
     }
 
-    let mut secrets = Secrets::new(secrets)
-        .with_values(values.load())
-        .with_writer(writer);
+    let mut manager = SecretManager::new(manager);
 
-    match secrets.collisions() {
+    match manager.collisions() {
         Ok(()) => {}
         Err(e) => {
             error!(error=%e, "secret destination collisions detected");
@@ -52,7 +97,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    if let Err(e) = secrets.inject_all(provider.as_ref()).await {
+    if let Err(e) = manager.inject_all(provider.as_ref()).await {
         error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
@@ -73,7 +118,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let mut watcher = FsWatcher::new(watcher, &mut secrets, provider.as_ref());
+            let mut watcher = FsWatcher::new(watcher, &mut manager, provider.as_ref());
             match watcher.run().await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {

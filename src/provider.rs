@@ -75,7 +75,7 @@ pub trait SecretsProvider: Send + Sync {
     async fn fetch_map(
         &self,
         references: &[&str],
-    ) -> Result<HashMap<String, String>, ProviderError>;
+    ) -> Result<HashMap<String, SecretString>, ProviderError>;
 
     /// Returns true if the key string looks like a reference this provider supports.
     fn accepts_key(&self, key: &str) -> bool;

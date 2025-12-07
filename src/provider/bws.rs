@@ -9,6 +9,7 @@ use bitwarden::{
 use clap::Args;
 use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
+use secrecy::SecretString;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -116,12 +117,12 @@ impl SecretsProvider for BwsProvider {
     async fn fetch_map(
         &self,
         references: &[&str],
-    ) -> Result<HashMap<String, String>, ProviderError> {
+    ) -> Result<HashMap<String, SecretString>, ProviderError> {
         let client = &self.client;
 
         let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
 
-        let results: Vec<Result<(String, String), ProviderError>> = stream::iter(refs)
+        let results: Vec<Result<(String, SecretString), ProviderError>> = stream::iter(refs)
             .map(|key| async move {
                 let id = Uuid::parse_str(&key)
                     .map_err(|_| ProviderError::InvalidConfig(format!("invalid uuid: {}", key)))?;
@@ -133,7 +134,7 @@ impl SecretsProvider for BwsProvider {
                     .await
                     .map_err(|e| ProviderError::NotFound(format!("{} ({})", key, e)))?;
 
-                Ok((key, resp.value))
+                Ok((key, SecretString::new(resp.value.into())))
             })
             .buffer_unordered(self.max_concurrent)
             .collect()

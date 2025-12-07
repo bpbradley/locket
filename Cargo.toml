@@ -16,10 +16,11 @@ categories = ["command-line-utilities", "config"]
 members = [".", "xtask"]
 
 [features]
-default = ["op", "connect", "bws"]
+default = ["op", "connect", "bws", "compose"]
 op = ["tokio/process", "dep:futures"]
 connect = ["dep:reqwest", "dep:url", "dep:percent-encoding", "dep:futures"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:futures", "dep:rustls-webpki"]
+compose = []
 
 [dependencies]
 anyhow = "1"
@@ -32,7 +33,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 walkdir = "2"
-secrecy = "0.10.3"
+secrecy = {version = "0.10.3", features = ["serde"]}
 sysexits = "0.10"
 indexmap = "2"
 async-trait = "0.1"

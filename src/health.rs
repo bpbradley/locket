@@ -1,3 +1,4 @@
+use crate::secrets::parse_absolute;
 use clap::Args;
 use std::path::PathBuf;
 #[derive(Args, Debug)]
@@ -6,7 +7,8 @@ pub struct StatusFile {
     #[arg(
         long = "status-file",
         env = "LOCKET_STATUS_FILE",
-        default_value = "/tmp/.locket/ready"
+        default_value = "/tmp/.locket/ready",
+        value_parser = parse_absolute,
     )]
     path: PathBuf,
 }

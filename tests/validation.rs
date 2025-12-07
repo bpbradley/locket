@@ -70,7 +70,7 @@ fn validate_fails_value_dir_loop() {
 
     let mut opts = SecretsOpts::default()
         .with_mapping(vec![PathMapping::new(&src, &dst)])
-        .with_value_dir(bad_value_dir.clone());
+        .with_secret_dir(bad_value_dir.clone());
 
     assert!(matches!(
         opts.resolve(),

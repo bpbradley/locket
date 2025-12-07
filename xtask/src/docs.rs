@@ -35,14 +35,14 @@ impl DocGenerator {
     pub fn generate(self) -> anyhow::Result<()> {
         let cmd = Cli::command();
         let app_name = cmd.get_name().to_string();
-        let version = cmd.get_version().unwrap();
+        let version = cmd.get_version().unwrap_or("0.0.0");
 
         let docs_dir = &self.dir;
         if !docs_dir.exists() {
             if self.check {
                 anyhow::bail!("Documentation directory '{}' missing", docs_dir.display());
             }
-            fs::create_dir(docs_dir)?;
+            fs::create_dir_all(docs_dir)?;
         }
 
         let mut index_buffer = Vec::new();
@@ -82,7 +82,32 @@ impl DocGenerator {
             let sub_path = docs_dir.join(&filename);
 
             let mut sub_buffer = Vec::new();
-            write_subcommand_docs(&mut sub_buffer, &self, sub, &app_name)?;
+
+            writeln!(
+                &mut sub_buffer,
+                "[Return to Index](./{})\n",
+                self.file.display()
+            )?;
+
+            writeln!(sub_buffer, "> [!TIP]")?;
+            writeln!(
+                sub_buffer,
+                "> All configuration options can be set via command line arguments OR \
+            environment variables. CLI arguments take precedence.\n"
+            )?;
+
+            write_command_section(&mut sub_buffer, sub, &app_name)?;
+
+            if has_visible_subcommands(sub) {
+                for child in sub.get_subcommands() {
+                    if !child.is_hide_set() {
+                        writeln!(&mut sub_buffer, "\n---\n")?;
+
+                        let parent_name = format!("{} {}", app_name, name);
+                        write_command_section(&mut sub_buffer, child, &parent_name)?;
+                    }
+                }
+            }
 
             write_or_verify(&sub_path, &sub_buffer, self.check)?;
         }
@@ -95,6 +120,10 @@ impl DocGenerator {
 
         Ok(())
     }
+}
+
+fn has_visible_subcommands(cmd: &Command) -> bool {
+    cmd.get_subcommands().any(|s| !s.is_hide_set())
 }
 
 fn write_or_verify(path: &PathBuf, content: &[u8], check: bool) -> anyhow::Result<()> {
@@ -112,33 +141,36 @@ fn write_or_verify(path: &PathBuf, content: &[u8], check: bool) -> anyhow::Resul
             );
         }
     } else {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         fs::write(path, content)?;
         println!("Generated {}", path.display());
     }
     Ok(())
 }
 
-fn write_subcommand_docs(
+fn write_command_section(
     writer: &mut impl Write,
-    config: &DocGenerator,
     cmd: &Command,
-    app_name: &str,
+    parent_name: &str,
 ) -> io::Result<()> {
     let cmd_name = cmd.get_name();
 
-    writeln!(writer, "[Return to Index](./{})\n", config.file.display())?;
+    let display_name = if parent_name == "locket" {
+        format!("locket {}", cmd_name)
+    } else {
+        format!("{} {}", parent_name, cmd_name)
+    };
 
-    writeln!(writer, "# `{} {}`\n", app_name, cmd_name)?;
-    writeln!(writer, "> [!TIP]")?;
-    writeln!(
-        writer,
-        "> All configuration options can be set via command line arguments OR \
-    environment variables. CLI arguments take precedence.\n"
-    )?;
+    writeln!(writer, "## `{}`\n", display_name)?;
 
+    if let Some(about) = cmd.get_about() {
+        writeln!(writer, "{}\n", about)?;
+    }
     let mut groups: IndexMap<Option<String>, Vec<&Arg>> = IndexMap::new();
     for arg in cmd.get_arguments() {
-        if arg.get_id() == "help" || arg.get_id() == "version" {
+        if arg.get_id() == "help" || arg.get_id() == "version" || arg.is_hide_set() {
             continue;
         }
         let heading = arg.get_help_heading().map(|s| s.to_string());
@@ -146,14 +178,12 @@ fn write_subcommand_docs(
     }
 
     if groups.is_empty() {
-        writeln!(writer, "_No configuration options._\n")?;
+        writeln!(writer, "_No options._\n")?;
         return Ok(());
     }
 
-    // Render Tables
     for (heading, args) in groups {
-        let title = heading.as_deref().unwrap_or("General");
-
+        let title = heading.as_deref().unwrap_or("Options");
         writeln!(writer, "### {}\n", title)?;
         writeln!(writer, "| Command | Env | Default | Description |")?;
         writeln!(writer, "| :--- | :--- | :--- | :--- |")?;
@@ -176,15 +206,7 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
     let env = arg
         .get_env()
         .map(|e| format!("`{}`", e.to_string_lossy()))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "Argument missing env option: `{}`",
-                    arg.get_long().unwrap_or_else(|| arg.get_id().as_str())
-                ),
-            )
-        })?;
+        .unwrap_or_else(|| "".to_string());
 
     let default = if !arg.get_default_values().is_empty() {
         let vals: Vec<_> = arg
@@ -194,42 +216,19 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
             .collect();
         format!("`{}`", vals.join(", "))
     } else {
-        "*None*".to_string()
+        "".to_string()
     };
 
-    let help_msg = arg.get_help().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "Argument missing help message: `{}`",
-                arg.get_long().unwrap_or_else(|| arg.get_id().as_str())
-            ),
-        )
-    })?;
-
-    let mut help = help_msg.to_string().replace("\n", " ");
+    let help_msg = arg.get_help().map(|s| s.to_string()).unwrap_or_default();
+    let mut help = help_msg.replace("\n", " ");
 
     let possible_values = arg.get_possible_values();
     if !possible_values.is_empty() {
-        let has_docs = possible_values.iter().any(|v| v.get_help().is_some());
-
-        if has_docs {
-            help.push_str("<br><br> **Options:**");
-            for v in possible_values {
-                let v_name = v.get_name();
-                if let Some(h) = v.get_help() {
-                    help.push_str(&format!("<br> - `{}`: {}", v_name, h));
-                } else {
-                    help.push_str(&format!("<br> - `{}`", v_name));
-                }
-            }
-        } else {
-            let values_list: Vec<_> = possible_values
-                .iter()
-                .map(|v| format!("`{}`", v.get_name()))
-                .collect();
-            help = format!("{} <br><br> **Options:** {}", help, values_list.join(", "));
-        }
+        let values_list: Vec<_> = possible_values
+            .iter()
+            .map(|v| format!("`{}`", v.get_name()))
+            .collect();
+        help = format!("{} <br> **Choices:** {}", help, values_list.join(", "));
     }
 
     writeln!(writer, "| {} | {} | {} | {} |", flag, env, default, help)?;
