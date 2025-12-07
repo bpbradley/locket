@@ -50,13 +50,14 @@ fn collisions_on_output_dst() {
     let mut values = HashMap::new();
     values.insert("dup".to_string(), "y".to_string());
 
-    let opts = SecretsOpts::default()
-        .with_value_dir(out_dir.clone())
-        .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())]);
-
     let args: Vec<Secret> = Secret::try_from_map(values.clone()).unwrap();
 
-    let manager = SecretManager::new(opts).with_secrets(args);
+    let opts = SecretsOpts::default()
+        .with_secret_dir(out_dir.clone())
+        .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())])
+        .with_secrets(args);
+
+    let manager = SecretManager::new(opts);
 
     let result = manager.collisions();
 

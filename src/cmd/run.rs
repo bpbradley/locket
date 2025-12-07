@@ -1,8 +1,53 @@
 // run.rs
-use super::{RunArgs, RunMode};
-use crate::{health::StatusFile, secrets::SecretManager, signal, watch::FsWatcher};
+use crate::{
+    health::StatusFile,
+    logging::Logger,
+    provider::Provider,
+    secrets::{SecretManager, SecretsOpts},
+    signal,
+    watch::{FsWatcher, WatcherOpts}
+};
+use clap::{Args, ValueEnum};
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
+
+#[derive(Default, Copy, Clone, Debug, ValueEnum)]
+pub enum RunMode {
+    /// Collect and materialize all secrets once and then exit
+    OneShot,
+    /// Continuously watch for changes on configured templates and update secrets as needed
+    #[default]
+    Watch,
+    /// Run once and then park to keep the process alive
+    Park,
+}
+
+#[derive(Args, Debug)]
+pub struct RunArgs {
+    /// Mode of operation
+    #[arg(long = "mode", env = "LOCKET_RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
+    pub mode: RunMode,
+
+    /// Status file path used for healthchecks
+    #[command(flatten)]
+    pub status_file: StatusFile,
+
+    /// Secret Management Configuration
+    #[command(flatten)]
+    pub manager: SecretsOpts,
+
+    /// Filesystem watcher options
+    #[command(flatten)]
+    pub watcher: WatcherOpts,
+
+    /// Logging configuration
+    #[command(flatten)]
+    pub logger: Logger,
+
+    /// Secrets provider selection
+    #[command(flatten, next_help_heading = "Provider Configuration")]
+    provider: Provider,
+}
 
 pub async fn run(args: RunArgs) -> ExitCode {
     if let Err(e) = args.logger.init() {
@@ -18,8 +63,6 @@ pub async fn run(args: RunArgs) -> ExitCode {
     let RunArgs {
         mut manager,
         status_file,
-        secrets,
-        writer,
         provider,
         watcher,
         mode,
@@ -44,9 +87,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         return ExitCode::Config;
     }
 
-    let mut manager = SecretManager::new(manager)
-        .with_secrets(secrets)
-        .with_writer(writer);
+    let mut manager = SecretManager::new(manager);
 
     match manager.collisions() {
         Ok(()) => {}

@@ -26,14 +26,29 @@ pub struct SecretsOpts {
         hide_env_values = true
     )]
     pub mapping: Vec<PathMapping>,
+
+    /// Additional secret values specified as LABEL=SECRET_TEMPLATE
+    /// Multiple values can be provided, separated by commas.
+    /// Or supplied multiple times as arguments.
+    /// Loading from file is supported via `LABEL=@/path/to/file`.
+    /// e.g. `--secret db_password={{op://..}} --secret api_key={{op://..}}`
+    #[arg(
+        long = "secret",
+        env = "LOCKET_SECRETS",
+        value_name = "label={{template}}",
+        value_delimiter = ',',
+        hide_env_values = true
+    )]
+    pub secrets: Vec<Secret>,
+
     /// Directory where secret values (literals) are materialized
     #[arg(
         long = "out",
-        env = "VALUE_OUTPUT_DIR",
+        env = "DEFAULT_SECRET_DIR",
         default_value = "/run/secrets/locket",
         value_parser = parse_absolute,
     )]
-    pub value_dir: PathBuf,
+    pub secret_dir: PathBuf,
     #[arg(
         long = "inject-policy",
         env = "INJECT_POLICY",
@@ -46,6 +61,10 @@ pub struct SecretsOpts {
     /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
     #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M")]
     pub max_file_size: MemSize,
+    
+    /// File writing permissions
+    #[command(flatten)]
+    pub writer: FileWriter,
 }
 
 /// Filesystem events for SecretFs
@@ -64,12 +83,20 @@ impl SecretsOpts {
         self.mapping = mapping;
         self
     }
-    pub fn with_value_dir(mut self, dir: impl AsRef<Path>) -> Self {
-        self.value_dir = dir.as_ref().absolute();
+    pub fn with_secret_dir(mut self, dir: impl AsRef<Path>) -> Self {
+        self.secret_dir = dir.as_ref().absolute();
         self
     }
     pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
         self.policy = policy;
+        self
+    }
+    pub fn with_secrets(mut self, secrets: Vec<Secret>) -> Self {
+        self.secrets = secrets;
+        self
+    }
+    pub fn with_writer(mut self, writer: FileWriter) -> Self {
+        self.writer = writer;
         self
     }
     pub fn resolve(&mut self) -> Result<(), SecretError> {
@@ -85,8 +112,8 @@ impl SecretsOpts {
             sources.push(m.src());
             destinations.push(m.dst());
         }
-        self.value_dir = self.value_dir.absolute();
-        destinations.push(&self.value_dir);
+        self.secret_dir = self.secret_dir.absolute();
+        destinations.push(&self.secret_dir);
 
         // Check for feedback loops and self-destruct scenarios
         for src in &sources {
@@ -114,47 +141,42 @@ impl Default for SecretsOpts {
     fn default() -> Self {
         Self {
             mapping: vec![PathMapping::default()],
-            value_dir: PathBuf::from("/run/secrets/locket"),
+            secret_dir: PathBuf::from("/run/secrets/locket"),
+            secrets: Vec::new(),
             policy: InjectFailurePolicy::CopyUnmodified,
             max_file_size: MemSize::default(),
+            writer: FileWriter::default(),
         }
     }
 }
 
 pub struct SecretManager {
     opts: SecretsOpts,
-    fs: SecretFs,
-    values: HashMap<String, SecretFile>,
+    dynamic: SecretFs,
+    static_secrets: HashMap<String, SecretFile>,
     writer: FileWriter,
 }
 
 impl SecretManager {
     pub fn new(opts: SecretsOpts) -> Self {
-        let fs = SecretFs::new(opts.mapping.clone(), opts.max_file_size);
+        let mut static_secrets = HashMap::new();
+        let dynamic = SecretFs::new(opts.mapping.clone(), opts.max_file_size);
+        for secret in &opts.secrets {
+            let file =
+                SecretFile::from_secret(secret.clone(), &opts.secret_dir, opts.max_file_size);
+            static_secrets.insert(secret.key.clone(), file);
+        }
+        let writer = opts.writer.clone();
         Self {
             opts,
-            fs,
-            values: HashMap::new(),
-            writer: FileWriter::default(),
+            dynamic,
+            static_secrets,
+            writer,
         }
     }
 
-    pub fn with_secrets(mut self, args: Vec<Secret>) -> Self {
-        for arg in args {
-            let key = arg.key.clone();
-            let file = SecretFile::from_arg(arg, &self.opts.value_dir, self.opts.max_file_size);
-            self.values.insert(key, file);
-        }
-        self
-    }
-
-    pub fn with_writer(mut self, writer: FileWriter) -> Self {
-        self.writer = writer;
-        self
-    }
-
-    pub fn iter_values(&self) -> impl Iterator<Item = &SecretFile> {
-        self.values.values()
+    pub fn iter_secrets(&self) -> impl Iterator<Item = &SecretFile> {
+        self.static_secrets.values()
     }
 
     pub fn options(&self) -> &SecretsOpts {
@@ -165,9 +187,9 @@ impl SecretManager {
         let v = SecretFile::from_template(
             label.to_string(),
             template.as_ref().to_string(),
-            &self.opts.value_dir,
+            &self.opts.secret_dir,
         );
-        self.values.insert(label.to_string(), v);
+        self.static_secrets.insert(label.to_string(), v);
         self
     }
 
@@ -195,7 +217,7 @@ impl SecretManager {
 
         if references.is_empty() {
             debug!(dst=?file.dest(), "no resolveable secrets found; passing through");
-            self.writer.atomic_write(file.dest(), content.as_bytes())?;
+            self.opts.writer.atomic_write(file.dest(), content.as_bytes())?;
             return Ok(());
         }
 
@@ -214,7 +236,7 @@ impl SecretManager {
             }
         };
 
-        self.writer.atomic_write(file.dest(), output.as_bytes())?;
+        self.opts.writer.atomic_write(file.dest(), output.as_bytes())?;
 
         Ok(())
     }
@@ -232,10 +254,10 @@ impl SecretManager {
 
     pub async fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
         // Combine sources
-        let values = self.iter_values();
-        let files = self.fs.iter_files();
+        let secrets = self.iter_secrets();
+        let fs = self.dynamic.iter_files();
 
-        for file in values.chain(files) {
+        for file in secrets.chain(fs) {
             self.process(file, provider).await?;
         }
         Ok(())
@@ -280,12 +302,12 @@ impl SecretManager {
         // Collect all secret destinations and label their sources
         let mut entries: Vec<(&Path, String)> = Vec::new();
 
-        for file in self.fs.iter_files() {
+        for file in self.dynamic.iter_files() {
             entries.push((file.dest(), format!("File({:?})", file.source().label())));
         }
 
-        for val in self.iter_values() {
-            entries.push((val.dest(), format!("Value({})", val.source().label())));
+        for file in self.iter_secrets() {
+            entries.push((file.dest(), format!("File({:?})", file.source().label())));
         }
 
         // Sort Lexicographically
@@ -318,7 +340,7 @@ impl SecretManager {
     }
 
     fn on_remove(&mut self, src: &Path) -> Result<(), SecretError> {
-        let removed = self.fs.remove(src);
+        let removed = self.dynamic.remove(src);
         if removed.is_empty() {
             debug!(
                 ?src,
@@ -336,7 +358,7 @@ impl SecretManager {
         }
 
         // Attempt to bubble delete empty parent dirs up to the event implied ceiling.
-        if let Some(ceiling) = self.fs.resolve(src) {
+        if let Some(ceiling) = self.dynamic.resolve(src) {
             let mut candidates = std::collections::HashSet::new();
             for file in &removed {
                 if let Some(parent) = file.dest().parent() {
@@ -386,7 +408,7 @@ impl SecretManager {
         old: &Path,
         new: &Path,
     ) -> Result<(), SecretError> {
-        if let Some((from, to)) = self.fs.try_rebase(old, new) {
+        if let Some((from, to)) = self.dynamic.try_rebase(old, new) {
             debug!(?from, ?to, "attempting rename");
 
             if let Some(p) = to.parent() {
@@ -397,7 +419,7 @@ impl SecretManager {
                 Ok(_) => {
                     debug!(?old, ?new, "moved");
                     if let Some(parent) = from.parent()
-                        && let Some(ceiling) = self.fs.resolve(old)
+                        && let Some(ceiling) = self.dynamic.resolve(old)
                         && let Some(ceil_parent) = ceiling.parent()
                         && parent.starts_with(ceil_parent)
                     {
@@ -408,7 +430,7 @@ impl SecretManager {
                 }
                 Err(e) => {
                     warn!(error=?e, "move failed; falling back to reinjection");
-                    self.fs.remove(new); // Rollback state
+                    self.dynamic.remove(new); // Rollback state
                     if from.exists() {
                         let _ = std::fs::remove_file(&from);
                     }
@@ -444,7 +466,7 @@ impl SecretManager {
             return Ok(());
         }
 
-        match self.fs.upsert(src)? {
+        match self.dynamic.upsert(src)? {
             Some(file) => {
                 self.process(&file, provider).await?;
             }

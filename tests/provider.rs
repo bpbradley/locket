@@ -60,7 +60,7 @@ fn setup(
 
     let opts = SecretsOpts::default()
         .with_mapping(vec![PathMapping::new(&tpl_dir, &out_dir)])
-        .with_value_dir(out_dir.clone());
+        .with_secret_dir(out_dir.clone());
 
     (tmp, out_dir, opts)
 }

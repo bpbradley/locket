@@ -206,10 +206,10 @@ impl SecretFile {
             max_size: MemSize::MAX,
         }
     }
-    pub fn from_arg(arg: Secret, root: &Path, max_size: MemSize) -> Self {
-        let safe_name = sanitize_filename::sanitize(&arg.key);
+    pub fn from_secret(secret: Secret, root: &Path, max_size: MemSize) -> Self {
+        let safe_name = sanitize_filename::sanitize(&secret.key);
         Self {
-            source: arg.source,
+            source: secret.source,
             dest: root.join(safe_name),
             max_size,
         }
