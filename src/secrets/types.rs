@@ -282,21 +282,19 @@ impl std::str::FromStr for MemSize {
             "k" | "kb" | "kib" => Ok(MemSize::from_kb(num)),
             "m" | "mb" | "mib" => Ok(MemSize::from_mb(num)),
             "g" | "gb" | "gib" => Ok(MemSize::from_gb(num)),
-            _ => {
-                return Err(format!(
-                    "Unknown size suffix: '{}'. Supported: k, m, g",
-                    suffix
-                ));
-            }
+            _ => Err(format!(
+                "Unknown size suffix: '{}'. Supported: k, m, g",
+                suffix
+            )),
         }
     }
 }
 
 impl std::fmt::Display for MemSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.bytes >= 1024 * 1024 * 1024 && self.bytes % (1024 * 1024 * 1024) == 0 {
+        if self.bytes >= 1024 * 1024 * 1024 && self.bytes.is_multiple_of(1024 * 1024 * 1024) {
             write!(f, "{}G", self.bytes / (1024 * 1024 * 1024))
-        } else if self.bytes >= 1024 * 1024 && self.bytes % (1024 * 1024) == 0 {
+        } else if self.bytes >= 1024 * 1024 && self.bytes.is_multiple_of(1024 * 1024) {
             write!(f, "{}M", self.bytes / (1024 * 1024))
         } else {
             write!(f, "{}B", self.bytes)

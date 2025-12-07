@@ -372,11 +372,12 @@ impl OpConnectProvider {
                 if f.id == field {
                     return true;
                 }
-                if let Some(label) = &f.label {
-                    if label == field {
-                        return true;
-                    }
+                if let Some(label) = &f.label
+                    && label == field
+                {
+                    return true;
                 }
+
                 false
             })
             .ok_or_else(|| ProviderError::NotFound(format!("field '{}' not found", field)))?;
