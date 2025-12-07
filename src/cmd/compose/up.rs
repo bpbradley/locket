@@ -1,6 +1,6 @@
 use crate::compose::ComposeMsg;
 use crate::provider::Provider;
-use crate::secrets::Secret;
+use crate::secrets::{MemSize, Secret};
 use crate::template::Template;
 use clap::Args;
 use secrecy::ExposeSecret;
@@ -37,7 +37,7 @@ pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
         ComposeMsg::info(format!("Processing secret target: {}", secret.key));
 
         // Apply a reasonable 1MB limit for environment variables
-        let raw_template = match secret.source.read().limit(1_024 * 1_024).fetch() {
+        let raw_template = match secret.source.read().limit(MemSize::from_mb(1)).fetch() {
             Ok(content) => content,
             Err(e) => {
                 ComposeMsg::error(format!("Failed to read source for '{}': {}", secret.key, e));

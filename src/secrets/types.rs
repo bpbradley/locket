@@ -129,7 +129,7 @@ impl SecretSource {
     pub fn read(&self) -> SourceReader<'_> {
         SourceReader {
             source: self,
-            max_size: u64::MAX,
+            max_size: MemSize::MAX,
         }
     }
     pub fn label(&self) -> Cow<'_, str> {
@@ -150,12 +150,12 @@ impl From<PathBuf> for SecretSource {
 
 pub struct SourceReader<'a> {
     source: &'a SecretSource,
-    max_size: u64,
+    max_size: MemSize,
 }
 
 impl<'a> SourceReader<'a> {
-    pub fn limit(mut self, bytes: u64) -> Self {
-        self.max_size = bytes;
+    pub fn limit(mut self, size: MemSize) -> Self {
+        self.max_size = size;
         self
     }
 
@@ -163,11 +163,11 @@ impl<'a> SourceReader<'a> {
         match self.source {
             SecretSource::File(path) => {
                 let meta = std::fs::metadata(path).map_err(SecretError::Io)?;
-                if meta.len() > self.max_size {
+                if meta.len() > self.max_size.bytes {
                     return Err(SecretError::SourceTooLarge {
                         path: path.clone(),
                         size: meta.len(),
-                        limit: self.max_size,
+                        limit: self.max_size.bytes,
                     });
                 }
                 let c = std::fs::read_to_string(path).map_err(SecretError::Io)?;
@@ -182,14 +182,14 @@ impl<'a> SourceReader<'a> {
 pub struct SecretFile {
     source: SecretSource,
     dest: PathBuf,
-    max_size: u64,
+    max_size: MemSize,
 }
 
 impl SecretFile {
     pub fn from_file(
         src: impl AsRef<Path>,
         dest: impl AsRef<Path>,
-        max_size: u64,
+        max_size: MemSize,
     ) -> Result<Self, SecretError> {
         Ok(Self {
             source: SecretSource::file(src)?,
@@ -203,10 +203,10 @@ impl SecretFile {
         Self {
             source: SecretSource::literal(label, template),
             dest,
-            max_size: u64::MAX,
+            max_size: MemSize::MAX,
         }
     }
-    pub fn from_arg(arg: Secret, root: &Path, max_size: u64) -> Self {
+    pub fn from_arg(arg: Secret, root: &Path, max_size: MemSize) -> Self {
         let safe_name = sanitize_filename::sanitize(&arg.key);
         Self {
             source: arg.source,
@@ -223,5 +223,82 @@ impl SecretFile {
 
     pub fn content(&self) -> Result<Cow<'_, str>, SecretError> {
         self.source.read().limit(self.max_size).fetch()
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MemSize {
+    pub bytes: u64,
+}
+
+impl Default for MemSize {
+    fn default() -> Self {
+        Self { bytes: 10 * 1024 * 1024 }
+    }
+}
+
+impl MemSize {
+    pub const MAX: Self = Self { bytes: u64::MAX };
+    pub fn new(bytes: u64) -> Self {
+        Self { bytes }
+    }
+    pub fn from_mb(mb: u64) -> Self {
+        Self {
+            bytes: mb.saturating_mul(1024 * 1024),
+        }
+    }
+    pub fn from_kb(kb: u64) -> Self {
+        Self {
+            bytes: kb.saturating_mul(1024),
+        }
+    }
+    pub fn from_gb(gb: u64) -> Self {
+        Self {
+            bytes: gb.saturating_mul(1024 * 1024 * 1024),
+        }
+    }
+}
+
+impl std::str::FromStr for MemSize {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let digit_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+        let (num_str, suffix) = s.split_at(digit_end);
+
+        if num_str.is_empty() {
+            return Err("No number provided".to_string());
+        }
+
+        let num: u64 = num_str
+            .parse()
+            .map_err(|e| format!("Invalid number: {}", e))?;
+
+        match suffix.trim().to_ascii_lowercase().as_str() {
+            "" | "b" | "byte" | "bytes" => Ok(MemSize::new(num)),
+            "k" | "kb" | "kib" => Ok(MemSize::from_kb(num)),
+            "m" | "mb" | "mib" => Ok(MemSize::from_mb(num)),
+            "g" | "gb" | "gib" => Ok(MemSize::from_gb(num)),
+            _ => {
+                return Err(format!(
+                    "Unknown size suffix: '{}'. Supported: k, m, g",
+                    suffix
+                ));
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for MemSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.bytes >= 1024 * 1024 * 1024 && self.bytes % (1024 * 1024 * 1024) == 0 {
+            write!(f, "{}G", self.bytes / (1024 * 1024 * 1024))
+        } else if self.bytes >= 1024 * 1024 && self.bytes % (1024 * 1024) == 0 {
+            write!(f, "{}M", self.bytes / (1024 * 1024))
+        } else {
+            write!(f, "{}B", self.bytes)
+        }
     }
 }

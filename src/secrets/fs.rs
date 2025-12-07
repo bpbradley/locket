@@ -1,6 +1,6 @@
 use crate::secrets::{
     path::PathMapping,
-    types::{SecretError, SecretFile},
+    types::{SecretError, SecretFile, MemSize},
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -11,11 +11,11 @@ use walkdir::WalkDir;
 pub struct SecretFs {
     mappings: Vec<PathMapping>,
     files: BTreeMap<PathBuf, SecretFile>,
-    max_file_size: u64,
+    max_file_size: MemSize,
 }
 
 impl SecretFs {
-    pub fn new(mappings: Vec<PathMapping>, max_file_size: u64) -> Self {
+    pub fn new(mappings: Vec<PathMapping>, max_file_size: MemSize) -> Self {
         let mut fs = Self {
             mappings,
             files: BTreeMap::new(),

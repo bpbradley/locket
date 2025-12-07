@@ -1,7 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::path::{PathExt, PathMapping, parse_absolute};
-use crate::secrets::types::{InjectFailurePolicy, Secret, SecretError, SecretFile};
+use crate::secrets::types::{InjectFailurePolicy, Secret, SecretError, SecretFile, MemSize};
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
@@ -44,8 +44,8 @@ pub struct SecretsOpts {
     pub policy: InjectFailurePolicy,
     /// Maximum allowable size for a template file. Files larger than this will be rejected.
     /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
-    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M", value_parser = parse_size)]
-    pub max_file_size: u64,
+    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M")]
+    pub max_file_size: MemSize,
 }
 
 /// Filesystem events for SecretFs
@@ -116,7 +116,7 @@ impl Default for SecretsOpts {
             mapping: vec![PathMapping::default()],
             value_dir: PathBuf::from("/run/secrets/locket"),
             policy: InjectFailurePolicy::CopyUnmodified,
-            max_file_size: 10 * 1024 * 1024,
+            max_file_size: MemSize::default(),
         }
     }
 }
@@ -468,37 +468,12 @@ impl SecretManager {
     }
 }
 
-fn parse_size(s: &str) -> Result<u64, String> {
-    let s = s.trim();
-    let digit_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
-    let (num_str, suffix) = s.split_at(digit_end);
-
-    if num_str.is_empty() {
-        return Err("No number provided".to_string());
-    }
-
-    let num: u64 = num_str
-        .parse()
-        .map_err(|e| format!("Invalid number: {}", e))?;
-    let multiplier = match suffix.trim().to_ascii_lowercase().as_str() {
-        "" | "b" | "byte" | "bytes" => 1,
-        "k" | "kb" | "kib" => 1024,
-        "m" | "mb" | "mib" => 1024 * 1024,
-        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
-        _ => {
-            return Err(format!(
-                "Unknown size suffix: '{}'. Supported: k, m, g",
-                suffix
-            ));
-        }
-    };
-    Ok(num.saturating_mul(multiplier))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+    use std::str::FromStr;
+    use crate::secrets::types::MemSize;
 
     #[test]
     fn secret_value_sanitization() {
@@ -519,8 +494,8 @@ mod tests {
 
     #[test]
     fn test_size_parsing() {
-        assert_eq!(parse_size("100").unwrap(), 100);
-        assert_eq!(parse_size("1k").unwrap(), 1024);
-        assert_eq!(parse_size("10M").unwrap(), 10 * 1024 * 1024);
+        assert_eq!(MemSize::from_str("100").unwrap().bytes, 100);
+        assert_eq!(MemSize::from_str("1k").unwrap().bytes, 1024);
+        assert_eq!(MemSize::from_str("10M").unwrap().bytes, 10 * 1024 * 1024);
     }
 }
