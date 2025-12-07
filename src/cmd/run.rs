@@ -9,7 +9,10 @@ pub async fn run(args: RunArgs) -> ExitCode {
         error!(error=%e, "init logging failed");
         return ExitCode::CantCreat;
     }
-    info!("Starting locket v{} `run` service ", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting locket v{} `run` service ",
+        env!("CARGO_PKG_VERSION")
+    );
     debug!("effective config: {:#?}", args);
 
     let RunArgs {

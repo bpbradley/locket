@@ -1,5 +1,6 @@
 use crate::secrets::SecretError;
 use std::path::{Component, Path, PathBuf};
+use std::str::FromStr;
 
 /// Extension trait for Path to provide additional functionality
 /// and convenience methods for use within SecretFs and locket Path handling.
@@ -90,8 +91,31 @@ impl PathMapping {
     }
 }
 
+impl FromStr for PathMapping {
+    type Err = String;
+
+    /// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
+    fn from_str(s: &str) -> Result<PathMapping, String> {
+        let (src, dst) = s
+            .split_once(':')
+            .or_else(|| s.split_once('='))
+            .ok_or_else(|| {
+                format!(
+                    "Invalid mapping format '{}'. Expected SRC:DST or SRC=DST",
+                    s
+                )
+            })?;
+        PathMapping::try_new(src, dst)
+            .map_err(|e| format!("Failed to create PathMapping '{}': {}", src, e))
+    }
+}
+
 impl Default for PathMapping {
     fn default() -> Self {
         Self::new("/templates", "/run/secrets/locket")
     }
+}
+
+pub fn parse_absolute(s: &str) -> Result<PathBuf, String> {
+    Ok(Path::new(s).absolute())
 }

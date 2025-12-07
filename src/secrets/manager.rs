@@ -1,6 +1,6 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
-use crate::secrets::path::{PathExt, PathMapping};
+use crate::secrets::path::{PathExt, PathMapping, parse_absolute};
 use crate::secrets::types::{InjectFailurePolicy, Secret, SecretError, SecretFile};
 use crate::template::Template;
 use crate::write::FileWriter;
@@ -19,9 +19,8 @@ pub struct SecretsOpts {
     /// provided, separated by commas, or supplied multiple times as arguments.
     /// e.g. `--map /templates:/run/secrets/locket/app --map /other_templates:/run/secrets/locket/other`
     #[arg(
-        long = "map", 
-        value_parser = parse_mapping,
-        env = "SECRET_MAP", 
+        long = "map",
+        env = "SECRET_MAP",
         value_delimiter = ',',
         default_value = "/templates:/run/secrets/locket",
         hide_env_values = true
@@ -469,21 +468,6 @@ impl SecretManager {
     }
 }
 
-/// Parse a path mapping from a string of the form "SRC:DST" or "SRC=DST".
-fn parse_mapping(s: &str) -> Result<PathMapping, String> {
-    let (src, dst) = s
-        .split_once(':')
-        .or_else(|| s.split_once('='))
-        .ok_or_else(|| {
-            format!(
-                "Invalid mapping format '{}'. Expected SRC:DST or SRC=DST",
-                s
-            )
-        })?;
-    PathMapping::try_new(src, dst)
-        .map_err(|e| format!("Failed to create PathMapping '{}': {}", src, e))
-}
-
 fn parse_size(s: &str) -> Result<u64, String> {
     let s = s.trim();
     let digit_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
@@ -509,10 +493,6 @@ fn parse_size(s: &str) -> Result<u64, String> {
         }
     };
     Ok(num.saturating_mul(multiplier))
-}
-
-fn parse_absolute(s: &str) -> Result<PathBuf, String> {
-    Ok(Path::new(s).absolute())
 }
 
 #[cfg(test)]
