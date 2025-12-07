@@ -122,7 +122,7 @@ volumes:
 
 ## Provider mode
 
- locket can be installed as a docker CLI plugin, and be used as a [Docker Compose provider service](https://docs.docker.com/compose/how-tos/provider-services/). In this mode, locket is manages the `compose up` lifecycle. Every time `docker compose up` is called, `locket compose up` is first called by Docker, where locket will take provided secret references and set them as environment variables in the dependent container.
+ locket can be installed as a docker CLI plugin, and be used as a [Docker Compose provider service](https://docs.docker.com/compose/how-tos/provider-services/). In this mode, locket manages the `compose up` lifecycle. Every time `docker compose up` is called, `locket compose up` is first called by Docker, where locket will take provided secret references and set them as environment variables in the dependent container.
 
  A full configuration reference for all available options is provided in [`docs/compose.md`](./docs/compose.md)
 
