@@ -5,6 +5,7 @@ mod compose;
 mod healthcheck;
 mod run;
 
+#[cfg(feature = "compose")]
 pub use compose::compose;
 pub use healthcheck::healthcheck;
 pub use run::run;
