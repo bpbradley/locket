@@ -61,7 +61,7 @@ pub struct SecretsOpts {
     /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
     #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M")]
     pub max_file_size: MemSize,
-    
+
     /// File writing permissions
     #[command(flatten)]
     pub writer: FileWriter,
@@ -217,7 +217,9 @@ impl SecretManager {
 
         if references.is_empty() {
             debug!(dst=?file.dest(), "no resolveable secrets found; passing through");
-            self.opts.writer.atomic_write(file.dest(), content.as_bytes())?;
+            self.opts
+                .writer
+                .atomic_write(file.dest(), content.as_bytes())?;
             return Ok(());
         }
 
@@ -236,7 +238,9 @@ impl SecretManager {
             }
         };
 
-        self.opts.writer.atomic_write(file.dest(), output.as_bytes())?;
+        self.opts
+            .writer
+            .atomic_write(file.dest(), output.as_bytes())?;
 
         Ok(())
     }

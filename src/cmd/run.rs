@@ -5,7 +5,7 @@ use crate::{
     provider::Provider,
     secrets::{SecretManager, SecretsOpts},
     signal,
-    watch::{FsWatcher, WatcherOpts}
+    watch::{FsWatcher, WatcherOpts},
 };
 use clap::{Args, ValueEnum};
 use sysexits::ExitCode;
