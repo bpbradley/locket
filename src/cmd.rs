@@ -118,10 +118,10 @@ pub struct ComposeArgs {
 #[cfg(feature = "compose")]
 #[derive(Subcommand, Debug)]
 pub enum ComposeCommand {
-    /// Handler for Docker Compose 'up' command
+    /// Injects secrets into a Docker Compose service environment with `docker compose up`
     Up(Box<compose::up::UpArgs>),
-    /// Handler for Docker Compose 'down' command
+    /// Handler for Docker Compose `down`, but no-op because secrets are not persisted
     Down,
-    /// Handler for Docker Compose 'metadata' command
+    /// Handler for Docker Compose `metadata` command so that docker can query plugin capabilities
     Metadata,
 }
