@@ -1,7 +1,7 @@
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFs;
 use crate::secrets::path::{PathExt, PathMapping, parse_absolute};
-use crate::secrets::types::{InjectFailurePolicy, Secret, SecretError, SecretFile, MemSize};
+use crate::secrets::types::{InjectFailurePolicy, MemSize, Secret, SecretError, SecretFile};
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
@@ -471,9 +471,9 @@ impl SecretManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::types::MemSize;
     use std::path::Path;
     use std::str::FromStr;
-    use crate::secrets::types::MemSize;
 
     #[test]
     fn secret_value_sanitization() {

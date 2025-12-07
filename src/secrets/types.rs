@@ -226,7 +226,6 @@ impl SecretFile {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemSize {
     pub bytes: u64,
@@ -234,7 +233,9 @@ pub struct MemSize {
 
 impl Default for MemSize {
     fn default() -> Self {
-        Self { bytes: 10 * 1024 * 1024 }
+        Self {
+            bytes: 10 * 1024 * 1024,
+        }
     }
 }
 

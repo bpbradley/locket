@@ -1,6 +1,6 @@
 use crate::secrets::{
     path::PathMapping,
-    types::{SecretError, SecretFile, MemSize},
+    types::{MemSize, SecretError, SecretFile},
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
