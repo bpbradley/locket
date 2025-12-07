@@ -1,4 +1,5 @@
 pub mod cmd;
+#[cfg(feature = "compose")]
 pub mod compose;
 pub mod health;
 pub mod logging;

@@ -8,6 +8,7 @@ use crate::{
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+#[cfg(feature = "compose")]
 pub mod compose;
 pub mod healthcheck;
 pub mod run;
@@ -35,6 +36,7 @@ pub enum Command {
     Compose(Box<ComposeArgs>),
 
     /// Docker CLI plugin metadata command
+    #[cfg(feature = "compose")]
     #[command(name = "docker-cli-plugin-metadata", hide = true)]
     DockerCliPluginMetadata,
 }
@@ -64,7 +66,10 @@ pub struct RunArgs {
     #[command(flatten)]
     pub manager: SecretsOpts,
 
-    /// Secret Sources
+    /// Additional secret values specified as LABEL=SECRET_TEMPLATE
+    /// Multiple values can be provided, separated by commas.
+    /// Or supplied multiple times as arguments.
+    /// e.g. `--secret db_password={{op://..}} --secret api_key={{op://..}}`
     #[arg(
         long = "secret",
         env = "LOCKET_SECRETS",
@@ -98,6 +103,7 @@ pub struct HealthArgs {
     pub status_file: StatusFile,
 }
 
+#[cfg(feature = "compose")]
 #[derive(Args, Debug)]
 pub struct ComposeArgs {
     /// Compose Project Name
@@ -109,6 +115,7 @@ pub struct ComposeArgs {
     pub cmd: ComposeCommand,
 }
 
+#[cfg(feature = "compose")]
 #[derive(Subcommand, Debug)]
 pub enum ComposeCommand {
     /// Handler for Docker Compose 'up' command

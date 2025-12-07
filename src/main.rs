@@ -1,5 +1,7 @@
 use clap::Parser;
-use locket::cmd::{Cli, Command, compose, healthcheck, run};
+#[cfg(feature = "compose")]
+use locket::cmd::compose;
+use locket::cmd::{Cli, Command, healthcheck, run};
 use sysexits::ExitCode;
 
 #[tokio::main]
@@ -8,7 +10,9 @@ async fn main() -> ExitCode {
     match cli.cmd {
         Command::Run(args) => run::run(*args).await,
         Command::Healthcheck(args) => healthcheck::healthcheck(args),
+        #[cfg(feature = "compose")]
         Command::Compose(args) => compose::compose(*args).await,
+        #[cfg(feature = "compose")]
         Command::DockerCliPluginMetadata => {
             let metadata = serde_json::json!({
                 "SchemaVersion": "0.1.0",

@@ -4,9 +4,8 @@ use clap::Args;
 use futures::stream::{self, StreamExt};
 use percent_encoding::percent_decode_str;
 use reqwest::{Client, StatusCode};
-use secrecy::ExposeSecret;
-use secrecy::SecretString;
-use serde_json::Value;
+use secrecy::{ExposeSecret, SecretString};
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,6 +48,33 @@ impl Default for OpConnectConfig {
             connect_max_concurrent: 20,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultResponse {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ItemResponse {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConnectItemDetail {
+    fields: Option<Vec<ConnectField>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConnectField {
+    id: String,
+    label: Option<String>,
+    value: Option<SecretString>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponse {
+    message: Option<String>,
 }
 
 /// Cache for Name -> UUID resolution to minimize API calls
@@ -95,17 +121,13 @@ impl OpConnectProvider {
         let status = resp.status();
 
         if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            let error_msg = serde_json::from_str::<Value>(&text)
+            let error_msg = resp
+                .json::<ErrorResponse>()
+                .await
                 .ok()
-                .and_then(|v| v["message"].as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| {
-                    if text.trim().is_empty() {
-                        status.to_string()
-                    } else {
-                        text
-                    }
-                });
+                .and_then(|e| e.message)
+                .unwrap_or_else(|| status.to_string());
+
             return match status {
                 StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                     Err(ProviderError::Unauthorized(error_msg))
@@ -153,7 +175,6 @@ impl OpConnectProvider {
             }
         }
 
-        // Resolve Vaults
         stream::iter(vaults)
             .map(|vault| async move {
                 let _ = self.resolve_vault_id(&vault).await;
@@ -162,7 +183,6 @@ impl OpConnectProvider {
             .collect::<Vec<_>>()
             .await;
 
-        // Resolve Items
         stream::iter(items)
             .map(|(vault, item)| async move {
                 let vault_uuid = match self.resolve_vault_id(&vault).await {
@@ -213,7 +233,7 @@ impl OpConnectProvider {
             )));
         }
 
-        let vaults: Vec<Value> = resp
+        let vaults: Vec<VaultResponse> = resp
             .json()
             .await
             .map_err(|e| ProviderError::Network(e.into()))?;
@@ -222,16 +242,13 @@ impl OpConnectProvider {
             .first()
             .ok_or_else(|| ProviderError::NotFound(format!("vault '{}' not found", name_or_id)))?;
 
-        let uuid = vault["id"]
-            .as_str()
-            .ok_or_else(|| ProviderError::Other("vault response missing id".into()))?
-            .to_string();
-
         {
             let mut cache = self.cache.lock().await;
-            cache.vaults.insert(name_or_id.to_string(), uuid.clone());
+            cache
+                .vaults
+                .insert(name_or_id.to_string(), vault.id.clone());
         }
-        Ok(uuid)
+        Ok(vault.id.clone())
     }
 
     async fn resolve_item_id(
@@ -267,7 +284,7 @@ impl OpConnectProvider {
             .await
             .map_err(|e| ProviderError::Network(e.into()))?;
 
-        let items: Vec<Value> = resp
+        let items: Vec<ItemResponse> = resp
             .json()
             .await
             .map_err(|e| ProviderError::Network(e.into()))?;
@@ -276,17 +293,12 @@ impl OpConnectProvider {
             ProviderError::NotFound(format!("item '{}' not found in vault", item_name_or_id))
         })?;
 
-        let uuid = item["id"]
-            .as_str()
-            .ok_or_else(|| ProviderError::Other("item response missing id".into()))?
-            .to_string();
-
         {
             let mut cache = self.cache.lock().await;
-            cache.items.insert(key, uuid.clone());
+            cache.items.insert(key, item.id.clone());
         }
 
-        Ok(uuid)
+        Ok(item.id.clone())
     }
 
     async fn fetch_single(&self, raw_path: &str) -> Result<SecretString, ProviderError> {
@@ -324,11 +336,9 @@ impl OpConnectProvider {
             .map_err(|e| ProviderError::InvalidConfig(format!("utf8 decode error: {}", e)))?;
         let field = field_cow.as_ref();
 
-        // Resolve UUIDs
         let vault_id = self.resolve_vault_id(vault_ref).await?;
         let item_id = self.resolve_item_id(&vault_id, item_ref).await?;
 
-        // Fetch Item
         let mut api_url = self.host.clone();
         api_url.set_path(&format!("/v1/vaults/{}/items/{}", vault_id, item_id));
 
@@ -349,30 +359,33 @@ impl OpConnectProvider {
             s => return Err(ProviderError::Other(format!("connect api error: {}", s))),
         }
 
-        let item_json: Value = resp
+        let item_detail: ConnectItemDetail = resp
             .json()
             .await
             .map_err(|e| ProviderError::Network(e.into()))?;
 
-        // Find Field Value
-        let field_obj = item_json["fields"]
-            .as_array()
-            .and_then(|fields| {
-                fields.iter().find(|f| {
-                    let f_id = f["id"].as_str().unwrap_or("");
-                    let f_label = f["label"].as_str().unwrap_or("");
+        let fields = item_detail.fields.as_deref().unwrap_or(&[]);
 
-                    // Strict match against ID or Label (using the decoded string)
-                    f_id == field || f_label == field
-                })
+        let target_field = fields
+            .iter()
+            .find(|f| {
+                if f.id == field {
+                    return true;
+                }
+                if let Some(label) = &f.label {
+                    if label == field {
+                        return true;
+                    }
+                }
+                false
             })
             .ok_or_else(|| ProviderError::NotFound(format!("field '{}' not found", field)))?;
 
-        let raw_value = field_obj["value"]
-            .as_str()
-            .ok_or_else(|| ProviderError::NotFound("field has no value".into()))?;
+        let secret_value = target_field.value.as_ref().ok_or_else(|| {
+            ProviderError::NotFound(format!("field '{}' exists but has no value", field))
+        })?;
 
-        Ok(SecretString::new(raw_value.into()))
+        Ok(secret_value.clone())
     }
 }
 
