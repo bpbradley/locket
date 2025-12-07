@@ -8,14 +8,20 @@ use std::borrow::Cow;
 
 #[derive(Args, Debug)]
 pub struct UpArgs {
-    /// Provider configuration (flattened)
+    /// Provider configuration
     #[command(flatten)]
     pub provider: Provider,
 
-    /// Secrets to be injected.
+    /// Secrets to be injected as environment variables.
     /// Format: KEY=TEMPLATE (e.g. `DB_PASS={{op://vault/item/field}}`)
     /// Supports file indirection: `KEY=@./path/to/file`
-    #[arg(long, value_delimiter = ',')]
+    #[arg(
+        long,
+        env = "LOCKET_SECRETS",
+        value_name = "label={{template}} or label=@./path/to/file",
+        value_delimiter = ',',
+        hide_env_values = true
+    )]
     pub secrets: Vec<Secret>,
 
     /// Service name from Docker Compose
