@@ -9,7 +9,7 @@ This provider is based on a [1password Connect](https://developer.1password.com/
 1. [Create an access token](https://developer.1password.com/docs/connect/manage-connect#create-a-token)
 1. Configure locket with your reachable connect host URL, and your authentication token. [Configuration Reference](../run.md#1password-connect)
 
-# Example Docker Compose
+## Example `locket run` Configuration
 
 ```yaml
 services:
@@ -36,3 +36,30 @@ volumes:
   out-connect: { driver: local, driver_opts: { type: tmpfs, device: tmpfs, o: "uid=1000,gid=1000,mode=0700" } }
 ```
 
+## Example Provider Configuration
+
+```yaml
+---
+name: provider
+services:
+  locket:
+    provider:
+      type: locket
+      options:
+        provider: op-connect
+        connect.token-file: /etc/connect/token
+        connect.host: $OP_CONNECT_HOST
+        secrets:
+          - "secret1={{ op://Mordin/SecretPassword/Test Section/text }}"
+          - "secret2={{ op://Mordin/SecretPassword/Test Section/date }}"
+  demo:
+    image: busybox
+    user: "1000:1000"
+    command: 
+      - sh
+      - -c
+      - "env | grep LOCKET"
+    depends_on:
+      - locket
+
+```

@@ -126,7 +126,7 @@ volumes:
 
  A full configuration reference for all available options is provided in [`docs/compose.md`](./docs/compose.md)
 
- ```yaml
+```yaml
 ---
 name: provider
 services:

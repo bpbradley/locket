@@ -8,16 +8,21 @@ This provider is based on the 1password `op` CLI as a backend. Each request for 
 
 If these issues are not satisfactory, the [1password connect provider](./connect.md) does not carry these issues
 
+> [!NOTE]
+> Because of the above constraints, using `op` provider in Provider mode (where `locket`) is installed directly on the host, means that you must also have the `op` CLI installed.
+
 ## Setup
 
 1. [Create a Service Account](https://developer.1password.com/docs/service-accounts/get-started#create-a-service-account)
 1. Make sure to set permissions on the service account for the Vaults that it should have access to.
 1. Store the Service Account token securely (i.e. in 1password)
 1. Authenticate locket using the service account token via `--op.token` or `--op.token-file` (or via env variables)
+1. If using provider mode, [install `op` cli](https://developer.1password.com/docs/cli/get-started/) dependency. 
+
 
 [Full configuration reference](../run.md#1password-op)
 
-Example docker compose
+# Example `locket run` Configuration
 
 ```yaml
 services:
@@ -80,3 +85,34 @@ services:
     command:
       - "--op.token-file=/run/secrets/op_token"
 ```
+
+## Example Provider Configuration
+
+
+> [!IMPORTANT]
+> If using `op` in provider mode, you must have `op` cli installed on your system as well.
+
+```yaml
+---
+name: provider
+services:
+  locket:
+    provider:
+      type: locket
+      options:
+        provider: op
+        op.token-file: /etc/op/token
+        secrets:
+          - "secret1={{ op://Mordin/SecretPassword/Test Section/text }}"
+          - "secret2={{ op://Mordin/SecretPassword/Test Section/date }}"
+  demo:
+    image: busybox
+    user: "1000:1000"
+    command: 
+      - sh
+      - -c
+      - "env | grep LOCKET"
+    depends_on:
+      - locket
+```
+

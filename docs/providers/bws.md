@@ -9,7 +9,7 @@ This provider is based on the [Bitwarden Secrets Manager](https://bitwarden.com/
 1. [Add a machine account with access to desired secrets / projects](https://bitwarden.com/help/secrets-manager-quick-start/#add-a-machine-account)
 1. Configure locket with your machine token. [Configuration Reference](../run.md#bitwarden-secrets-provider)
 
-# Example Docker Compose
+## Example `locket run` Configuration
 
 ```yaml
 services:
@@ -33,4 +33,31 @@ secrets:
     file: /etc/tokens/bws
 volumes:
   out-bws: { driver: local, driver_opts: { type: tmpfs, device: tmpfs, o: "uid=1000,gid=1000,mode=0700" } }
+```
+
+## Example Provider Configuration
+
+```yaml
+---
+name: provider
+services:
+  locket:
+    provider:
+      type: locket
+      options:
+        provider: bws
+        bws.token-file: /etc/bws/token
+        secrets:
+          - "secret1={{ 3832b656-a93b-45ad-bdfa-b267016802c3 }}"
+          - "secret2={{ 3e0f2247-b359-4408-83d0-b3a70152731c }}"
+  demo:
+    image: busybox
+    user: "1000:1000"
+    command: 
+      - sh
+      - -c
+      - "env | grep LOCKET"
+    depends_on:
+      - locket
+
 ```
