@@ -16,10 +16,11 @@ categories = ["command-line-utilities", "config"]
 members = [".", "xtask"]
 
 [features]
-default = ["op", "connect", "bws"]
+default = ["op", "connect", "bws", "compose"]
 op = ["tokio/process", "dep:futures"]
 connect = ["dep:reqwest", "dep:url", "dep:percent-encoding", "dep:futures"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:futures", "dep:rustls-webpki"]
+compose = []
 
 [dependencies]
 anyhow = "1"

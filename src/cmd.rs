@@ -31,7 +31,12 @@ pub enum Command {
     Healthcheck(HealthArgs),
 
     /// Docker Compose provider API
+    #[cfg(feature = "compose")]
     Compose(Box<ComposeArgs>),
+
+    /// Docker CLI plugin metadata command
+    #[command(name = "docker-cli-plugin-metadata", hide = true)]
+    DockerCliPluginMetadata,
 }
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
