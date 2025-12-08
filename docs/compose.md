@@ -24,6 +24,8 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--provider` | `SECRETS_PROVIDER` |  | Secrets provider <br> **Choices:** `op`, `op-connect`, `bws` |
+| `--secrets` | `LOCKET_SECRETS` |  | Secrets to be injected as environment variables. Format: KEY=TEMPLATE (e.g. `DB_PASS={{op://vault/item/field}}`) Supports file indirection: `KEY=@./path/to/file` |
+| `<service>` |  |  | Service name from Docker Compose |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
@@ -49,8 +51,6 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
 | `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Secrets Manager machine token |
 | `--bws.token-file` | `BWS_MACHINE_TOKEN_FILE` |  | Path to file containing Bitwarden Secrets Manager machine token |
-| `--secrets` | `LOCKET_SECRETS` |  | Secrets to be injected as environment variables. Format: KEY=TEMPLATE (e.g. `DB_PASS={{op://vault/item/field}}`) Supports file indirection: `KEY=@./path/to/file` |
-| `<service>` |  |  | Service name from Docker Compose |
 
 ---
 

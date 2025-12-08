@@ -20,11 +20,13 @@ pub struct UpArgs {
         env = "LOCKET_SECRETS",
         value_name = "label={{template}} or label=@./path/to/file",
         value_delimiter = ',',
-        hide_env_values = true
+        hide_env_values = true,
+        help_heading = None,
     )]
     pub secrets: Vec<Secret>,
 
     /// Service name from Docker Compose
+    #[arg(help_heading = None)]
     pub service: String,
 }
 

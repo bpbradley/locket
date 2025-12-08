@@ -70,7 +70,6 @@ impl DocGenerator {
                 writeln!(&mut index_buffer, "- [`{}`](./{})", name, filename)?;
             }
         }
-
         write_or_verify(&docs_dir.join(&self.file), &index_buffer, self.check)?;
 
         for sub in cmd.get_subcommands() {
@@ -103,8 +102,8 @@ impl DocGenerator {
                     if !child.is_hide_set() {
                         writeln!(&mut sub_buffer, "\n---\n")?;
 
-                        let parent_name = format!("{} {}", app_name, name);
-                        write_command_section(&mut sub_buffer, child, &parent_name)?;
+                        let parent_context = format!("{} {}", app_name, name);
+                        write_command_section(&mut sub_buffer, child, &parent_context)?;
                     }
                 }
             }
@@ -157,11 +156,7 @@ fn write_command_section(
 ) -> io::Result<()> {
     let cmd_name = cmd.get_name();
 
-    let display_name = if parent_name == "locket" {
-        format!("locket {}", cmd_name)
-    } else {
-        format!("{} {}", parent_name, cmd_name)
-    };
+    let display_name = format!("{} {}", parent_name, cmd_name);
 
     writeln!(writer, "## `{}`\n", display_name)?;
 
