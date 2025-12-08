@@ -2,12 +2,14 @@
 use crate::{
     health::StatusFile,
     logging::Logger,
-    provider::Provider,
-    secrets::{SecretManager, SecretsOpts},
+    provider::{Provider, SecretsProvider},
+    secrets::{FsEvent, SecretManager, SecretsOpts},
     signal,
-    watch::{FsWatcher, WatcherOpts},
+    watch::{DebounceDuration, FsWatcher, WatchHandler},
 };
+use async_trait::async_trait;
 use clap::{Args, ValueEnum};
+use std::path::PathBuf;
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -36,9 +38,13 @@ pub struct RunArgs {
     #[command(flatten)]
     pub manager: SecretsOpts,
 
-    /// Filesystem watcher options
-    #[command(flatten)]
-    pub watcher: WatcherOpts,
+    /// Debounce duration for filesystem events in watch mode.
+    /// Events occurring within this duration will be coalesced into a single update
+    /// so as to not overwhelm the secrets manager with rapid successive updates from
+    /// filesystem noise. Handles human-readable strings like "100ms", "2s", etc.
+    /// Unitless numbers are interpreted as milliseconds.
+    #[arg(long, env = "WATCH_DEBOUNCE", default_value_t = DebounceDuration::default())]
+    debounce: DebounceDuration,
 
     /// Logging configuration
     #[command(flatten)]
@@ -64,7 +70,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         mut manager,
         status_file,
         provider,
-        watcher,
+        debounce,
         mode,
         ..
     } = args;
@@ -118,8 +124,12 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let mut watcher = FsWatcher::new(watcher, &mut manager, provider.as_ref());
-            match watcher.run().await {
+            let handler = SecretsWatcher {
+                secrets: &mut manager,
+                provider: provider.as_ref(),
+            };
+            let mut watcher = FsWatcher::new(debounce, handler);
+            match watcher.run(signal::recv_shutdown()).await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {
                     error!(error=%e, "watch errored");
@@ -127,5 +137,27 @@ pub async fn run(args: RunArgs) -> ExitCode {
                 }
             }
         }
+    }
+}
+
+struct SecretsWatcher<'a> {
+    secrets: &'a mut SecretManager,
+    provider: &'a dyn SecretsProvider,
+}
+
+#[async_trait]
+impl<'a> WatchHandler for SecretsWatcher<'a> {
+    fn paths(&self) -> Vec<PathBuf> {
+        self.secrets
+            .options()
+            .mapping
+            .iter()
+            .map(|m| m.src().into())
+            .collect()
+    }
+
+    async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()> {
+        self.secrets.handle_fs_event(self.provider, event).await?;
+        Ok(())
     }
 }
