@@ -2,14 +2,13 @@
 
 use crate::{secrets::FsEvent};
 use async_trait::async_trait;
-use clap::Args;
 use indexmap::IndexMap;
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
     recommended_watcher,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -42,22 +41,6 @@ pub trait WatchHandler: Send + Sync {
     async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()>;
 }
 
-#[derive(Debug, Clone, Copy, Args)]
-pub struct WatcherOpts {
-    /// Debounce duration in milliseconds for filesystem events.
-    /// Events occurring within this duration will be coalesced into a single update
-    /// so as to not overwhelm the secrets manager with rapid successive updates from
-    /// filesystem noise.
-    #[arg(long, env = "WATCH_DEBOUNCE_MS", default_value_t = 500)]
-    debounce_ms: u64,
-}
-
-impl Default for WatcherOpts {
-    fn default() -> Self {
-        Self { debounce_ms: 500 }
-    }
-}
-
 enum ControlFlow {
     Continue,
     Break,
@@ -70,10 +53,10 @@ pub struct FsWatcher<H: WatchHandler> {
 }
 
 impl<H: WatchHandler> FsWatcher<H> {
-    pub fn new(opts: WatcherOpts, handler: H) -> Self {
+    pub fn new(debounce: impl Into<Duration>, handler: H) -> Self {
         Self {
             handler,
-            debounce: Duration::from_millis(opts.debounce_ms),
+            debounce: debounce.into(),
             events: EventRegistry::new(),
         }
     }
@@ -322,5 +305,39 @@ impl EventRegistry {
 impl Default for EventRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DebounceDuration(pub Duration);
+
+impl FromStr for DebounceDuration {
+    type Err = humantime::DurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        /* Defaults to millseconds if no unit specified */
+        if let Ok(ms) = s.parse::<u64>() {
+            return Ok(DebounceDuration(Duration::from_millis(ms)));
+        }
+        let duration = humantime::parse_duration(s)?;
+        Ok(DebounceDuration(duration))
+    }
+}
+
+impl std::fmt::Display for DebounceDuration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", humantime::format_duration(self.0))
+    }
+}
+
+impl From<DebounceDuration> for Duration {
+    fn from(val: DebounceDuration) -> Self {
+        val.0
+    }
+}
+
+impl Default for DebounceDuration {
+    fn default() -> Self {
+        DebounceDuration(Duration::from_millis(500))
     }
 }

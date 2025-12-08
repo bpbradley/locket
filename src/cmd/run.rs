@@ -5,7 +5,7 @@ use crate::{
     provider::{Provider, SecretsProvider},
     secrets::{FsEvent, SecretManager, SecretsOpts},
     signal,
-    watch::{FsWatcher, WatchHandler, WatcherOpts},
+    watch::{FsWatcher, WatchHandler, DebounceDuration},
 };
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
@@ -38,9 +38,13 @@ pub struct RunArgs {
     #[command(flatten)]
     pub manager: SecretsOpts,
 
-    /// Filesystem watcher options
-    #[command(flatten)]
-    pub watcher: WatcherOpts,
+    /// Debounce duration for filesystem events in watch mode.
+    /// Events occurring within this duration will be coalesced into a single update
+    /// so as to not overwhelm the secrets manager with rapid successive updates from
+    /// filesystem noise. Handles human-readable strings like "100ms", "2s", etc.
+    /// Unitless numbers are interpreted as milliseconds.
+    #[arg(long, env = "WATCH_DEBOUNCE", default_value_t = DebounceDuration::default())]
+    debounce: DebounceDuration,
 
     /// Logging configuration
     #[command(flatten)]
@@ -66,7 +70,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         mut manager,
         status_file,
         provider,
-        watcher,
+        debounce,
         mode,
         ..
     } = args;
@@ -124,7 +128,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
                 secrets: &mut manager,
                 provider: provider.as_ref(),
             };
-            let mut watcher = FsWatcher::new(watcher, handler);
+            let mut watcher = FsWatcher::new(debounce, handler);
             match watcher.run(signal::recv_shutdown()).await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {
