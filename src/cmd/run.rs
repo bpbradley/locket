@@ -2,12 +2,14 @@
 use crate::{
     health::StatusFile,
     logging::Logger,
-    provider::Provider,
-    secrets::{SecretManager, SecretsOpts},
+    provider::{Provider, SecretsProvider},
+    secrets::{FsEvent, SecretManager, SecretsOpts},
     signal,
-    watch::{FsWatcher, WatcherOpts},
+    watch::{FsWatcher, WatchError, WatchHandler, WatcherOpts},
 };
+use async_trait::async_trait;
 use clap::{Args, ValueEnum};
+use std::path::PathBuf;
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -47,6 +49,30 @@ pub struct RunArgs {
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
     provider: Provider,
+}
+
+struct SecretsWatcher<'a> {
+    secrets: &'a mut SecretManager,
+    provider: &'a dyn SecretsProvider,
+}
+
+#[async_trait]
+impl<'a> WatchHandler for SecretsWatcher<'a> {
+    fn paths(&self) -> Vec<PathBuf> {
+        self.secrets
+            .options()
+            .mapping
+            .iter()
+            .map(|m| m.src().into())
+            .collect()
+    }
+
+    async fn handle(&mut self, event: FsEvent) -> Result<(), WatchError> {
+        self.secrets
+            .handle_fs_event(self.provider, event)
+            .await
+            .map_err(|e| e.into())
+    }
 }
 
 pub async fn run(args: RunArgs) -> ExitCode {
@@ -118,7 +144,11 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let mut watcher = FsWatcher::new(watcher, &mut manager, provider.as_ref());
+            let handler = SecretsWatcher {
+                secrets: &mut manager,
+                provider: provider.as_ref(),
+            };
+            let mut watcher = FsWatcher::new(watcher, handler);
             match watcher.run().await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {

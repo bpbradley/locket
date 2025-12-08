@@ -1,5 +1,5 @@
 use crate::secrets::{
-    path::PathMapping,
+    path::{PathMapping, PathExt},
     types::{MemSize, SecretError, SecretFile},
 };
 use std::collections::BTreeMap;
@@ -124,8 +124,8 @@ impl SecretFs {
             }
 
             // Calculate new state
-            let new_k = to.join(rel);
-            let new_d = to_root.join(rel);
+            let new_k = to.join(rel).clean();
+            let new_d = to_root.join(rel).clean();
             updates.push((k.clone(), new_k, new_d));
         }
 

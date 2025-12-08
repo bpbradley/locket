@@ -1,7 +1,6 @@
 use crate::secrets::SecretError;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
-
 /// Extension trait for Path to provide additional functionality
 /// and convenience methods for use within SecretFs and locket Path handling.
 pub trait PathExt {
@@ -118,4 +117,48 @@ impl Default for PathMapping {
 
 pub fn parse_absolute(s: &str) -> Result<PathBuf, String> {
     Ok(Path::new(s).absolute())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_clean() {
+        assert_eq!(Path::new("a/b/c").clean(), PathBuf::from("a/b/c"));
+        assert_eq!(Path::new("a/./b/./c").clean(), PathBuf::from("a/b/c"));
+    }
+
+    #[test]
+    fn test_trailing_slashes() {
+        assert_eq!(Path::new("a/b/").clean(), PathBuf::from("a/b"));
+        assert_eq!(
+            Path::new("/tmp/secret/").clean(),
+            PathBuf::from("/tmp/secret")
+        );
+        assert_eq!(
+            Path::new("secret.yaml/").clean(),
+            PathBuf::from("secret.yaml")
+        );
+    }
+
+    #[test]
+    fn test_parent_dir_absolute() {
+        assert_eq!(Path::new("/a/b/../c").clean(), PathBuf::from("/a/c"));
+        assert_eq!(Path::new("/a/b/../../c").clean(), PathBuf::from("/c"));
+    }
+
+    #[test]
+    fn test_root_boundary() {
+        assert_eq!(Path::new("/..").clean(), PathBuf::from("/"));
+        assert_eq!(Path::new("/../a").clean(), PathBuf::from("/a"));
+    }
+
+    #[test]
+    fn test_complex() {
+        assert_eq!(
+            Path::new("./a/b/../../c/./d/").clean(),
+            PathBuf::from("c/d")
+        );
+    }
 }

@@ -1,10 +1,10 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
 use crate::{
-    provider::SecretsProvider,
-    secrets::{FsEvent, SecretError, SecretManager},
+    secrets::{FsEvent, SecretError},
     signal,
 };
+use async_trait::async_trait;
 use clap::Args;
 use indexmap::IndexMap;
 use notify::{
@@ -37,6 +37,17 @@ pub enum WatchError {
     Secret(#[from] SecretError),
 }
 
+/// Handler trait for reacting to filesystem events
+#[async_trait]
+pub trait WatchHandler: Send + Sync {
+    /// Return the list of paths to monitor.
+    /// Files must exist prior to starting the watcher.
+    fn paths(&self) -> Vec<PathBuf>;
+
+    /// Handle filesystem event dispatched by the watcher.
+    async fn handle(&mut self, event: FsEvent) -> Result<(), WatchError>;
+}
+
 #[derive(Debug, Clone, Copy, Args)]
 pub struct WatcherOpts {
     /// Debounce duration in milliseconds for filesystem events.
@@ -58,22 +69,16 @@ enum ControlFlow {
     Break,
 }
 
-pub struct FsWatcher<'a> {
-    secrets: &'a mut SecretManager,
-    provider: &'a dyn SecretsProvider,
+pub struct FsWatcher<H: WatchHandler> {
+    handler: H,
     debounce: Duration,
     events: EventRegistry,
 }
 
-impl<'a> FsWatcher<'a> {
-    pub fn new(
-        opts: WatcherOpts,
-        secrets: &'a mut SecretManager,
-        provider: &'a dyn SecretsProvider,
-    ) -> Self {
+impl<H: WatchHandler> FsWatcher<H> {
+    pub fn new(opts: WatcherOpts, handler: H) -> Self {
         Self {
-            secrets,
-            provider,
+            handler,
             debounce: Duration::from_millis(opts.debounce_ms),
             events: EventRegistry::new(),
         }
@@ -87,8 +92,7 @@ impl<'a> FsWatcher<'a> {
         })?;
         let shutdown = signal::recv_shutdown();
         tokio::pin!(shutdown);
-        for mapping in &self.secrets.options().mapping {
-            let watched = mapping.src();
+        for watched in self.handler.paths() {
             if !watched.exists() {
                 return Err(WatchError::SourceMissing(watched.to_path_buf()));
             }
@@ -97,7 +101,7 @@ impl<'a> FsWatcher<'a> {
             } else {
                 RecursiveMode::NonRecursive
             };
-            watcher.watch(watched, mode)?;
+            watcher.watch(&watched, mode)?;
             info!(path=?watched, "watching for changes");
         }
 
@@ -200,7 +204,7 @@ impl<'a> FsWatcher<'a> {
         debug!(count = events.len(), "processing batched fs events");
 
         for ev in events {
-            if let Err(e) = self.secrets.handle_fs_event(self.provider, ev).await {
+            if let Err(e) = self.handler.handle(ev).await {
                 warn!(error=?e, "failed to handle fs event");
             }
         }
