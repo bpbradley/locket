@@ -1,5 +1,5 @@
 use crate::secrets::{
-    path::{PathMapping, PathExt},
+    path::{PathExt, PathMapping},
     types::{MemSize, SecretError, SecretFile},
 };
 use std::collections::BTreeMap;

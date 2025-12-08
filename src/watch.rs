@@ -1,9 +1,6 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
-use crate::{
-    secrets::{FsEvent, SecretError},
-    signal,
-};
+use crate::{secrets::FsEvent, signal};
 use async_trait::async_trait;
 use clap::Args;
 use indexmap::IndexMap;
@@ -32,9 +29,6 @@ pub enum WatchError {
 
     #[error("source path missing: {0}")]
     SourceMissing(PathBuf),
-
-    #[error("secrets error: {0}")]
-    Secret(#[from] SecretError),
 }
 
 /// Handler trait for reacting to filesystem events
@@ -45,7 +39,7 @@ pub trait WatchHandler: Send + Sync {
     fn paths(&self) -> Vec<PathBuf>;
 
     /// Handle filesystem event dispatched by the watcher.
-    async fn handle(&mut self, event: FsEvent) -> Result<(), WatchError>;
+    async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, Clone, Copy, Args)]

@@ -5,7 +5,7 @@ use crate::{
     provider::{Provider, SecretsProvider},
     secrets::{FsEvent, SecretManager, SecretsOpts},
     signal,
-    watch::{FsWatcher, WatchError, WatchHandler, WatcherOpts},
+    watch::{FsWatcher, WatchHandler, WatcherOpts},
 };
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
@@ -49,30 +49,6 @@ pub struct RunArgs {
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
     provider: Provider,
-}
-
-struct SecretsWatcher<'a> {
-    secrets: &'a mut SecretManager,
-    provider: &'a dyn SecretsProvider,
-}
-
-#[async_trait]
-impl<'a> WatchHandler for SecretsWatcher<'a> {
-    fn paths(&self) -> Vec<PathBuf> {
-        self.secrets
-            .options()
-            .mapping
-            .iter()
-            .map(|m| m.src().into())
-            .collect()
-    }
-
-    async fn handle(&mut self, event: FsEvent) -> Result<(), WatchError> {
-        self.secrets
-            .handle_fs_event(self.provider, event)
-            .await
-            .map_err(|e| e.into())
-    }
 }
 
 pub async fn run(args: RunArgs) -> ExitCode {
@@ -157,5 +133,27 @@ pub async fn run(args: RunArgs) -> ExitCode {
                 }
             }
         }
+    }
+}
+
+struct SecretsWatcher<'a> {
+    secrets: &'a mut SecretManager,
+    provider: &'a dyn SecretsProvider,
+}
+
+#[async_trait]
+impl<'a> WatchHandler for SecretsWatcher<'a> {
+    fn paths(&self) -> Vec<PathBuf> {
+        self.secrets
+            .options()
+            .mapping
+            .iter()
+            .map(|m| m.src().into())
+            .collect()
+    }
+
+    async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()> {
+        self.secrets.handle_fs_event(self.provider, event).await?;
+        Ok(())
     }
 }
