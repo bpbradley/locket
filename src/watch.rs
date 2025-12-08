@@ -1,6 +1,6 @@
 //! Filesystem watch: monitor templates dir and re-apply sync on changes
 
-use crate::{secrets::FsEvent, signal};
+use crate::{secrets::FsEvent};
 use async_trait::async_trait;
 use clap::Args;
 use indexmap::IndexMap;
@@ -78,13 +78,15 @@ impl<H: WatchHandler> FsWatcher<H> {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), WatchError> {
+    pub async fn run<F>(&mut self, shutdown: F) -> Result<(), WatchError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         let (tx, mut rx) = mpsc::channel::<NotifyResult<Event>>(100);
         let tx_fs = tx.clone();
         let mut watcher = recommended_watcher(move |res| {
             let _ = tx_fs.blocking_send(res);
         })?;
-        let shutdown = signal::recv_shutdown();
         tokio::pin!(shutdown);
         for watched in self.handler.paths() {
             if !watched.exists() {
@@ -103,7 +105,7 @@ impl<H: WatchHandler> FsWatcher<H> {
             debug!("waiting for fs event");
 
             let event = tokio::select! {
-                _ = &mut shutdown => {
+                _ = shutdown.as_mut() => {
                     info!("shutdown signal received; exiting watcher");
                     return Ok(());
                 }

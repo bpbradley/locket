@@ -125,7 +125,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
                 provider: provider.as_ref(),
             };
             let mut watcher = FsWatcher::new(watcher, handler);
-            match watcher.run().await {
+            match watcher.run(signal::recv_shutdown()).await {
                 Ok(()) => ExitCode::Ok,
                 Err(e) => {
                     error!(error=%e, "watch errored");
