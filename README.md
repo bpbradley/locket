@@ -2,6 +2,11 @@
 
 > *A secrets management agent. Keeps your secrets safe, but out of sight.*
 
+[![Build Status](https://github.com/bpbradley/locket/actions/workflows/ci.yml/badge.svg)](https://github.com/bpbradley/locket/actions)
+[![Crates.io](https://img.shields.io/crates/v/locket.svg)](https://crates.io/crates/locket)
+[![Docker](https://img.shields.io/github/v/release/bpbradley/locket?sort=semver&label=docker&logo=docker)](https://github.com/bpbradley/locket/pkgs/container/locket)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
+
 1. [Overview](#overview)
 1. [Supported Providers](#providers)
 1. [Full Configuration](./docs/CONFIGURATION.md)
