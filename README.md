@@ -13,7 +13,7 @@
 1. [Roadmap](#roadmap)
 
 ## Overview
-Locket is a small CLI tool, packaged as a tiny rootless and distroless Docker image, designed to orchestrate secrets for dependent applications and services. locket is designed to work with most secrets providers, and it will orchestrate the retrieval of secrets and injection of them into dependent services. locket can help keep sensitive files off disk completely in tmpfs, or just somewhere out of revision control.
+locket is a small CLI tool, packaged as a tiny rootless and distroless Docker image, designed to orchestrate secrets for dependent applications and services. locket is designed to work with most secrets providers, and it will orchestrate the retrieval of secrets and injection of them into dependent services. locket can help keep sensitive files off disk completely in tmpfs, or just somewhere out of revision control.
 
 Currently, locket operates in two modes for two distinct purposes.
 
@@ -190,10 +190,10 @@ Otherwise, install the prebuilt binary directly for your architecture. The scrip
 
 ## Example: Hot-Reloading Traefik configurations with Secrets
 
-Traefik supports Dynamic Configuration via files, which it watches for changes. By pairing Traefik with Locket, you can inject secrets (like Dashboard credentials, TLS certificates, or middleware auth) into your configuration files and have Traefik hot-reload them automatically without a restart.
+Traefik supports Dynamic Configuration via files, which it watches for changes. By pairing Traefik with locket, you can inject secrets (like Dashboard credentials, TLS certificates, or middleware auth) into your configuration files and have Traefik hot-reload them automatically without a restart.
 
-1. Locket watches a local `templates/` directory containing your Traefik config with `{{ op://... }}` placeholders.
-1. When a template changes, Locket atomically updates the file in the shared secrets-store volume.
+1. locket watches a local `templates/` directory containing your Traefik config with `{{ op://... }}` placeholders.
+1. When a template changes, locket atomically updates the file in the shared secrets-store volume.
 1. Traefik detects the change in the shared volume and reloads its configuration without a restart.
 
 So a snippet from `./templates/dynamic_conf.yaml` might look like
@@ -239,7 +239,7 @@ services:
       locket:
         condition: service_healthy
     command:
-      # Tell Traefik to watch the directory where Locket writes
+      # Tell Traefik to watch the directory where locket writes
       - "--providers.file.directory=/etc/traefik/dynamic"
       - "--providers.file.watch=true"
       - "--api.dashboard=true"
@@ -248,7 +248,7 @@ services:
       - 443:443
       - 8080:8080
     volumes:
-      # Mount the SHARED volume where Locket writes the 'real' config
+      # Mount the SHARED volume where locket writes the 'real' config
       - secrets-store:/etc/traefik/dynamic:ro 
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -257,7 +257,7 @@ secrets:
     file: /etc/op/token
 
 volumes:
-  # The bridge between Locket and Traefik.
+  # The bridge between locket and Traefik.
   # Using tmpfs ensures secrets never touch the disk.
   secrets-store:
     driver: local
