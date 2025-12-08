@@ -5,7 +5,7 @@ use crate::{
     provider::{Provider, SecretsProvider},
     secrets::{FsEvent, SecretManager, SecretsOpts},
     signal,
-    watch::{FsWatcher, WatchHandler, DebounceDuration},
+    watch::{DebounceDuration, FsWatcher, WatchHandler},
 };
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};

@@ -4,7 +4,7 @@
 //! and "coalescing" (merging multiple rapid events into a single logical operation)
 //! to prevent the secret manager from thrashing.
 
-use crate::{secrets::FsEvent};
+use crate::secrets::FsEvent;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use notify::{
@@ -12,8 +12,8 @@ use notify::{
     event::{EventKind, ModifyKind, RenameMode},
     recommended_watcher,
 };
-use std::{path::PathBuf, str::FromStr};
 use std::time::Duration;
+use std::{path::PathBuf, str::FromStr};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
@@ -330,7 +330,7 @@ impl EventRegistry {
     pub fn drain(&mut self) -> impl Iterator<Item = FsEvent> + '_ {
         self.map.drain(..).map(|(_, event)| event)
     }
-    
+
     /// Returns true if no events are pending flush
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
