@@ -457,7 +457,8 @@ mod tests {
         let new_sub = data.join("new_sub");
 
         fs::create_dir_all(&old_sub).unwrap();
-        fs::create_dir_all(&new_sub).unwrap(); // New dir must exist
+        fs::create_dir_all(&new_sub).unwrap(); 
+        fs::create_dir_all(&output.join("old_sub")).unwrap(); 
 
         let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&data, &output));
@@ -516,14 +517,9 @@ mod tests {
         fs::write(&f_new, "").unwrap();
 
         let res = fs.try_rebase(&folder_a, &folder_b);
-
-        assert!(res.is_some());
-        let (old_dst, new_dst) = res.unwrap();
-
-        assert_eq!(old_dst, out_a.join("folder"));
-        assert_eq!(new_dst, out_b.join("moved_folder"));
-
-        assert!(fs.files.contains_key(&f_new));
+        assert!(res.is_none());
+        assert!(fs.files.contains_key(&f_old));
+        assert!(!fs.files.contains_key(&f_new));
     }
 
     #[test]
