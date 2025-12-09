@@ -1,5 +1,21 @@
-use locket::secrets::{PathMapping, Secret, SecretError, SecretManager, SecretsOpts};
+use locket::provider::{ProviderError, SecretsProvider};
+use locket::secrets::{PathMapping, Secret, SecretError, SecretFileManager, SecretFileOpts};
+use secrecy::SecretString;
 use std::collections::HashMap;
+
+struct NoOpProvider;
+#[async_trait::async_trait]
+impl SecretsProvider for NoOpProvider {
+    fn accepts_key(&self, _key: &str) -> bool {
+        true
+    }
+    async fn fetch_map(
+        &self,
+        _references: &[&str],
+    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        Ok(HashMap::new())
+    }
+}
 
 #[test]
 fn collisions_structure_conflict() {
@@ -21,12 +37,12 @@ fn collisions_structure_conflict() {
     let blocked_src = src_b.join("nested");
     std::fs::write(&blocked_src, "I am inside a dir").unwrap();
 
-    let opts = SecretsOpts::default().with_mapping(vec![
+    let opts = SecretFileOpts::default().with_mapping(vec![
         PathMapping::new(blocker_src.clone(), output.join("config")),
         PathMapping::new(blocked_src.clone(), output.join("config/nested")),
     ]);
 
-    let secrets = SecretManager::new(opts);
+    let secrets = SecretFileManager::new(opts, Box::new(NoOpProvider));
 
     let result = secrets.collisions();
 
@@ -52,12 +68,12 @@ fn collisions_on_output_dst() {
 
     let args: Vec<Secret> = Secret::try_from_map(values.clone()).unwrap();
 
-    let opts = SecretsOpts::default()
+    let opts = SecretFileOpts::default()
         .with_secret_dir(out_dir.clone())
         .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())])
         .with_secrets(args);
 
-    let manager = SecretManager::new(opts);
+    let manager = SecretFileManager::new(opts, Box::new(NoOpProvider));
 
     let result = manager.collisions();
 

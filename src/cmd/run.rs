@@ -2,8 +2,8 @@
 use crate::{
     health::StatusFile,
     logging::Logger,
-    provider::{Provider, SecretsProvider},
-    secrets::{FsEvent, SecretManager, SecretsOpts},
+    provider::Provider,
+    secrets::{FsEvent, SecretFileManager, SecretFileOpts},
     signal,
     watch::{DebounceDuration, FsWatcher, WatchHandler},
 };
@@ -36,7 +36,7 @@ pub struct RunArgs {
 
     /// Secret Management Configuration
     #[command(flatten)]
-    pub manager: SecretsOpts,
+    pub manager: SecretFileOpts,
 
     /// Debounce duration for filesystem events in watch mode.
     /// Events occurring within this duration will be coalesced into a single update
@@ -93,7 +93,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         return ExitCode::Config;
     }
 
-    let mut manager = SecretManager::new(manager);
+    let mut manager = SecretFileManager::new(manager, provider);
 
     match manager.collisions() {
         Ok(()) => {}
@@ -103,7 +103,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    if let Err(e) = manager.inject_all(provider.as_ref()).await {
+    if let Err(e) = manager.inject_all().await {
         error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
@@ -126,7 +126,6 @@ pub async fn run(args: RunArgs) -> ExitCode {
         RunMode::Watch => {
             let handler = SecretsWatcher {
                 secrets: &mut manager,
-                provider: provider.as_ref(),
             };
             let mut watcher = FsWatcher::new(debounce, handler);
             match watcher.run(signal::recv_shutdown()).await {
@@ -141,8 +140,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
 }
 
 struct SecretsWatcher<'a> {
-    secrets: &'a mut SecretManager,
-    provider: &'a dyn SecretsProvider,
+    secrets: &'a mut SecretFileManager,
 }
 
 #[async_trait]
@@ -157,7 +155,7 @@ impl<'a> WatchHandler for SecretsWatcher<'a> {
     }
 
     async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()> {
-        self.secrets.handle_fs_event(self.provider, event).await?;
+        self.secrets.handle_fs_event(event).await?;
         Ok(())
     }
 }

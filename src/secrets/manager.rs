@@ -1,18 +1,19 @@
 use crate::provider::SecretsProvider;
-use crate::secrets::fs::SecretFs;
+use crate::secrets::fs::SecretFileRegistry;
 use crate::secrets::path::{PathExt, PathMapping, parse_absolute};
-use crate::secrets::types::{InjectFailurePolicy, MemSize, Secret, SecretError, SecretFile};
+use crate::secrets::types::{
+    InjectFailurePolicy, MemSize, Secret, SecretError, SecretFile, SecretSource,
+};
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::Args;
 use secrecy::ExposeSecret;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Args)]
-pub struct SecretsOpts {
+pub struct SecretFileOpts {
     /// Mapping of source paths (holding secret templates)
     /// to destination paths (where secrets are materialized and reflected)
     /// in the form `SRC:DST` or `SRC=DST`. Multiple mappings can be
@@ -67,7 +68,7 @@ pub struct SecretsOpts {
     pub writer: FileWriter,
 }
 
-/// Filesystem events for SecretFs
+/// Filesystem events for SecretFileRegistry
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum FsEvent {
     Write(PathBuf),
@@ -75,7 +76,7 @@ pub enum FsEvent {
     Move { from: PathBuf, to: PathBuf },
 }
 
-impl SecretsOpts {
+impl SecretFileOpts {
     pub fn new() -> Self {
         Self::default()
     }
@@ -137,7 +138,7 @@ impl SecretsOpts {
     }
 }
 
-impl Default for SecretsOpts {
+impl Default for SecretFileOpts {
     fn default() -> Self {
         Self {
             mapping: vec![PathMapping::default()],
@@ -150,36 +151,41 @@ impl Default for SecretsOpts {
     }
 }
 
-pub struct SecretManager {
-    opts: SecretsOpts,
-    dynamic: SecretFs,
-    static_secrets: HashMap<String, SecretFile>,
-    writer: FileWriter,
+pub struct SecretFileManager {
+    opts: SecretFileOpts,
+    registry: SecretFileRegistry,
+    literals: Vec<SecretFile>,
+    provider: Box<dyn SecretsProvider>,
 }
 
-impl SecretManager {
-    pub fn new(opts: SecretsOpts) -> Self {
-        let mut static_secrets = HashMap::new();
-        let dynamic = SecretFs::new(opts.mapping.clone(), opts.max_file_size);
-        for secret in &opts.secrets {
-            let file =
-                SecretFile::from_secret(secret.clone(), &opts.secret_dir, opts.max_file_size);
-            static_secrets.insert(secret.key.clone(), file);
+impl SecretFileManager {
+    pub fn new(opts: SecretFileOpts, provider: Box<dyn SecretsProvider>) -> Self {
+        let mut pinned = Vec::new();
+        let mut literals = Vec::new();
+
+        for s in &opts.secrets {
+            let f = SecretFile::from_secret(s.clone(), &opts.secret_dir, opts.max_file_size);
+            match f.source() {
+                SecretSource::File(_) => pinned.push(f),
+                SecretSource::Literal { .. } => literals.push(f),
+            }
         }
-        let writer = opts.writer.clone();
+
+        let registry = SecretFileRegistry::new(opts.mapping.clone(), pinned, opts.max_file_size);
+
         Self {
             opts,
-            dynamic,
-            static_secrets,
-            writer,
+            registry,
+            literals,
+            provider,
         }
     }
 
     pub fn iter_secrets(&self) -> impl Iterator<Item = &SecretFile> {
-        self.static_secrets.values()
+        self.registry.iter().chain(self.literals.iter())
     }
 
-    pub fn options(&self) -> &SecretsOpts {
+    pub fn options(&self) -> &SecretFileOpts {
         &self.opts
     }
 
@@ -189,16 +195,14 @@ impl SecretManager {
             template.as_ref().to_string(),
             &self.opts.secret_dir,
         );
-        self.static_secrets.insert(label.to_string(), v);
+        self.literals.push(v);
         self
     }
 
-    pub async fn try_inject(
-        &self,
-        file: &SecretFile,
-        provider: &dyn SecretsProvider,
-    ) -> Result<(), SecretError> {
-        let content = file.content()?;
+    pub async fn resolve(&self, file: &SecretFile) -> Result<String, SecretError> {
+        let f = file.clone();
+        let content =
+            tokio::task::spawn_blocking(move || f.content().map(|c| c.into_owned())).await??;
 
         let tpl = Template::new(&content);
         let keys = tpl.keys();
@@ -212,19 +216,16 @@ impl SecretManager {
 
         let references: Vec<&str> = candidates
             .into_iter()
-            .filter(|k| provider.accepts_key(k))
+            .filter(|k| self.provider.accepts_key(k))
             .collect();
 
         if references.is_empty() {
             debug!(dst=?file.dest(), "no resolveable secrets found; passing through");
-            self.opts
-                .writer
-                .atomic_write(file.dest(), content.as_bytes())?;
-            return Ok(());
+            return Ok(content);
         }
 
         info!(dst=?file.dest(), count=references.len(), "fetching secrets");
-        let secrets_map = provider.fetch_map(&references).await?;
+        let secrets_map = self.provider.fetch_map(&references).await?;
 
         let output = if has_keys {
             tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()))
@@ -233,41 +234,25 @@ impl SecretManager {
                 Some(val) => Cow::Borrowed(val.expose_secret()),
                 None => {
                     warn!(dst=?file.dest(), "provider returned success but secret value was missing");
-                    content
+                    Cow::Borrowed(content.as_str())
                 }
             }
         };
 
-        self.opts
-            .writer
-            .atomic_write(file.dest(), output.as_bytes())?;
+        Ok(output.into_owned())
+    }
+
+    pub async fn materialize(&self, file: &SecretFile, content: String) -> Result<(), SecretError> {
+        let writer = self.opts.writer.clone();
+        let dest = file.dest().to_path_buf();
+        let bytes = content.into_bytes();
+
+        tokio::task::spawn_blocking(move || writer.atomic_write(&dest, &bytes)).await??;
 
         Ok(())
     }
 
-    pub async fn process(
-        &self,
-        file: &SecretFile,
-        provider: &dyn SecretsProvider,
-    ) -> Result<(), SecretError> {
-        match self.try_inject(file, provider).await {
-            Ok(_) => Ok(()),
-            Err(e) => self.handle_policy(file, e, self.opts.policy),
-        }
-    }
-
-    pub async fn inject_all(&self, provider: &dyn SecretsProvider) -> Result<(), SecretError> {
-        // Combine sources
-        let secrets = self.iter_secrets();
-        let fs = self.dynamic.iter_files();
-
-        for file in secrets.chain(fs) {
-            self.process(file, provider).await?;
-        }
-        Ok(())
-    }
-
-    fn handle_policy(
+    async fn handle_policy(
         &self,
         file: &SecretFile,
         err: SecretError,
@@ -287,11 +272,16 @@ impl SecretManager {
                     error = ?err,
                     "injection failed; policy=copy-unmodified. Reverting to raw copy."
                 );
-                // Attempt to read content again.
-                // If it fails (e.g. file gone), unwrap_or handles it.
-                let raw = file.content().unwrap_or(Cow::Borrowed(""));
+                let f = file.clone();
+                let raw = tokio::task::spawn_blocking(move || {
+                    // unwrap_or_default to take IO errors during fallback
+                    // if we can't read the source, we just don't write anything
+                    f.content().map(|c| c.into_owned()).unwrap_or_default()
+                })
+                .await?;
+
                 if !raw.is_empty() {
-                    self.writer.atomic_write(file.dest(), raw.as_bytes())?;
+                    self.materialize(file, raw).await?;
                 }
                 Ok(())
             }
@@ -302,13 +292,28 @@ impl SecretManager {
         }
     }
 
+    pub async fn process(&self, file: &SecretFile) -> Result<(), SecretError> {
+        match self.resolve(file).await {
+            Ok(content) => {
+                if let Err(e) = self.materialize(file, content).await {
+                    return self.handle_policy(file, e, self.opts.policy).await;
+                }
+                Ok(())
+            }
+            Err(e) => self.handle_policy(file, e, self.opts.policy).await,
+        }
+    }
+
+    pub async fn inject_all(&self) -> Result<(), SecretError> {
+        for file in self.iter_secrets() {
+            self.process(file).await?;
+        }
+        Ok(())
+    }
+
     pub fn collisions(&self) -> Result<(), SecretError> {
         // Collect all secret destinations and label their sources
         let mut entries: Vec<(&Path, String)> = Vec::new();
-
-        for file in self.dynamic.iter_files() {
-            entries.push((file.dest(), format!("File({:?})", file.source().label())));
-        }
 
         for file in self.iter_secrets() {
             entries.push((file.dest(), format!("File({:?})", file.source().label())));
@@ -344,7 +349,7 @@ impl SecretManager {
     }
 
     fn on_remove(&mut self, src: &Path) -> Result<(), SecretError> {
-        let removed = self.dynamic.remove(src);
+        let removed = self.registry.remove(src);
         if removed.is_empty() {
             debug!(
                 ?src,
@@ -361,82 +366,80 @@ impl SecretManager {
             debug!("event: removed secret file: {:?}", file.dest());
         }
 
-        // Attempt to bubble delete empty parent dirs up to the event implied ceiling.
-        if let Some(ceiling) = self.dynamic.resolve(src) {
-            let mut candidates = std::collections::HashSet::new();
-            for file in &removed {
-                if let Some(parent) = file.dest().parent() {
-                    candidates.insert(parent.to_path_buf());
-                }
-            }
-
-            for dir in candidates {
-                if dir.starts_with(&ceiling) && dir.exists() {
-                    self.bubble_delete(dir, &ceiling);
-                }
-            }
+        // Clean up empty parent directories
+        if let Some(ceiling) = self.registry.resolve(src) {
+            self.cleanup_parents(removed, &ceiling);
         }
+
         Ok(())
     }
-    /// TODO: There are some edges with how we bubble delete here.
-    /// For example, since we traverse bottom up, if there are empty
-    /// sibling directories, we wont remove_dir won't remove them
-    /// and we will exit with DirectoryNotEmpty. We could do a more thorough
-    /// traversal to catch these, but overkill for an edge.
+
+    fn cleanup_parents(&self, removed_files: Vec<SecretFile>, ceiling: &Path) {
+        let mut candidates = std::collections::HashSet::new();
+        for file in removed_files {
+            if let Some(parent) = file.dest().parent() {
+                candidates.insert(parent.to_path_buf());
+            }
+        }
+
+        for dir in candidates {
+            if dir.starts_with(ceiling) && dir.exists() {
+                self.bubble_delete(dir, ceiling);
+            }
+        }
+    }
+
     fn bubble_delete(&self, start_dir: PathBuf, ceiling: &Path) {
         let mut current = start_dir;
         loop {
             if !current.starts_with(ceiling) {
                 break;
             }
+            // Attempt removal; stop if not empty or other error
             match std::fs::remove_dir(&current) {
                 Ok(_) => {
                     if current == ceiling {
                         break;
                     }
-                    if let Some(parent) = current.parent() {
-                        current = parent.to_path_buf();
-                    } else {
-                        break;
+                    match current.parent() {
+                        Some(p) => current = p.to_path_buf(),
+                        None => break,
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => break,
                 Err(_) => break,
             }
         }
     }
 
-    async fn on_move(
-        &mut self,
-        provider: &dyn SecretsProvider,
-        old: &Path,
-        new: &Path,
-    ) -> Result<(), SecretError> {
-        if let Some((from, to)) = self.dynamic.try_rebase(old, new) {
-            debug!(?from, ?to, "attempting rename");
+    async fn on_move(&mut self, old: &Path, new: &Path) -> Result<(), SecretError> {
+        let from_clean = old.clean();
+        let to_clean = new.canon().unwrap_or_else(|_| new.clean());
 
-            if let Some(p) = to.parent() {
-                std::fs::create_dir_all(p)?;
+        if let Some((from_dst, to_dst)) = self.registry.try_rebase(&from_clean, &to_clean) {
+            debug!(?from_dst, ?to_dst, "attempting optimistic rename");
+
+            if let Some(p) = to_dst.parent() {
+                tokio::fs::create_dir_all(p).await?;
             }
 
-            match std::fs::rename(&from, &to) {
+            match tokio::fs::rename(&from_dst, &to_dst).await {
                 Ok(_) => {
                     debug!(?old, ?new, "moved");
-                    if let Some(parent) = from.parent()
-                        && let Some(ceiling) = self.dynamic.resolve(old)
+                    // Cleanup old parent dirs
+                    if let Some(parent) = from_dst.parent()
+                        && let Some(ceiling) = self.registry.resolve(old)
                         && let Some(ceil_parent) = ceiling.parent()
-                        && parent.starts_with(ceil_parent)
                     {
                         self.bubble_delete(parent.to_path_buf(), ceil_parent);
                     }
-
                     return Ok(());
                 }
                 Err(e) => {
                     warn!(error=?e, "move failed; falling back to reinjection");
-                    self.dynamic.remove(new); // Rollback state
-                    if from.exists() {
-                        let _ = std::fs::remove_file(&from);
+                    // rollback registry state
+                    self.registry.remove(&to_clean);
+                    if from_dst.exists() {
+                        let _ = tokio::fs::remove_file(&from_dst).await;
                     }
                 }
             }
@@ -444,17 +447,13 @@ impl SecretManager {
 
         // Fallback
         debug!(?old, ?new, "fallback move via remove + write");
-        self.on_remove(old)?;
-        self.on_write(provider, new).await?;
+        self.on_remove(&from_clean)?;
+        self.on_write(&to_clean).await?;
 
         Ok(())
     }
 
-    async fn on_write(
-        &mut self,
-        provider: &dyn SecretsProvider,
-        src: &Path,
-    ) -> Result<(), SecretError> {
+    async fn on_write(&mut self, src: &Path) -> Result<(), SecretError> {
         if src.is_dir() {
             debug!(?src, "directory write event; scanning for children");
             let entries: Vec<PathBuf> = walkdir::WalkDir::new(src)
@@ -465,14 +464,14 @@ impl SecretManager {
                 .collect();
 
             for entry in entries {
-                Box::pin(self.on_write(provider, &entry)).await?;
+                Box::pin(self.on_write(&entry)).await?;
             }
             return Ok(());
         }
 
-        match self.dynamic.upsert(src)? {
+        match self.registry.upsert(src)? {
             Some(file) => {
-                self.process(&file, provider).await?;
+                self.process(&file).await?;
             }
             None => {
                 // File ignored
@@ -481,15 +480,11 @@ impl SecretManager {
         Ok(())
     }
 
-    pub async fn handle_fs_event(
-        &mut self,
-        provider: &dyn SecretsProvider,
-        ev: FsEvent,
-    ) -> Result<(), SecretError> {
+    pub async fn handle_fs_event(&mut self, ev: FsEvent) -> Result<(), SecretError> {
         match ev {
-            FsEvent::Write(src) => self.on_write(provider, &src.clean()).await,
+            FsEvent::Write(src) => self.on_write(&src.clean()).await,
             FsEvent::Remove(src) => self.on_remove(&src.clean()),
-            FsEvent::Move { from, to } => self.on_move(provider, &from.clean(), &to.clean()).await,
+            FsEvent::Move { from, to } => self.on_move(&from.clean(), &to.clean()).await,
         }
     }
 }

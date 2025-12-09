@@ -15,6 +15,9 @@ pub enum SecretError {
     #[error("provider error: {0}")]
     Provider(#[from] ProviderError),
 
+    #[error("blocking task failed: {0}")]
+    Task(#[from] tokio::task::JoinError),
+
     #[error("input file too large: {size} bytes (limit: {limit} bytes): {path:?}")]
     SourceTooLarge {
         path: PathBuf,
@@ -80,7 +83,7 @@ impl FromStr for Secret {
 
         // @ means load from file
         let source = if let Some(path) = val.strip_prefix('@') {
-            SecretSource::File(PathBuf::from(path))
+            SecretSource::file(path)?
         } else {
             // Use key as the label for the literal
             SecretSource::literal(key, val)
