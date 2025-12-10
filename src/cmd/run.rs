@@ -5,7 +5,7 @@ use crate::{
     provider::Provider,
     secrets::{SecretFileManager, SecretFileOpts},
     signal,
-    watch::{DebounceDuration, FsWatcher, SecretFileWatcher},
+    watch::{DebounceDuration, FsWatcher, FileHandler},
 };
 use clap::{Args, ValueEnum};
 use sysexits::ExitCode;
@@ -91,7 +91,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         return ExitCode::Config;
     }
 
-    let mut manager = SecretFileManager::new(manager, provider);
+    let manager = SecretFileManager::new(manager, provider);
 
     match manager.collisions() {
         Ok(()) => {}
@@ -122,7 +122,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let handler = SecretFileWatcher::new(manager);
+            let handler = FileHandler::new(manager);
             let mut watcher = FsWatcher::new(debounce, handler);
             match watcher.run(signal::recv_shutdown()).await {
                 Ok(()) => ExitCode::Ok,

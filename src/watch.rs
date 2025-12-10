@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
 mod file;
-pub use file::SecretFileWatcher;
+pub use file::FileHandler;
 
 #[derive(Debug, Error)]
 pub enum WatchError {
