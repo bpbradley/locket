@@ -4,7 +4,6 @@
 //! and "coalescing" (merging multiple rapid events into a single logical operation)
 //! to prevent the secret manager from thrashing.
 
-use crate::secrets::FsEvent;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use notify::{
@@ -18,6 +17,8 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
+mod file;
+pub use file::SecretFileWatcher;
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -32,6 +33,14 @@ pub enum WatchError {
 
     #[error("source path missing: {0}")]
     SourceMissing(PathBuf),
+}
+
+/// Filesystem events for SecretFileRegistry
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub enum FsEvent {
+    Write(PathBuf),
+    Remove(PathBuf),
+    Move { from: PathBuf, to: PathBuf },
 }
 
 /// Handler trait for reacting to filesystem events

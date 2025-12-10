@@ -68,14 +68,6 @@ pub struct SecretFileOpts {
     pub writer: FileWriter,
 }
 
-/// Filesystem events for SecretFileRegistry
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-pub enum FsEvent {
-    Write(PathBuf),
-    Remove(PathBuf),
-    Move { from: PathBuf, to: PathBuf },
-}
-
 impl SecretFileOpts {
     pub fn new() -> Self {
         Self::default()
@@ -187,6 +179,20 @@ impl SecretFileManager {
 
     pub fn options(&self) -> &SecretFileOpts {
         &self.opts
+    }
+
+    pub fn sources(&self) -> Vec<PathBuf> {
+        let pinned = self.iter_secrets()
+            .filter_map(|f| match f.source() {
+                SecretSource::File(p) => Some(p.clone()),
+                _ => None,
+            });
+
+        let mapped = self.opts.mapping
+            .iter()
+            .map(|m| m.src().to_path_buf());
+
+        pinned.chain(mapped).collect()
     }
 
     pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
@@ -348,8 +354,8 @@ impl SecretFileManager {
         Ok(())
     }
 
-    fn on_remove(&mut self, src: &Path) -> Result<(), SecretError> {
-        let removed = self.registry.remove(src);
+    pub fn handle_remove(&mut self, src: &Path) -> Result<(), SecretError> {
+        let removed = self.registry.remove(&src.clean());
         if removed.is_empty() {
             debug!(
                 ?src,
@@ -411,9 +417,9 @@ impl SecretFileManager {
         }
     }
 
-    async fn on_move(&mut self, old: &Path, new: &Path) -> Result<(), SecretError> {
+    pub async fn handle_move(&mut self, old: &Path, new: &Path) -> Result<(), SecretError> {
         let from_clean = old.clean();
-        let to_clean = new.canon().unwrap_or_else(|_| new.clean());
+        let to_clean = new.canon().unwrap_or_else(|_| new.absolute());
 
         if let Some((from_dst, to_dst)) = self.registry.try_rebase(&from_clean, &to_clean) {
             debug!(?from_dst, ?to_dst, "attempting optimistic rename");
@@ -447,13 +453,14 @@ impl SecretFileManager {
 
         // Fallback
         debug!(?old, ?new, "fallback move via remove + write");
-        self.on_remove(&from_clean)?;
-        self.on_write(&to_clean).await?;
+        self.handle_remove(&from_clean)?;
+        self.handle_write(&to_clean).await?;
 
         Ok(())
     }
 
-    async fn on_write(&mut self, src: &Path) -> Result<(), SecretError> {
+    pub async fn handle_write(&mut self, src: &Path) -> Result<(), SecretError> {
+        let src = src.clean();
         if src.is_dir() {
             debug!(?src, "directory write event; scanning for children");
             let entries: Vec<PathBuf> = walkdir::WalkDir::new(src)
@@ -464,12 +471,12 @@ impl SecretFileManager {
                 .collect();
 
             for entry in entries {
-                Box::pin(self.on_write(&entry)).await?;
+                Box::pin(self.handle_write(&entry)).await?;
             }
             return Ok(());
         }
 
-        match self.registry.upsert(src)? {
+        match self.registry.upsert(&src)? {
             Some(file) => {
                 self.process(&file).await?;
             }
@@ -478,14 +485,6 @@ impl SecretFileManager {
             }
         }
         Ok(())
-    }
-
-    pub async fn handle_fs_event(&mut self, ev: FsEvent) -> Result<(), SecretError> {
-        match ev {
-            FsEvent::Write(src) => self.on_write(&src.clean()).await,
-            FsEvent::Remove(src) => self.on_remove(&src.clean()),
-            FsEvent::Move { from, to } => self.on_move(&from.clean(), &to.clean()).await,
-        }
     }
 }
 
