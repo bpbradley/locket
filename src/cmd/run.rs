@@ -122,7 +122,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let handler = SecretFileWatcher::new(&mut manager);
+            let handler = SecretFileWatcher::new(manager);
             let mut watcher = FsWatcher::new(debounce, handler);
             match watcher.run(signal::recv_shutdown()).await {
                 Ok(()) => ExitCode::Ok,

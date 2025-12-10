@@ -3,18 +3,18 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use super::{FsEvent, WatchHandler};
 
-pub struct SecretFileWatcher<'a> {
-    secrets: &'a mut SecretFileManager,
+pub struct SecretFileWatcher {
+    secrets: SecretFileManager
 }
 
-impl SecretFileWatcher<'_> {
-    pub fn new<'a>(secrets: &'a mut SecretFileManager) -> SecretFileWatcher<'a> {
+impl SecretFileWatcher {
+    pub fn new(secrets: SecretFileManager) -> Self {
         SecretFileWatcher { secrets }
     }
 }
 
 #[async_trait]
-impl<'a> WatchHandler for SecretFileWatcher<'a> {
+impl WatchHandler for SecretFileWatcher {
     fn paths(&self) -> Vec<PathBuf> {
         self.secrets.sources()
     }
