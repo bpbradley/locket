@@ -5,4 +5,3 @@
 compose.debug.yaml
 tests/docker/.env
 tests/docker/secrets/
-compose.yaml

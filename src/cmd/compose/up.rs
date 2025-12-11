@@ -1,5 +1,5 @@
 use crate::compose::ComposeMsg;
-use crate::env::{EnvManager, EnvSource};
+use crate::env::{EnvManager, EnvSource, EnvFile};
 use crate::provider::Provider;
 use clap::Args;
 use secrecy::ExposeSecret;
@@ -11,16 +11,27 @@ pub struct UpArgs {
     #[command(flatten)]
     pub provider: Provider,
 
-    /// Secrets to be injected as environment variables
     #[arg(
-        long,
-        env = "LOCKET_SECRETS",
+        long = "env_file",
+        env = "LOCKET_ENV_FILE",
         value_name = "KEY=VAL or @FILE",
         value_delimiter = ',',
         hide_env_values = true,
         help_heading = None,
     )]
-    pub secrets: Vec<EnvSource>,
+    pub env_file: Option<EnvFile>,
+
+    /// Secrets to be injected as environment variables
+    #[arg(
+        long,
+        short = 'e',
+        env = "LOCKET_ENV",
+        value_name = "KEY=VAL or @FILE",
+        value_delimiter = ',',
+        hide_env_values = true,
+        help_heading = None,
+    )]
+    pub env: Vec<EnvSource>,
 
     /// Service name from Docker Compose
     #[arg(help_heading = None)]
@@ -38,7 +49,14 @@ pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
         }
     };
 
-    let manager = EnvManager::new(args.secrets, provider);
+    let mut envs = Vec::new();
+
+    if let Some(env_file) = args.env_file.clone() {
+        envs.push(EnvSource::File(env_file));
+    }
+    envs.extend(args.env);
+    
+    let manager = EnvManager::new(envs, provider);
 
     let env = match manager.resolve().await {
         Ok(map) => map,

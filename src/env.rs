@@ -34,22 +34,31 @@ pub struct EnvFile {
 impl EnvFile {
     pub fn try_new(path: impl AsRef<Path>) -> Result<Self, EnvError> {
         let path = path.as_ref().canon()?;
-        let values = Self::load(&path)?;
-        Ok(Self { path, values })
+        let mut f = Self{ path, values: HashMap::new() };
+        f.load()?;
+        Ok(f)
     }
-    pub fn load(path: impl AsRef<Path>) -> Result<HashMap<String, String>, EnvError> {
-        let values = dotenvy::from_path_iter(&path)
-            .map_err(|e| EnvError::DotEnv { path: path.as_ref().to_path_buf(), source: e })?
+    pub fn clear(&mut self) {
+        self.values.clear();
+    }
+    pub fn load(&mut self) -> Result<(), EnvError> {
+        if !self.path.exists() {
+            self.clear();
+            return Ok(());
+        }
+        let values = dotenvy::from_path_iter(&self.path)
+            .map_err(|e| EnvError::DotEnv { path: self.path.to_path_buf(), source: e })?
             .collect::<Result<HashMap<String, String>, _>>()
-            .map_err(|e| EnvError::DotEnv { path: path.as_ref().to_path_buf(), source: e })?;
-        Ok(values)
-    }
-
-    pub fn reload(&mut self) -> Result<bool, EnvError> {        
-        let values = Self::load(&self.path)?;
-        let changed = self.values != values;
+            .map_err(|e| EnvError::DotEnv { path: self.path.to_path_buf(), source: e })?;
         self.values = values;
-        Ok(changed)
+        Ok(())
+    }
+}
+
+impl FromStr for EnvFile {
+    type Err = EnvError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        EnvFile::try_new(s)
     }
 }
 
@@ -124,26 +133,30 @@ impl EnvManager {
         self.files().iter().any(|p| p == path)
     }
 
-    /// Reloads file sources if needed.
-    pub async fn reload(&mut self, path: &Path) -> Result<bool, EnvError> {
+    pub fn remove(&mut self, path: &Path) {
+        for source in &mut self.sources {
+            if let EnvSource::File(f) = source {
+                if f.path == path {
+                    f.clear();
+                }
+            }
+        }
+    }
+
+    pub async fn reload(&mut self, path: &Path) -> Result<(), EnvError> {
         for source in &mut self.sources {
             if let EnvSource::File(f) = source {
                 if f.path == path {
                     let mut f_clone = f.clone();
-                    // Offload IO
-                    let (updated, changed) = tokio::task::spawn_blocking(move || {
-                        let c = f_clone.reload()?;
-                        Ok::<_, EnvError>((f_clone, c))
+                    let updated_f = tokio::task::spawn_blocking(move || {
+                        f_clone.load()?;
+                        Ok::<_, EnvError>(f_clone)
                     }).await??;
-                    
-                    if changed {
-                        *f = updated;
-                        return Ok(true);
-                    }
+                    *f = updated_f;
                 }
             }
         }
-        Ok(false)
+        Ok(())
     }
 
     /// Resolves the current environment state.
