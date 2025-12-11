@@ -2,6 +2,7 @@ use locket::provider::{ProviderError, SecretsProvider};
 use locket::secrets::{PathMapping, Secret, SecretError, SecretFileManager, SecretFileOpts};
 use secrecy::SecretString;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 struct NoOpProvider;
 #[async_trait::async_trait]
@@ -42,7 +43,7 @@ fn collisions_structure_conflict() {
         PathMapping::new(blocked_src.clone(), output.join("config/nested")),
     ]);
 
-    let secrets = SecretFileManager::new(opts, Box::new(NoOpProvider));
+    let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider));
 
     let result = secrets.collisions();
 
@@ -73,7 +74,7 @@ fn collisions_on_output_dst() {
         .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())])
         .with_secrets(args);
 
-    let manager = SecretFileManager::new(opts, Box::new(NoOpProvider));
+    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
 
     let result = manager.collisions();
 

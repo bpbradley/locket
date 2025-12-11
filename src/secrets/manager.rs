@@ -11,6 +11,7 @@ use secrecy::ExposeSecret;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretFileOpts {
@@ -147,11 +148,11 @@ pub struct SecretFileManager {
     opts: SecretFileOpts,
     registry: SecretFileRegistry,
     literals: Vec<SecretFile>,
-    provider: Box<dyn SecretsProvider>,
+    provider: Arc<dyn SecretsProvider>,
 }
 
 impl SecretFileManager {
-    pub fn new(opts: SecretFileOpts, provider: Box<dyn SecretsProvider>) -> Self {
+    pub fn new(opts: SecretFileOpts, provider: Arc<dyn SecretsProvider>) -> Self {
         let mut pinned = Vec::new();
         let mut literals = Vec::new();
 

@@ -7,6 +7,7 @@ use secrecy::SecretString;
 use std::collections::HashMap;
 use tempfile::tempdir;
 use tracing::debug;
+use std::sync::Arc;
 
 // Holds a static map of "Remote" secrets to serve.
 #[derive(Debug, Clone, Default)]
@@ -74,7 +75,7 @@ async fn test_happy_path_template_rendering() {
     );
 
     // Provider has both secrets
-    let provider = Box::new(MockProvider::new(vec![
+    let provider = Arc::new(MockProvider::new(vec![
         ("mock://user", "admin"),
         ("mock://pass", "secret123"),
     ]));
@@ -92,7 +93,7 @@ async fn test_whole_file_replacement() {
     let (_tmp, out_dir, opts) = setup("id_rsa", "mock://ssh/key");
 
     let key_content = "-----BEGIN RSA PRIVATE KEY-----...";
-    let provider = Box::new(MockProvider::new(vec![("mock://ssh/key", key_content)]));
+    let provider = Arc::new(MockProvider::new(vec![("mock://ssh/key", key_content)]));
     let manager = SecretFileManager::new(opts, provider);
 
     manager.inject_all().await.unwrap();
@@ -108,7 +109,7 @@ async fn test_policy_error_aborts() {
 
     opts.policy = InjectFailurePolicy::Error;
 
-    let provider = Box::new(MockProvider::new(vec![])); // Empty provider
+    let provider = Arc::new(MockProvider::new(vec![])); // Empty provider
     let manager = SecretFileManager::new(opts, provider);
 
     let result = manager.inject_all().await;
@@ -128,7 +129,7 @@ async fn test_policy_copy_unmodified() {
 
     opts.policy = InjectFailurePolicy::CopyUnmodified;
 
-    let provider = Box::new(MockProvider::new(vec![]));
+    let provider = Arc::new(MockProvider::new(vec![]));
     let manager = SecretFileManager::new(opts, provider);
 
     // Should succeed (return Ok) despite missing secret
@@ -146,7 +147,7 @@ async fn test_ignore_unknown_providers() {
     let content = "A: {{ op://vault/item }}\nB: {{ mock://valid }}";
     let (_tmp, out_dir, opts) = setup("mixed.yaml", content);
 
-    let provider = Box::new(MockProvider::new(vec![("mock://valid", "value")]));
+    let provider = Arc::new(MockProvider::new(vec![("mock://valid", "value")]));
     let manager = SecretFileManager::new(opts, provider);
 
     manager.inject_all().await.unwrap();
