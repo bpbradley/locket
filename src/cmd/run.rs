@@ -5,7 +5,7 @@ use crate::{
     provider::Provider,
     secrets::{SecretFileManager, SecretFileOpts},
     signal,
-    watch::{DebounceDuration, FsWatcher, FileHandler},
+    watch::{DebounceDuration, FileHandler, FsWatcher},
 };
 use clap::{Args, ValueEnum};
 use sysexits::ExitCode;

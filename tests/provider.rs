@@ -5,9 +5,9 @@ use locket::{
 };
 use secrecy::SecretString;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::tempdir;
 use tracing::debug;
-use std::sync::Arc;
 
 // Holds a static map of "Remote" secrets to serve.
 #[derive(Debug, Clone, Default)]

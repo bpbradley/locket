@@ -10,8 +10,8 @@ use clap::Args;
 use secrecy::ExposeSecret;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
 use std::sync::Arc;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretFileOpts {
@@ -152,7 +152,10 @@ pub struct SecretFileManager {
 }
 
 impl SecretFileManager {
-    pub fn new(opts: SecretFileOpts, provider: Arc<dyn SecretsProvider>) -> Result<Self, SecretError> {
+    pub fn new(
+        opts: SecretFileOpts,
+        provider: Arc<dyn SecretsProvider>,
+    ) -> Result<Self, SecretError> {
         let mut pinned = Vec::new();
         let mut literals = Vec::new();
 
@@ -172,7 +175,7 @@ impl SecretFileManager {
             literals,
             provider,
         };
-        
+
         Ok(manager)
     }
 
@@ -185,15 +188,12 @@ impl SecretFileManager {
     }
 
     pub fn sources(&self) -> Vec<PathBuf> {
-        let pinned = self.iter_secrets()
-            .filter_map(|f| match f.source() {
-                SecretSource::File(p) => Some(p.clone()),
-                _ => None,
-            });
+        let pinned = self.iter_secrets().filter_map(|f| match f.source() {
+            SecretSource::File(p) => Some(p.clone()),
+            _ => None,
+        });
 
-        let mapped = self.opts.mapping
-            .iter()
-            .map(|m| m.src().to_path_buf());
+        let mapped = self.opts.mapping.iter().map(|m| m.src().to_path_buf());
 
         pinned.chain(mapped).collect()
     }

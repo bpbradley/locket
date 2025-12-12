@@ -1,10 +1,10 @@
-use crate::secrets::SecretFileManager;
-use std::path::PathBuf;
-use async_trait::async_trait;
 use super::{FsEvent, WatchHandler};
+use crate::secrets::SecretFileManager;
+use async_trait::async_trait;
+use std::path::PathBuf;
 
 pub struct FileHandler {
-    secrets: SecretFileManager
+    secrets: SecretFileManager,
 }
 
 impl FileHandler {

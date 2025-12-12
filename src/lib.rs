@@ -1,6 +1,8 @@
 pub mod cmd;
 #[cfg(feature = "compose")]
 pub mod compose;
+#[cfg(any(feature = "exec", feature = "compose"))]
+pub mod env;
 pub mod health;
 pub mod logging;
 pub mod provider;
@@ -9,5 +11,3 @@ pub mod signal;
 pub mod template;
 pub mod watch;
 pub mod write;
-#[cfg(any(feature = "exec", feature = "compose"))]
-pub mod env;

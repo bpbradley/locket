@@ -1,5 +1,5 @@
 use crate::compose::ComposeMsg;
-use crate::env::{EnvManager, EnvSource, EnvFile};
+use crate::env::EnvManager;
 use crate::provider::Provider;
 use clap::Args;
 use secrecy::ExposeSecret;
@@ -55,7 +55,7 @@ pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
         envs.push(EnvSource::File(env_file));
     }
     envs.extend(args.env);
-    
+
     let manager = EnvManager::new(envs, provider);
 
     let env = match manager.resolve().await {

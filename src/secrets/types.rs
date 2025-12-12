@@ -60,10 +60,7 @@ pub enum Secret {
 
     /// A named secret with an explicit key.
     /// Input: "KEY=VALUE" or "KEY=@path/to/file"
-    Named {
-        key: String,
-        source: SecretSource,
-    },
+    Named { key: String, source: SecretSource },
 }
 
 impl Secret {
@@ -75,7 +72,7 @@ impl Secret {
         } else {
             SecretSource::literal(&key, val)
         };
-        
+
         Ok(Self::Named { key, source })
     }
 
@@ -83,7 +80,7 @@ impl Secret {
     pub fn try_from_map(map: HashMap<String, String>) -> Result<Vec<Self>, SecretError> {
         map.into_iter().map(|(k, v)| Self::from_kv(k, v)).collect()
     }
-    
+
     /// Utility to access the inner source regardless of variant.
     pub fn source(&self) -> &SecretSource {
         match self {
@@ -191,21 +188,24 @@ impl<'a> SourceReader<'a> {
         self
     }
 
-    pub fn fetch(self) -> Result<Cow<'a, str>, SecretError> {
+    pub fn fetch(self) -> Result<Option<Cow<'a, str>>, SecretError> {
         match self.source {
-            SecretSource::File(path) => {
-                let meta = std::fs::metadata(path).map_err(SecretError::Io)?;
-                if meta.len() > self.max_size.bytes {
-                    return Err(SecretError::SourceTooLarge {
-                        path: path.clone(),
-                        size: meta.len(),
-                        limit: self.max_size.bytes,
-                    });
+            SecretSource::File(path) => match std::fs::metadata(path) {
+                Ok(meta) => {
+                    if meta.len() > self.max_size.bytes {
+                        return Err(SecretError::SourceTooLarge {
+                            path: path.clone(),
+                            size: meta.len(),
+                            limit: self.max_size.bytes,
+                        });
+                    }
+                    let c = std::fs::read_to_string(path).map_err(SecretError::Io)?;
+                    Ok(Some(Cow::Owned(c)))
                 }
-                let c = std::fs::read_to_string(path).map_err(SecretError::Io)?;
-                Ok(Cow::Owned(c))
-            }
-            SecretSource::Literal { template, .. } => Ok(Cow::Borrowed(template)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(SecretError::Io(e)),
+            },
+            SecretSource::Literal { template, .. } => Ok(Some(Cow::Borrowed(template))),
         }
     }
 }
@@ -252,14 +252,12 @@ impl SecretFile {
                     ))
                 })?;
 
-                let filename = path.file_name()
-                    .and_then(|s| s.to_str())
-                    .ok_or_else(|| {
-                        SecretError::Parse(format!(
-                            "Could not derive a valid filename from path: {:?}",
-                            path
-                        ))
-                    })?;
+                let filename = path.file_name().and_then(|s| s.to_str()).ok_or_else(|| {
+                    SecretError::Parse(format!(
+                        "Could not derive a valid filename from path: {:?}",
+                        path
+                    ))
+                })?;
 
                 (filename.to_string(), source)
             }
@@ -283,7 +281,14 @@ impl SecretFile {
     }
 
     pub fn content(&self) -> Result<Cow<'_, str>, SecretError> {
-        self.source.read().limit(self.max_size).fetch()
+        self.source
+            .read()
+            .limit(self.max_size)
+            .fetch()?
+            .ok_or_else(|| {
+                let path = self.source.path().unwrap_or_else(|| Path::new("<unknown>"));
+                SecretError::SourceMissing(path.to_path_buf())
+            })
     }
 }
 
