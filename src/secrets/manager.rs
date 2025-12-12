@@ -152,12 +152,12 @@ pub struct SecretFileManager {
 }
 
 impl SecretFileManager {
-    pub fn new(opts: SecretFileOpts, provider: Arc<dyn SecretsProvider>) -> Self {
+    pub fn new(opts: SecretFileOpts, provider: Arc<dyn SecretsProvider>) -> Result<Self, SecretError> {
         let mut pinned = Vec::new();
         let mut literals = Vec::new();
 
         for s in &opts.secrets {
-            let f = SecretFile::from_secret(s.clone(), &opts.secret_dir, opts.max_file_size);
+            let f = SecretFile::from_secret(s.clone(), &opts.secret_dir, opts.max_file_size)?;
             match f.source() {
                 SecretSource::File(_) => pinned.push(f),
                 SecretSource::Literal { .. } => literals.push(f),
@@ -166,12 +166,14 @@ impl SecretFileManager {
 
         let registry = SecretFileRegistry::new(opts.mapping.clone(), pinned, opts.max_file_size);
 
-        Self {
+        let manager = Self {
             opts,
             registry,
             literals,
             provider,
-        }
+        };
+        
+        Ok(manager)
     }
 
     pub fn iter_secrets(&self) -> impl Iterator<Item = &SecretFile> {

@@ -52,24 +52,44 @@ pub enum SecretError {
 }
 
 #[derive(Debug, Clone)]
-pub struct Secret {
-    pub key: String,
-    pub source: SecretSource,
+pub enum Secret {
+    /// An anonymous secret source.
+    /// The consumer decides how to handle it.
+    /// Input: "path/to/file" or "@path/to/file"
+    Anonymous(SecretSource),
+
+    /// A named secret with an explicit key.
+    /// Input: "KEY=VALUE" or "KEY=@path/to/file"
+    Named {
+        key: String,
+        source: SecretSource,
+    },
 }
 
 impl Secret {
+    /// Creates a Named secret from a Key/Value pair.
     fn from_kv(key: String, val: String) -> Result<Self, SecretError> {
-        // @file
+        // If val starts with @, it's a file source. Otherwise, literal.
         let source = if let Some(path) = val.strip_prefix('@') {
             SecretSource::file(path)?
         } else {
             SecretSource::literal(&key, val)
         };
-        Ok(Self { key, source })
+        
+        Ok(Self::Named { key, source })
     }
 
+    /// Helper to batch convert a HashMap into Named secrets
     pub fn try_from_map(map: HashMap<String, String>) -> Result<Vec<Self>, SecretError> {
         map.into_iter().map(|(k, v)| Self::from_kv(k, v)).collect()
+    }
+    
+    /// Utility to access the inner source regardless of variant.
+    pub fn source(&self) -> &SecretSource {
+        match self {
+            Secret::Anonymous(s) => s,
+            Secret::Named { source, .. } => source,
+        }
     }
 }
 
@@ -77,22 +97,25 @@ impl FromStr for Secret {
     type Err = SecretError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (key, val) = s
-            .split_once('=')
-            .ok_or_else(|| SecretError::Parse(format!("expected KEY=VALUE, got '{}'", s)))?;
+        // key=value form means Named secret
+        if let Some((key, val)) = s.split_once('=') {
+            let source = if let Some(path) = val.strip_prefix('@') {
+                SecretSource::file(path)?
+            } else {
+                SecretSource::literal(key, val)
+            };
 
-        // @ means load from file
-        let source = if let Some(path) = val.strip_prefix('@') {
-            SecretSource::file(path)?
-        } else {
-            // Use key as the label for the literal
-            SecretSource::literal(key, val)
-        };
+            return Ok(Self::Named {
+                key: key.to_string(),
+                source,
+            });
+        }
 
-        Ok(Self {
-            key: key.to_string(),
-            source,
-        })
+        // No `=` means Anonymous secret.
+        // This does mean file paths with `=` may not be parsed correctly.
+        // Strip explicit file indicator '@' if present, otherwise treat as path.
+        let path = s.strip_prefix('@').unwrap_or(s);
+        Ok(Self::Anonymous(SecretSource::file(path)?))
     }
 }
 
@@ -141,6 +164,12 @@ impl SecretSource {
             Self::Literal { label, .. } => {
                 Cow::Borrowed(label.as_deref().unwrap_or("inline-value"))
             }
+        }
+    }
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            SecretSource::File(p) => Some(p),
+            SecretSource::Literal { .. } => None,
         }
     }
 }
@@ -209,14 +238,43 @@ impl SecretFile {
             max_size: MemSize::MAX,
         }
     }
-    pub fn from_secret(secret: Secret, root: &Path, max_size: MemSize) -> Self {
-        let safe_name = sanitize_filename::sanitize(&secret.key);
-        Self {
-            source: secret.source,
-            dest: root.join(safe_name),
+    pub fn from_secret(
+        secret: Secret,
+        root: &Path,
+        max_size: MemSize,
+    ) -> Result<Self, SecretError> {
+        let (key, source) = match secret {
+            Secret::Named { key, source } => (key, source),
+            Secret::Anonymous(source) => {
+                let path = source.path().ok_or_else(|| {
+                    SecretError::Parse(format!(
+                        "Cannot derive SecretFile from anonymous literal secret"
+                    ))
+                })?;
+
+                let filename = path.file_name()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| {
+                        SecretError::Parse(format!(
+                            "Could not derive a valid filename from path: {:?}",
+                            path
+                        ))
+                    })?;
+
+                (filename.to_string(), source)
+            }
+        };
+
+        let safe_name = sanitize_filename::sanitize(&key);
+        let dest = root.absolute().join(safe_name);
+
+        Ok(Self {
+            source,
+            dest,
             max_size,
-        }
+        })
     }
+
     pub fn dest(&self) -> &Path {
         &self.dest
     }

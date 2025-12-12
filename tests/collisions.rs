@@ -43,7 +43,7 @@ fn collisions_structure_conflict() {
         PathMapping::new(blocked_src.clone(), output.join("config/nested")),
     ]);
 
-    let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+    let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider)).unwrap();
 
     let result = secrets.collisions();
 
@@ -74,7 +74,7 @@ fn collisions_on_output_dst() {
         .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())])
         .with_secrets(args);
 
-    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider)).unwrap();
 
     let result = manager.collisions();
 

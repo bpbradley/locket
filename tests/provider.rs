@@ -80,7 +80,7 @@ async fn test_happy_path_template_rendering() {
         ("mock://pass", "secret123"),
     ]));
 
-    let manager = SecretFileManager::new(opts, provider);
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 
@@ -94,7 +94,7 @@ async fn test_whole_file_replacement() {
 
     let key_content = "-----BEGIN RSA PRIVATE KEY-----...";
     let provider = Arc::new(MockProvider::new(vec![("mock://ssh/key", key_content)]));
-    let manager = SecretFileManager::new(opts, provider);
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 
@@ -110,7 +110,7 @@ async fn test_policy_error_aborts() {
     opts.policy = InjectFailurePolicy::Error;
 
     let provider = Arc::new(MockProvider::new(vec![])); // Empty provider
-    let manager = SecretFileManager::new(opts, provider);
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
     let result = manager.inject_all().await;
 
@@ -130,7 +130,7 @@ async fn test_policy_copy_unmodified() {
     opts.policy = InjectFailurePolicy::CopyUnmodified;
 
     let provider = Arc::new(MockProvider::new(vec![]));
-    let manager = SecretFileManager::new(opts, provider);
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
     // Should succeed (return Ok) despite missing secret
     manager.inject_all().await.unwrap();
@@ -148,7 +148,7 @@ async fn test_ignore_unknown_providers() {
     let (_tmp, out_dir, opts) = setup("mixed.yaml", content);
 
     let provider = Arc::new(MockProvider::new(vec![("mock://valid", "value")]));
-    let manager = SecretFileManager::new(opts, provider);
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 

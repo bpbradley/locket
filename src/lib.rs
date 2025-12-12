@@ -9,4 +9,5 @@ pub mod signal;
 pub mod template;
 pub mod watch;
 pub mod write;
+#[cfg(any(feature = "exec", feature = "compose"))]
 pub mod env;

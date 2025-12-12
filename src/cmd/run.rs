@@ -91,7 +91,13 @@ pub async fn run(args: RunArgs) -> ExitCode {
         return ExitCode::Config;
     }
 
-    let manager = SecretFileManager::new(manager, provider);
+    let manager = match SecretFileManager::new(manager, provider) {
+        Ok(m) => m,
+        Err(e) => {
+            error!(error=%e, "failed to initialize SecretFileManager");
+            return ExitCode::Config;
+        }
+    };
 
     match manager.collisions() {
         Ok(()) => {}
