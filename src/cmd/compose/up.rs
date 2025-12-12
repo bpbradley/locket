@@ -4,7 +4,6 @@ use crate::provider::Provider;
 use crate::secrets::Secret;
 use clap::Args;
 use secrecy::ExposeSecret;
-use std::sync::Arc;
 
 fn parse_secret_path(s: &str) -> Result<Secret, String> {
     Secret::from_file(s).map_err(|e| e.to_string())
@@ -50,7 +49,7 @@ pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
     ComposeMsg::info(format!("Starting project: {}", project));
 
     let provider = match args.provider.build().await {
-        Ok(p) => Arc::from(p),
+        Ok(p) => p,
         Err(e) => {
             ComposeMsg::error(format!("Failed to initialize provider: {}", e));
             return sysexits::ExitCode::Config;

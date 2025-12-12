@@ -22,7 +22,7 @@ mod file;
 mod process;
 pub use file::FileHandler;
 #[cfg(feature = "exec")]
-pub use process::{ProcessHandler, ExecError};
+pub use process::{ExecError, ProcessHandler};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -94,7 +94,7 @@ impl<H: WatchHandler> FsWatcher<H> {
     /// 2. Buffer incoming filesystem events.
     /// 3. Debounce events
     /// 4. Flush coalesced events to `handler.handle()` when debounce period expires
-    pub async fn run<F>(&mut self, shutdown: F) -> Result<(), WatchError>
+    pub async fn run<F>(mut self, shutdown: F) -> Result<H, WatchError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -122,8 +122,8 @@ impl<H: WatchHandler> FsWatcher<H> {
 
             let event = tokio::select! {
                 _ = shutdown.as_mut() => {
-                    info!("shutdown signal received; exiting watcher");
-                    return Ok(());
+                    info!("shutdown signal received");
+                    break; // Exit the loop
                 }
                 signal = rx.recv() => {
                     match signal {
@@ -148,10 +148,11 @@ impl<H: WatchHandler> FsWatcher<H> {
                 }
                 ControlFlow::Break => {
                     info!("exiting watcher loop.");
-                    return Ok(());
+                    break;
                 }
             }
         }
+        Ok(self.handler)
     }
 
     /// Debounce loop to wait for a quiet period before processing events so as not to overwhelm the handler

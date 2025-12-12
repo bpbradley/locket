@@ -458,7 +458,7 @@ mod tests {
 
         fs::create_dir_all(&old_sub).unwrap();
         fs::create_dir_all(&new_sub).unwrap();
-        fs::create_dir_all(&output.join("old_sub")).unwrap();
+        fs::create_dir_all(output.join("old_sub")).unwrap();
 
         let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&data, &output));

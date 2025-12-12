@@ -1,15 +1,14 @@
 use crate::{
+    env::EnvManager,
     logging::Logger,
     provider::Provider,
     secrets::Secret,
     signal,
-    env::EnvManager,
-    watch::{DebounceDuration, ProcessHandler, FsWatcher, ExecError},
+    watch::{DebounceDuration, ExecError, FsWatcher, ProcessHandler},
 };
 use clap::Args;
 use sysexits::ExitCode;
-use std::sync::Arc;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 #[derive(Args, Debug)]
 pub struct ExecArgs {
@@ -47,7 +46,7 @@ pub struct ExecArgs {
     provider: Provider,
 
     /// Command to execute with secrets injected into environment
-    /// Example: -- cmd arg1 arg2
+    /// Example: locket exec -e locket.env -- docker compose up -d
     #[arg(required = true, trailing_var_arg = true)]
     pub cmd: Vec<String>,
 }
@@ -65,7 +64,7 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
 
     // Initialize Provider
     let provider = match args.provider.build().await {
-        Ok(p) => Arc::from(p),
+        Ok(p) => p,
         Err(e) => {
             error!(error = %e, "failed to initialize secrets provider");
             return ExitCode::Config;
@@ -90,12 +89,13 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
 
     // Execution Mode Branch
     if args.watch {
-        let mut watcher = FsWatcher::new(args.debounce, handler);
+        let watcher = FsWatcher::new(args.debounce, handler);
 
         // Run the watcher loop until a shutdown signal (Ctrl+C/SIGTERM) is received
         match watcher.run(signal::recv_shutdown()).await {
-            Ok(_) => {
+            Ok(mut handler) => {
                 info!("watch loop terminated gracefully");
+                handler.stop().await;
                 ExitCode::Ok
             }
             Err(e) => {
@@ -113,9 +113,7 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
 }
 
 impl From<ExecError> for ExitCode {
-    fn from(err: ExecError) -> Self {
-        match err {
-            _ => ExitCode::Software,
-        }
+    fn from(_err: ExecError) -> Self {
+        ExitCode::Software
     }
 }

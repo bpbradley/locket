@@ -129,9 +129,9 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
         RunMode::Watch => {
             let handler = FileHandler::new(manager);
-            let mut watcher = FsWatcher::new(debounce, handler);
+            let watcher = FsWatcher::new(debounce, handler);
             match watcher.run(signal::recv_shutdown()).await {
-                Ok(()) => ExitCode::Ok,
+                Ok(_) => ExitCode::Ok,
                 Err(e) => {
                     error!(error=%e, "watch errored");
                     ExitCode::IoErr

@@ -9,7 +9,7 @@ async fn main() -> ExitCode {
     match cli.cmd {
         Command::Run(args) => cmd::run(*args).await,
         #[cfg(feature = "exec")]
-        Command::Exec(args) => cmd::exec(args).await,
+        Command::Exec(args) => cmd::exec(*args).await,
         Command::Healthcheck(args) => cmd::healthcheck(args),
         #[cfg(feature = "compose")]
         Command::Compose(args) => cmd::compose(*args).await,

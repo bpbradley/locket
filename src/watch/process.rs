@@ -1,14 +1,17 @@
 use super::{FsEvent, WatchHandler};
 use crate::env::EnvManager;
 use async_trait::async_trait;
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 use secrecy::ExposeSecret;
-use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use tokio::process::{Child, Command};
-use thiserror::Error;
-use tracing::{debug, info, error};
 use std::process::ExitStatus;
+use thiserror::Error;
+use tokio::process::{Child, Command};
+use tokio::signal::unix::{SignalKind, signal};
+use tracing::{debug, error, info};
 
 #[derive(Debug, Error)]
 pub enum ExecError {
@@ -64,33 +67,21 @@ impl ProcessHandler {
         hasher.finish()
     }
 
-    async fn restart(&mut self, env_map: &HashMap<String, secrecy::SecretString>) -> anyhow::Result<()> {
-        // Kill the old process if it exists
-        if let Some(mut child) = self.child.take() {
-            debug!("Killing old process (pid: {:?})", child.id());
-            
-            // Standard Tokio kill sends SIGKILL (immediate termination).
-            // TODO: implement graceful shutdown with SIGTERM first?
-            child.kill().await?;
-            
-            child.wait().await?;
-        }
+    async fn restart(
+        &mut self,
+        env_map: &HashMap<String, secrecy::SecretString>,
+    ) -> anyhow::Result<()> {
+        // Try to gracefully stop existing process (if it exists)
+        self.stop().await;
 
         if self.cmd.is_empty() {
             return Ok(());
         }
 
-        // Prepare command
-        // We use the first arg as the program, and the rest as arguments.
+        // Prepare new command
         let mut command = Command::new(&self.cmd[0]);
         command.args(&self.cmd[1..]);
-
-        // Inject secrets
-        // We must expose the secrets here to pass them to the OS process.
-        // This is the point where 'SecretString' protection ends.
         command.envs(env_map.iter().map(|(k, v)| (k, v.expose_secret())));
-
-        // Inherit Standard IO so logs show up in the console
         command.stdout(std::process::Stdio::inherit());
         command.stderr(std::process::Stdio::inherit());
 
@@ -104,20 +95,118 @@ impl ProcessHandler {
 
     pub async fn wait(&mut self) -> Result<(), ExecError> {
         let child = self.child.as_mut().ok_or(ExecError::NoChild)?;
-        
-        let status = child.wait().await?;
-        
-        if status.success() {
-            Ok(())
-        } else {
-            Err(ExecError::from(status))
+        let child_id = child.id().ok_or(ExecError::NoChild)? as i32;
+        let pid = Pid::from_raw(child_id);
+
+        let signals = vec![
+            (SignalKind::interrupt(), Signal::SIGINT, "SIGINT"),
+            (SignalKind::terminate(), Signal::SIGTERM, "SIGTERM"),
+            (SignalKind::hangup(), Signal::SIGHUP, "SIGHUP"),
+            (SignalKind::quit(), Signal::SIGQUIT, "SIGQUIT"),
+            (SignalKind::user_defined1(), Signal::SIGUSR1, "SIGUSR1"),
+            (SignalKind::user_defined2(), Signal::SIGUSR2, "SIGUSR2"),
+            (SignalKind::window_change(), Signal::SIGWINCH, "SIGWINCH"),
+        ];
+
+        // Create a channel to unify signal handling
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        // Register listeners and spawn forwarders
+        for (kind, sig, name) in signals {
+            // Register the listener with the OS
+            let mut stream = match signal(kind) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("failed to register listener for {}: {}", name, e);
+                    continue;
+                }
+            };
+
+            let tx = tx.clone();
+            // Spawn a task to bridge the OS signal to this channel
+            tokio::spawn(async move {
+                // Keep forwarding until the channel closes (main loop exits)
+                while stream.recv().await.is_some() {
+                    if tx.send((sig, name)).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        loop {
+            tokio::select! {
+                // Child Exited
+                status = child.wait() => {
+                    let status = status?;
+                    return if status.success() {
+                        Ok(())
+                    } else {
+                        Err(ExecError::from(status))
+                    };
+                }
+
+                // The 'Some' match handles the actual event.
+                // If None, it means all senders dropped
+                Some((sig, name)) = rx.recv() => {
+                    debug!("received {}, forwarding to child", name);
+                    // Use the helper to send the signal safely
+                    if let Err(e) = signal::kill(pid, sig) {
+                         debug!("failed to forward signal {}: {}", name, e);
+                    }
+                }
+            }
         }
     }
-    
+
     pub async fn start(&mut self) -> anyhow::Result<()> {
         let env = self.env.resolve().await?;
         self.env_hash = Self::hash_env(&env);
         self.restart(&env).await
+    }
+
+    pub async fn stop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            debug!("Stopping child process (pid: {:?})", child.id());
+
+            // Send SIGTERM
+            if let Some(id) = child.id() {
+                let pid = Pid::from_raw(id as i32);
+                if let Err(e) = signal::kill(pid, Signal::SIGTERM) {
+                    debug!("Failed to send SIGTERM: {}", e);
+                }
+            }
+
+            // Wait with Timeout TODO make configurable
+            let timeout = std::time::Duration::from_secs(5);
+
+            match tokio::time::timeout(timeout, child.wait()).await {
+                Ok(_) => {
+                    debug!("Child exited gracefully");
+                }
+                Err(_) => {
+                    tracing::warn!("Child did not exit within 5s, sending SIGKILL");
+                    let _ = child.kill().await; // Force kill
+                    let _ = child.wait().await; // Prevent zombie
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ProcessHandler {
+    fn drop(&mut self) {
+        // If a child is still running when the handler is dropped, ensure it doesn't become a zombie or orphan.
+        if let Some(mut child) = self.child.take() {
+            // Check if it has already exited
+            match child.try_wait() {
+                Ok(Some(_)) => {} // Already done
+                _ => {
+                    debug!("ProcessHandler dropped, killing child process to prevent orphan");
+                    let _ = child.start_kill(); // Non-blocking SIGKILL
+                }
+            }
+        }
     }
 }
 

@@ -21,7 +21,7 @@ op = ["tokio/process", "dep:futures"]
 connect = ["dep:reqwest", "dep:url", "dep:percent-encoding", "dep:futures"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:futures", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
-exec = ["dep:dotenvy"]
+exec = ["dep:dotenvy", "dep:nix"]
 
 [dependencies]
 anyhow = "1"
@@ -49,6 +49,7 @@ percent-encoding = { version = "2.3", optional = true }
 bitwarden = { version = "1", features=["secrets"], optional = true }
 uuid = { version = "1", optional = true }
 dotenvy = {version = "0.15", optional = true}
+nix = { version = "0.27", features = ["signal"], optional = true}
 
 # bitwarden sdk needs to update their crate. Cannot build without this.
 # https://github.com/bitwarden/sdk-sm/issues/1244

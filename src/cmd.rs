@@ -2,17 +2,17 @@ use clap::{Parser, Subcommand};
 
 #[cfg(feature = "compose")]
 mod compose;
-mod healthcheck;
-mod run;
 #[cfg(feature = "exec")]
 mod exec;
+mod healthcheck;
+mod run;
 
 #[cfg(feature = "compose")]
 pub use compose::compose;
-pub use healthcheck::healthcheck;
-pub use run::run;
 #[cfg(feature = "exec")]
 pub use exec::exec;
+pub use healthcheck::healthcheck;
+pub use run::run;
 
 #[derive(Parser, Debug)]
 #[command(name = "locket")]
@@ -29,7 +29,7 @@ pub enum Command {
     Run(Box<run::RunArgs>),
 
     #[cfg(feature = "exec")]
-    Exec(exec::ExecArgs),
+    Exec(Box<exec::ExecArgs>),
 
     /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
     /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.

@@ -252,9 +252,9 @@ impl SecretFile {
             Secret::Named { key, source } => (key, source),
             Secret::Anonymous(source) => {
                 let path = source.path().ok_or_else(|| {
-                    SecretError::Parse(format!(
-                        "Cannot derive SecretFile from anonymous literal secret"
-                    ))
+                    SecretError::Parse(
+                        "Cannot derive SecretFile from anonymous literal secret".to_string(),
+                    )
                 })?;
 
                 let filename = path.file_name().and_then(|s| s.to_str()).ok_or_else(|| {
