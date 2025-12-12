@@ -11,6 +11,7 @@ use std::process::ExitStatus;
 use thiserror::Error;
 use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
 #[derive(Debug, Error)]
@@ -43,6 +44,7 @@ pub struct ProcessHandler {
     cmd: Vec<String>,
     env_hash: u64,
     child: Option<Child>,
+    forwarder: Option<JoinHandle<()>>,
 }
 
 impl ProcessHandler {
@@ -52,6 +54,7 @@ impl ProcessHandler {
             cmd,
             env_hash: 0,
             child: None,
+            forwarder: None,
         }
     }
 
@@ -65,6 +68,53 @@ impl ProcessHandler {
             map.get(k).unwrap().expose_secret().hash(&mut hasher);
         }
         hasher.finish()
+    }
+
+    fn spawn_forwarder(child_pid: u32) -> JoinHandle<()> {
+        let pid = Pid::from_raw(child_pid as i32);
+
+        tokio::spawn(async move {
+            // Define signals to proxy
+            // We intentionally include INT/TERM here.
+            // While the main loop also catches them, forwarding them ensures
+            // the child receives the specific signal the user sent.
+            let signals = vec![
+                (SignalKind::interrupt(), Signal::SIGINT, "SIGINT"),
+                (SignalKind::terminate(), Signal::SIGTERM, "SIGTERM"),
+                (SignalKind::hangup(), Signal::SIGHUP, "SIGHUP"),
+                (SignalKind::quit(), Signal::SIGQUIT, "SIGQUIT"),
+                (SignalKind::user_defined1(), Signal::SIGUSR1, "SIGUSR1"),
+                (SignalKind::user_defined2(), Signal::SIGUSR2, "SIGUSR2"),
+                (SignalKind::window_change(), Signal::SIGWINCH, "SIGWINCH"),
+            ];
+
+            let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+            for (kind, sig, name) in signals {
+                match signal(kind) {
+                    Ok(mut stream) => {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            while stream.recv().await.is_some() {
+                                if tx.send((sig, name)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => tracing::warn!("failed to register listener for {}: {}", name, e),
+                }
+            }
+
+            // Forwarding Loop
+            while let Some((sig, name)) = rx.recv().await {
+                debug!("forwarding {} to child {}", name, pid);
+                if signal::kill(pid, sig).is_err() {
+                    // Child is dead... RIP. stop forwarding
+                    break;
+                }
+            }
+        })
     }
 
     async fn restart(
@@ -85,9 +135,15 @@ impl ProcessHandler {
         command.stdout(std::process::Stdio::inherit());
         command.stderr(std::process::Stdio::inherit());
 
-        // Spawn
+        // Spawn child
         info!(cmd = ?self.cmd, "Spawning child process");
         let child = command.spawn()?;
+
+        // Spawn signal forwarder
+        if let Some(pid) = child.id() {
+            self.forwarder = Some(Self::spawn_forwarder(pid));
+        }
+
         self.child = Some(child);
 
         Ok(())
@@ -95,67 +151,18 @@ impl ProcessHandler {
 
     pub async fn wait(&mut self) -> Result<(), ExecError> {
         let child = self.child.as_mut().ok_or(ExecError::NoChild)?;
-        let child_id = child.id().ok_or(ExecError::NoChild)? as i32;
-        let pid = Pid::from_raw(child_id);
 
-        let signals = vec![
-            (SignalKind::interrupt(), Signal::SIGINT, "SIGINT"),
-            (SignalKind::terminate(), Signal::SIGTERM, "SIGTERM"),
-            (SignalKind::hangup(), Signal::SIGHUP, "SIGHUP"),
-            (SignalKind::quit(), Signal::SIGQUIT, "SIGQUIT"),
-            (SignalKind::user_defined1(), Signal::SIGUSR1, "SIGUSR1"),
-            (SignalKind::user_defined2(), Signal::SIGUSR2, "SIGUSR2"),
-            (SignalKind::window_change(), Signal::SIGWINCH, "SIGWINCH"),
-        ];
+        let status = child.wait().await?;
 
-        // Create a channel to unify signal handling
-        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-
-        // Register listeners and spawn forwarders
-        for (kind, sig, name) in signals {
-            // Register the listener with the OS
-            let mut stream = match signal(kind) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!("failed to register listener for {}: {}", name, e);
-                    continue;
-                }
-            };
-
-            let tx = tx.clone();
-            // Spawn a task to bridge the OS signal to this channel
-            tokio::spawn(async move {
-                // Keep forwarding until the channel closes (main loop exits)
-                while stream.recv().await.is_some() {
-                    if tx.send((sig, name)).await.is_err() {
-                        break;
-                    }
-                }
-            });
+        // Clean up forwarder
+        if let Some(handle) = self.forwarder.take() {
+            handle.abort();
         }
 
-        loop {
-            tokio::select! {
-                // Child Exited
-                status = child.wait() => {
-                    let status = status?;
-                    return if status.success() {
-                        Ok(())
-                    } else {
-                        Err(ExecError::from(status))
-                    };
-                }
-
-                // The 'Some' match handles the actual event.
-                // If None, it means all senders dropped
-                Some((sig, name)) = rx.recv() => {
-                    debug!("received {}, forwarding to child", name);
-                    // Use the helper to send the signal safely
-                    if let Err(e) = signal::kill(pid, sig) {
-                         debug!("failed to forward signal {}: {}", name, e);
-                    }
-                }
-            }
+        if status.success() {
+            Ok(())
+        } else {
+            Err(ExecError::from(status))
         }
     }
 
@@ -196,14 +203,18 @@ impl ProcessHandler {
 
 impl Drop for ProcessHandler {
     fn drop(&mut self) {
-        // If a child is still running when the handler is dropped, ensure it doesn't become a zombie or orphan.
+        // Abort the forwarder
+        if let Some(handle) = self.forwarder.take() {
+            handle.abort();
+        }
+
+        // Clean up the child process
         if let Some(mut child) = self.child.take() {
-            // Check if it has already exited
             match child.try_wait() {
                 Ok(Some(_)) => {} // Already done
                 _ => {
-                    debug!("ProcessHandler dropped, killing child process to prevent orphan");
-                    let _ = child.start_kill(); // Non-blocking SIGKILL
+                    debug!("ProcessHandler dropped, killing child process");
+                    let _ = child.start_kill();
                 }
             }
         }
