@@ -76,6 +76,11 @@ impl Secret {
         Ok(Self::Named { key, source })
     }
 
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, SecretError> {
+        let source = SecretSource::file(path)?;
+        Ok(Self::Anonymous(source))
+    }
+
     /// Helper to batch convert a HashMap into Named secrets
     pub fn try_from_map(map: HashMap<String, String>) -> Result<Vec<Self>, SecretError> {
         map.into_iter().map(|(k, v)| Self::from_kv(k, v)).collect()

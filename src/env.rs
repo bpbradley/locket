@@ -1,5 +1,5 @@
 use crate::provider::SecretsProvider;
-use crate::secrets::{MemSize, Secret, SecretError};
+use crate::secrets::{Secret, SecretError};
 use crate::template::Template;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;

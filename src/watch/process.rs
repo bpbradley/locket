@@ -39,28 +39,29 @@ impl WatchHandler for ProcessHandler {
         self.env.files()
     }
 
-    async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()> {
-        match event {
-            FsEvent::Write(_) | FsEvent::Remove(_) => {
-                match self.env.resolve().await {
-                    Ok(resolved) => {
-                        let new_hash = Self::hash_env(&resolved);
-                        if new_hash != self.env_hash {
-                            self.env_hash = new_hash;
-                            // TODO: Add logic here to restart the process
-                            tracing::info!("Environment changed , restarting process...");
-                        } else {
-                            debug!("File changed but resolved environment is identical; skipping restart");
-                        }
-                    }
-                    Err(e) => {
-                        // Crucial: Log parsing errors (e.g. bad .env syntax) but do not crash.
-                        // We wait for the next Write event to fix it.
-                        tracing::error!("Failed to reload environment: {}", e);
-                    }
+    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        match self.env.resolve().await {
+            Ok(resolved) => {
+                let new_hash = Self::hash_env(&resolved);
+                if new_hash != self.env_hash {
+                    self.env_hash = new_hash;
+                    tracing::info!(
+                        "Environment changed ({} events), restarting process...",
+                        events.len()
+                    );
+
+                    // TODO: Trigger child process restart here?
+                } else {
+                    debug!("Files changed but resolved environment is identical; skipping restart");
                 }
             }
-            _ => {}
+            Err(e) => {
+                // Log but don't crash the watcher loop
+                tracing::error!("Failed to reload environment: {}", e);
+            }
         }
         Ok(())
     }

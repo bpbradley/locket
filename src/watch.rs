@@ -56,7 +56,7 @@ pub trait WatchHandler: Send + Sync {
     fn paths(&self) -> Vec<PathBuf>;
 
     /// Handle filesystem event dispatched by the watcher.
-    async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()>;
+    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
 }
 
 enum ControlFlow {
@@ -218,10 +218,8 @@ impl<H: WatchHandler> FsWatcher<H> {
         let events: Vec<_> = self.events.drain().collect();
         debug!(count = events.len(), "processing batched fs events");
 
-        for ev in events {
-            if let Err(e) = self.handler.handle(ev).await {
-                warn!(error=?e, "failed to handle fs event");
-            }
+        if let Err(e) = self.handler.handle(events).await {
+            warn!(error=?e, "failed to handle fs events");
         }
     }
 
