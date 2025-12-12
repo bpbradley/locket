@@ -6,7 +6,35 @@ use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use tokio::process::{Child, Command};
+use thiserror::Error;
 use tracing::{debug, info, error};
+use std::process::ExitStatus;
+
+#[derive(Debug, Error)]
+pub enum ExecError {
+    #[error("child process failed with code {0}")]
+    Code(i32),
+
+    #[error("child process terminated by signal")]
+    Signal,
+
+    #[error("failed to wait on child: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("no child process is currently running")]
+    NoChild,
+}
+
+impl From<ExitStatus> for ExecError {
+    fn from(status: ExitStatus) -> Self {
+        if let Some(code) = status.code() {
+            Self::Code(code)
+        } else {
+            Self::Signal
+        }
+    }
+}
+
 pub struct ProcessHandler {
     env: EnvManager,
     cmd: Vec<String>,
@@ -43,10 +71,9 @@ impl ProcessHandler {
             
             // Standard Tokio kill sends SIGKILL (immediate termination).
             // TODO: implement graceful shutdown with SIGTERM first?
-            let _ = child.kill().await; 
+            child.kill().await?;
             
-            // Crucial: Wait for the process to actually exit to avoid zombie processes
-            let _ = child.wait().await;
+            child.wait().await?;
         }
 
         if self.cmd.is_empty() {
@@ -73,6 +100,18 @@ impl ProcessHandler {
         self.child = Some(child);
 
         Ok(())
+    }
+
+    pub async fn wait(&mut self) -> Result<(), ExecError> {
+        let child = self.child.as_mut().ok_or(ExecError::NoChild)?;
+        
+        let status = child.wait().await?;
+        
+        if status.success() {
+            Ok(())
+        } else {
+            Err(ExecError::from(status))
+        }
     }
     
     pub async fn start(&mut self) -> anyhow::Result<()> {

@@ -22,7 +22,7 @@ mod file;
 mod process;
 pub use file::FileHandler;
 #[cfg(feature = "exec")]
-pub use process::ProcessHandler;
+pub use process::{ProcessHandler, ExecError};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
