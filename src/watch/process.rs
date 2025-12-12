@@ -2,14 +2,16 @@ use super::{FsEvent, WatchHandler};
 use crate::env::EnvManager;
 use async_trait::async_trait;
 use secrecy::ExposeSecret;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use tracing::debug;
+use tokio::process::{Child, Command};
+use tracing::{debug, info, error};
 pub struct ProcessHandler {
     env: EnvManager,
     cmd: Vec<String>,
     env_hash: u64,
+    child: Option<Child>,
 }
 
 impl ProcessHandler {
@@ -18,9 +20,11 @@ impl ProcessHandler {
             env,
             cmd,
             env_hash: 0,
+            child: None,
         }
     }
-    fn hash_env(map: &std::collections::HashMap<String, secrecy::SecretString>) -> u64 {
+
+    fn hash_env(map: &HashMap<String, secrecy::SecretString>) -> u64 {
         let mut hasher = DefaultHasher::new();
         let mut keys: Vec<_> = map.keys().collect();
         keys.sort();
@@ -30,6 +34,51 @@ impl ProcessHandler {
             map.get(k).unwrap().expose_secret().hash(&mut hasher);
         }
         hasher.finish()
+    }
+
+    async fn restart(&mut self, env_map: &HashMap<String, secrecy::SecretString>) -> anyhow::Result<()> {
+        // Kill the old process if it exists
+        if let Some(mut child) = self.child.take() {
+            debug!("Killing old process (pid: {:?})", child.id());
+            
+            // Standard Tokio kill sends SIGKILL (immediate termination).
+            // TODO: implement graceful shutdown with SIGTERM first?
+            let _ = child.kill().await; 
+            
+            // Crucial: Wait for the process to actually exit to avoid zombie processes
+            let _ = child.wait().await;
+        }
+
+        if self.cmd.is_empty() {
+            return Ok(());
+        }
+
+        // Prepare command
+        // We use the first arg as the program, and the rest as arguments.
+        let mut command = Command::new(&self.cmd[0]);
+        command.args(&self.cmd[1..]);
+
+        // Inject secrets
+        // We must expose the secrets here to pass them to the OS process.
+        // This is the point where 'SecretString' protection ends.
+        command.envs(env_map.iter().map(|(k, v)| (k, v.expose_secret())));
+
+        // Inherit Standard IO so logs show up in the console
+        command.stdout(std::process::Stdio::inherit());
+        command.stderr(std::process::Stdio::inherit());
+
+        // Spawn
+        info!(cmd = ?self.cmd, "Spawning child process");
+        let child = command.spawn()?;
+        self.child = Some(child);
+
+        Ok(())
+    }
+    
+    pub async fn start(&mut self) -> anyhow::Result<()> {
+        let env = self.env.resolve().await?;
+        self.env_hash = Self::hash_env(&env);
+        self.restart(&env).await
     }
 }
 
@@ -53,14 +102,16 @@ impl WatchHandler for ProcessHandler {
                         events.len()
                     );
 
-                    // TODO: Trigger child process restart here?
+                    if let Err(e) = self.restart(&resolved).await {
+                        error!("Failed to restart process: {}", e);
+                    }
                 } else {
                     debug!("Files changed but resolved environment is identical; skipping restart");
                 }
             }
             Err(e) => {
                 // Log but don't crash the watcher loop
-                tracing::error!("Failed to reload environment: {}", e);
+                error!("Failed to reload environment: {}", e);
             }
         }
         Ok(())
