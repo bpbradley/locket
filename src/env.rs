@@ -20,6 +20,9 @@ pub enum EnvError {
 
     #[error("dotenv parse error: {0}")]
     Parse(String),
+
+    #[error("task join error: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
 
 #[derive(Clone)]
@@ -49,29 +52,34 @@ impl EnvManager {
 
     /// Resolves the current environment state.
     pub async fn resolve(&self) -> Result<HashMap<String, SecretString>, EnvError> {
-        let mut map = HashMap::new();
+        let secrets = self.secrets.clone();
+        let map = tokio::task::spawn_blocking(move || {
+            let mut inner = HashMap::new();
 
-        for secret in &self.secrets {
-            let content = secret.source().read().fetch()?;
+            for secret in secrets {
+                let content = secret.source().read().fetch()?;
 
-            let content = match content {
-                Some(c) => c,
-                None => continue,
-            };
+                let content = match content {
+                    Some(c) => c,
+                    None => continue,
+                };
 
-            match secret {
-                Secret::Anonymous(_) => {
-                    let cursor = std::io::Cursor::new(content.as_bytes());
-                    for item in dotenvy::from_read_iter(cursor) {
-                        let (k, v) = item.map_err(|e| EnvError::Parse(e.to_string()))?;
-                        map.insert(k, v);
+                match &secret {
+                    Secret::Anonymous(_) => {
+                        let cursor = std::io::Cursor::new(content.as_bytes());
+                        for item in dotenvy::from_read_iter(cursor) {
+                            let (k, v) = item.map_err(|e| EnvError::Parse(e.to_string()))?;
+                            inner.insert(k, v);
+                        }
+                    }
+                    Secret::Named { key, .. } => {
+                        inner.insert(key.clone(), content.into_owned());
                     }
                 }
-                Secret::Named { key, .. } => {
-                    map.insert(key.clone(), content.into_owned());
-                }
             }
-        }
+            Ok::<HashMap<String, String>, EnvError>(inner)
+        })
+        .await??;
         let mut references = Vec::new();
 
         for v in map.values() {
