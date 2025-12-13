@@ -26,16 +26,30 @@ pub struct Cli {
 pub enum Command {
     /// Start the secret sidecar agent.
     /// All secrets will be collected and materialized according to configuration.
-    /// Example: `locket run --provider bws --bws-token-file /path/to/token --secret=/path/to/secrets.yaml --secret=key=@key.pem --map /templates=/run/secrets/locket`
+    /// Example:
+    /// ```sh
+    /// locket run --provider bws --bws-token-file /path/to/token \
+    ///         --secret=/path/to/secrets.yaml \
+    ///         --secret=key=@key.pem \
+    ///         --map /templates=/run/secrets/locket
+    /// ```
+    #[clap(verbatim_doc_comment)]
     Run(Box<run::RunArgs>),
 
     /// Execute a command with secrets injected into the process environment.
-    /// Example: `locket exec --provider bws --bws-token-file /path/to/token -e locket.env -e OVERRIDE={{ reference }} -- docker compose up -d`
+    /// Example: 
+    /// ```sh
+    /// locket exec --provider bws --bws-token-file /path/to/token \
+    ///         -e locket.env -e OVERRIDE={{ reference }} \
+    ///         -- docker compose up -d
+    /// ```
     #[cfg(feature = "exec")]
+    #[clap(verbatim_doc_comment)]
     Exec(Box<exec::ExecArgs>),
 
     /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
     /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.
+    #[clap(verbatim_doc_comment)]
     Healthcheck(healthcheck::HealthArgs),
     /// Docker Compose provider API
     #[cfg(feature = "compose")]
