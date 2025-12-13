@@ -29,12 +29,12 @@ pub enum Command {
     /// 
     /// Example:
     ///
-    ///     ```sh
-    ///     locket run --provider bws --bws-token-file /path/to/token \
-    ///         --secret=/path/to/secrets.yaml \
-    ///         --secret=key=@key.pem \
-    ///         --map /templates=/run/secrets/locket
-    ///     ```
+    /// ```sh
+    /// locket run --provider bws --bws-token-file /path/to/token \
+    ///     --secret=/path/to/secrets.yaml \
+    ///     --secret=key=@key.pem \
+    ///     --map /templates=/run/secrets/locket
+    /// ```
     #[clap(verbatim_doc_comment)]
     Run(Box<run::RunArgs>),
 
@@ -42,11 +42,11 @@ pub enum Command {
     /// 
     /// Example:
     /// 
-    ///     ```sh
-    ///     locket exec --provider bws --bws-token-file /path/to/token \
-    ///         -e locket.env -e OVERRIDE={{ reference }} \
-    ///         -- docker compose up -d
-    ///     ```
+    /// ```sh
+    /// locket exec --provider bws --bws-token-file /path/to/token \
+    ///     -e locket.env -e OVERRIDE={{ reference }} \
+    ///     -- docker compose up -d
+    /// ```
     #[cfg(feature = "exec")]
     #[clap(verbatim_doc_comment)]
     Exec(Box<exec::ExecArgs>),
