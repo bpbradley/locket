@@ -1,7 +1,7 @@
 use crate::path::{PathExt, PathMapping, parse_absolute};
 use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
-use crate::secrets::{MemSize, Secret, SecretError, SecretFile, SecretSource};
+use crate::secrets::{MemSize, Secret, SecretError, SecretSource, file::SecretFile};
 use crate::template::Template;
 use crate::write::FileWriter;
 use clap::{Args, ValueEnum};

@@ -1,5 +1,5 @@
 use crate::path::{PathExt, PathMapping};
-use crate::secrets::{MemSize, SecretError, SecretFile, SecretSource};
+use crate::secrets::{MemSize, SecretError, SecretSource, file::SecretFile};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
