@@ -1,5 +1,5 @@
 use crate::path::{PathExt, PathMapping};
-use crate::secrets::types::{MemSize, SecretError, SecretFile, SecretSource};
+use crate::secrets::{MemSize, SecretError, SecretFile, SecretSource};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
@@ -350,7 +350,7 @@ mod tests {
 
         // Check that the removed file is indeed f_a
         // We check the source because SecretFile stores canonical paths
-        if let crate::secrets::types::SecretSource::File(p) = removed[0].source() {
+        if let crate::secrets::SecretSource::File(p) = removed[0].source() {
             assert_eq!(p, &f_a.canonicalize().unwrap());
         }
 

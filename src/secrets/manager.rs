@@ -1,12 +1,10 @@
 use crate::path::{PathExt, PathMapping, parse_absolute};
 use crate::provider::SecretsProvider;
-use crate::secrets::fs::SecretFileRegistry;
-use crate::secrets::types::{
-    InjectFailurePolicy, MemSize, Secret, SecretError, SecretFile, SecretSource,
-};
+use crate::secrets::registry::SecretFileRegistry;
+use crate::secrets::{MemSize, Secret, SecretError, SecretFile, SecretSource};
 use crate::template::Template;
 use crate::write::FileWriter;
-use clap::Args;
+use clap::{Args, ValueEnum};
 use secrecy::ExposeSecret;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -67,6 +65,17 @@ pub struct SecretFileOpts {
     /// File writing permissions
     #[command(flatten)]
     pub writer: FileWriter,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum, Default)]
+pub enum InjectFailurePolicy {
+    /// Injection failures are treated as errors and will abort the process
+    Error,
+    /// On injection failure, copy the unmodified secret to destination
+    #[default]
+    CopyUnmodified,
+    /// On injection failure, just log a warning and proceed with the secret ignored
+    Ignore,
 }
 
 impl SecretFileOpts {
@@ -494,7 +503,7 @@ impl SecretFileManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secrets::types::MemSize;
+    use crate::secrets::MemSize;
     use std::path::Path;
     use std::str::FromStr;
 
