@@ -26,7 +26,7 @@ pub struct Cli {
 pub enum Command {
     /// Start the secret sidecar agent.
     /// All secrets will be collected and materialized according to configuration.
-    /// 
+    ///
     /// Example:
     ///
     /// ```sh
@@ -39,9 +39,9 @@ pub enum Command {
     Run(Box<run::RunArgs>),
 
     /// Execute a command with secrets injected into the process environment.
-    /// 
+    ///
     /// Example:
-    /// 
+    ///
     /// ```sh
     /// locket exec --provider bws --bws-token-file /path/to/token \
     ///     -e locket.env -e OVERRIDE={{ reference }} \
