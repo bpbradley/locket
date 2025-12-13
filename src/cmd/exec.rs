@@ -29,6 +29,7 @@ pub struct ExecArgs {
     )]
     pub interactive: Option<bool>,
 
+
     /// Files containing environment variables which may contain secret references
     #[arg(
         long,
@@ -56,7 +57,7 @@ pub struct ExecArgs {
     )]
     pub env: Vec<Secret>,
 
-    /// Timeout duration for process termination signals.
+        /// Timeout duration for process termination signals.
     /// Unitless numbers are interpreted as seconds.
     #[arg(
         long,
@@ -82,8 +83,9 @@ pub struct ExecArgs {
     provider: Provider,
 
     /// Command to execute with secrets injected into environment
+    /// Must be the last argument(s), following a `--` separator.
     /// Example: locket exec -e locket.env -- docker compose up -d
-    #[arg(required = true, trailing_var_arg = true)]
+    #[arg(required = true, trailing_var_arg = true, help_heading = None)]
     pub cmd: Vec<String>,
 }
 

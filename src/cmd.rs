@@ -28,6 +28,7 @@ pub enum Command {
     /// All secrets will be collected and materialized according to configuration.
     Run(Box<run::RunArgs>),
 
+    /// Execute a command with secrets injected into the process environment.
     #[cfg(feature = "exec")]
     Exec(Box<exec::ExecArgs>),
 

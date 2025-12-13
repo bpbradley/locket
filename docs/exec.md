@@ -5,6 +5,8 @@
 
 ## `locket exec`
 
+Execute a command with secrets injected into the process environment
+
 ### Options
 
 | Command | Env | Default | Description |
@@ -17,6 +19,7 @@
 | `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise. Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds |
 | `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json` |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
+| `<cmd>` |  |  | Command to execute with secrets injected into environment Must be the last argument(s), following a `--` separator. Example: locket exec -e locket.env -- docker compose up -d |
 ### Provider Configuration
 
 | Command | Env | Default | Description |
@@ -47,4 +50,3 @@
 | `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
 | `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Secrets Manager machine token |
 | `--bws.token-file` | `BWS_MACHINE_TOKEN_FILE` |  | Path to file containing Bitwarden Secrets Manager machine token |
-| `<cmd>` |  |  | Command to execute with secrets injected into environment Example: locket exec -e locket.env -- docker compose up -d |
