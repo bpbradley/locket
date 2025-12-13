@@ -1,30 +1,55 @@
-use crate::secrets::{
-    path::{PathExt, PathMapping},
-    types::{MemSize, SecretError, SecretFile},
-};
-use std::collections::BTreeMap;
+use crate::path::{PathExt, PathMapping};
+use crate::secrets::{MemSize, SecretError, SecretSource, file::SecretFile};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
+#[derive(Debug, Clone)]
+enum RegistryKind {
+    /// File belongs to a directory mapping (can be rebased)
+    Mapped { mapping_idx: usize },
+    /// File was explicitly pinned via configuration (cannot be rebased)
+    Pinned,
+}
+
+#[derive(Debug, Clone)]
+struct RegistryEntry {
+    file: SecretFile,
+    kind: RegistryKind,
+}
+
 #[derive(Debug, Default)]
-pub struct SecretFs {
+pub struct SecretFileRegistry {
     mappings: Vec<PathMapping>,
-    files: BTreeMap<PathBuf, SecretFile>,
+    pinned: HashMap<PathBuf, SecretFile>,
+    files: BTreeMap<PathBuf, RegistryEntry>,
     max_file_size: MemSize,
 }
 
-impl SecretFs {
-    pub fn new(mappings: Vec<PathMapping>, max_file_size: MemSize) -> Self {
-        let mut fs = Self {
+impl SecretFileRegistry {
+    pub fn new(
+        mappings: Vec<PathMapping>,
+        secrets: Vec<SecretFile>,
+        max_file_size: MemSize,
+    ) -> Self {
+        let mut pinned = HashMap::new();
+
+        for s in secrets {
+            if let SecretSource::File(p) = s.source() {
+                pinned.insert(p.clone(), s);
+            }
+        }
+        let mut registry = Self {
             mappings,
+            pinned,
             files: BTreeMap::new(),
             max_file_size,
         };
 
-        fs.scan();
+        registry.scan();
 
-        fs
+        registry
     }
 
     fn scan(&mut self) {
@@ -41,8 +66,17 @@ impl SecretFs {
                 .filter(|e| e.file_type().is_file())
             {
                 if let Err(e) = self.upsert(entry.path()) {
-                    warn!("Failed to scan file {:?}: {}", entry.path(), e);
+                    warn!("Failed to scan mapped file {:?}: {}", entry.path(), e);
                 }
+            }
+        }
+
+        let pinned: Vec<PathBuf> = self.pinned.keys().cloned().collect();
+        for path in pinned {
+            if path.exists()
+                && let Err(e) = self.upsert(&path)
+            {
+                warn!("Failed to scan pinned file {:?}: {}", path, e);
             }
         }
     }
@@ -58,14 +92,45 @@ impl SecretFs {
     }
 
     pub fn upsert(&mut self, src: &Path) -> Result<Option<SecretFile>, SecretError> {
-        if let Some(file) = self.files.get(src) {
-            return Ok(Some(file.clone()));
+        // Check Pinned Config first
+        // If the file matches a pinned configuration, enforce that config.
+        if let Some(pinned) = self.pinned.get(src) {
+            let entry = RegistryEntry {
+                file: pinned.clone(),
+                kind: RegistryKind::Pinned,
+            };
+            self.files.insert(src.to_path_buf(), entry);
+            debug!("Tracked pinned file: {:?}", src);
+            return Ok(Some(pinned.clone()));
         }
-        if let Some(dest) = self.resolve(src) {
+
+        // Check existing
+        if let Some(entry) = self.files.get(src) {
+            return Ok(Some(entry.file.clone()));
+        }
+
+        // Find the best mapping. i.e. the longest matching prefix.
+        let map = self
+            .mappings
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| src.starts_with(m.src()))
+            .max_by_key(|(_, m)| m.src().as_os_str().len());
+
+        if let Some((idx, mapping)) = map {
+            let rel = src
+                .strip_prefix(mapping.src())
+                .map_err(|_| SecretError::Parse("path strip failed".into()))?;
+            let dest = mapping.dst().join(rel);
+
             match SecretFile::from_file(src, dest, self.max_file_size) {
                 Ok(file) => {
-                    self.files.insert(src.to_path_buf(), file.clone());
-                    debug!("Added secret file: {:?}", src);
+                    let entry = RegistryEntry {
+                        file: file.clone(),
+                        kind: RegistryKind::Mapped { mapping_idx: idx },
+                    };
+                    self.files.insert(src.to_path_buf(), entry);
+                    debug!("Tracked mapped file: {:?}", src);
                     return Ok(Some(file));
                 }
                 Err(SecretError::SourceMissing(_)) => {
@@ -87,21 +152,22 @@ impl SecretFs {
             .take_while(|(k, _)| k.starts_with(src))
             .map(|(k, _)| k.clone())
             .collect();
+
         let mut results = Vec::with_capacity(removed_keys.len());
         for key in removed_keys {
-            if let Some(file) = self.files.remove(&key) {
+            if let Some(entry) = self.files.remove(&key) {
                 debug!("Removed secret file: {:?}", key);
-                results.push(file);
+                results.push(entry.file);
             }
         }
         results
     }
 
+    /// Optimistically attempts to reflect a directory move by renaming the output directory.
+    /// Returns Some((old_output, new_output)) if the move is safe and valid.
+    /// Returns None if the move involves pinned files, crosses mappings, or implies state drift.
     pub fn try_rebase(&mut self, from: &Path, to: &Path) -> Option<(PathBuf, PathBuf)> {
-        let from_root = self.resolve(from)?;
-        let to_root = self.resolve(to)?;
-
-        // Find rebase candidates
+        // Identify all affected files in the registry
         let keys: Vec<PathBuf> = self
             .files
             .range(from.to_path_buf()..)
@@ -113,40 +179,76 @@ impl SecretFs {
             return None;
         }
 
-        // Check homogeneity
+        // Establish an anchor
+        // All moved files must belong to the same mapping for a directory rename to work.
+        let first_entry = self.files.get(&keys[0])?;
+        let reference_idx = match first_entry.kind {
+            RegistryKind::Mapped { mapping_idx } => mapping_idx,
+            RegistryKind::Pinned => return None, // Pinned files cannot be rebased via directory moves
+        };
+
+        let mapping = &self.mappings[reference_idx];
+
+        // Calculate roots to pivot
+        // Determine the relative movement within the mapping to project the output paths.
+        let rel_from = from.strip_prefix(mapping.src()).ok()?;
+        let old_root_dst = mapping.dst().join(rel_from).canon().ok()?;
+
+        let rel_to = to.strip_prefix(mapping.src()).ok()?;
+        let new_root_dst = mapping.dst().join(rel_to).absolute();
+
+        // Verification pass
+        // Ensure every file is eligible and consistent before mutating state.
         let mut updates = Vec::with_capacity(keys.len());
 
         for k in &keys {
-            let file = self.files.get(k)?;
+            let entry = self.files.get(k)?;
+
+            // Mixed mappings prevent atomic rebase
+            match entry.kind {
+                RegistryKind::Mapped { mapping_idx } if mapping_idx == reference_idx => {}
+                _ => return None,
+            }
+
             let rel = k.strip_prefix(from).ok()?;
-            if file.dest() != from_root.join(rel) {
+
+            // Check for drift
+            // i.e. the file's current destination doesn't match calculation
+            if entry.file.dest() != old_root_dst.join(rel).clean() {
                 return None;
             }
 
             // Calculate new state
             let new_k = to.join(rel).clean();
-            let new_d = to_root.join(rel).clean();
+            let new_d = new_root_dst.join(rel).clean();
+
             updates.push((k.clone(), new_k, new_d));
         }
 
         // Commit updates
+        // Update the registry state to reflect the move.
         for (old_k, new_k, new_d) in updates {
-            if self.files.remove(&old_k).is_some() {
+            if let Some(mut entry) = self.files.remove(&old_k) {
+                // Re-create SecretFile to ensure internal consistency (validating new paths)
                 match SecretFile::from_file(&new_k, new_d, self.max_file_size) {
-                    Ok(file) => {
-                        self.files.insert(new_k, file);
+                    Ok(new_file) => {
+                        entry.file = new_file;
+                        self.files.insert(new_k, entry);
                     }
                     Err(e) => {
-                        warn!("Failed to rebase file to {:?}: {}", new_k, e);
+                        warn!("Failed to rebase file entry {:?}: {}", new_k, e);
+                        // continue even on error to attempt to reach a consistent state,
+                        // rather than aborting halfway through a commit.
                     }
                 }
             }
         }
-        Some((from_root, to_root))
+
+        Some((old_root_dst, new_root_dst))
     }
 
-    pub fn iter_files(&self) -> impl Iterator<Item = &SecretFile> {
-        self.files.values()
+    pub fn iter(&self) -> impl Iterator<Item = &SecretFile> {
+        self.files.values().map(|e| &e.file)
     }
 }
 
@@ -179,7 +281,7 @@ mod tests {
         fs::write(&f_key, "data").unwrap();
 
         // Setup Logic
-        let mut fs = SecretFs {
+        let mut fs = SecretFileRegistry {
             mappings: vec![
                 PathMapping::new(&src_root, "/secrets/general"),
                 PathMapping::new(&src_secure, "/secrets/specific"),
@@ -233,7 +335,7 @@ mod tests {
         fs::write(&f_a, "").unwrap();
         fs::write(&f_aa, "").unwrap();
 
-        let mut fs = SecretFs::default();
+        let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&src_root, "/out"));
 
         fs.upsert(&f_a).unwrap();
@@ -248,7 +350,7 @@ mod tests {
 
         // Check that the removed file is indeed f_a
         // We check the source because SecretFile stores canonical paths
-        if let crate::secrets::types::SecretSource::File(p) = removed[0].source() {
+        if let crate::secrets::SecretSource::File(p) = removed[0].source() {
             assert_eq!(p, &f_a.canonicalize().unwrap());
         }
 
@@ -275,7 +377,7 @@ mod tests {
             fs::write(p, "").unwrap();
         }
 
-        let mut fs = SecretFs::default();
+        let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&src, "/out"));
 
         fs.upsert(&f_a).unwrap();
@@ -304,7 +406,7 @@ mod tests {
         let src = root.join("templates");
         fs::create_dir_all(&src).unwrap();
 
-        let mut fs = SecretFs::default();
+        let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&src, "/secrets"));
 
         // File totally outside
@@ -331,7 +433,7 @@ mod tests {
         let src = root.join("t");
         fs::create_dir_all(&src).unwrap();
 
-        let mut fs = SecretFs::default();
+        let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&src, "/s"));
 
         let input = src.join("subdir/file");
@@ -353,9 +455,10 @@ mod tests {
         let new_sub = data.join("new_sub");
 
         fs::create_dir_all(&old_sub).unwrap();
-        fs::create_dir_all(&new_sub).unwrap(); // New dir must exist
+        fs::create_dir_all(&new_sub).unwrap();
+        fs::create_dir_all(output.join("old_sub")).unwrap();
 
-        let mut fs = SecretFs::default();
+        let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&data, &output));
 
         let p_old = old_sub.join("file.txt");
@@ -380,7 +483,7 @@ mod tests {
         assert!(!fs.files.contains_key(&p_old));
 
         let new_entry = fs.files.get(&p_new).expect("new file should be tracked");
-        assert_eq!(new_entry.dest(), output.join("new_sub/file.txt"));
+        assert_eq!(new_entry.file.dest(), output.join("new_sub/file.txt"));
     }
 
     #[test]
@@ -399,7 +502,7 @@ mod tests {
         fs::create_dir_all(&folder_a).unwrap();
         fs::create_dir_all(&folder_b).unwrap();
 
-        let mut fs = SecretFs::default();
+        let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&src_a, &out_a));
         fs.mappings.push(PathMapping::new(&src_b, &out_b));
 
@@ -412,14 +515,9 @@ mod tests {
         fs::write(&f_new, "").unwrap();
 
         let res = fs.try_rebase(&folder_a, &folder_b);
-
-        assert!(res.is_some());
-        let (old_dst, new_dst) = res.unwrap();
-
-        assert_eq!(old_dst, out_a.join("folder"));
-        assert_eq!(new_dst, out_b.join("moved_folder"));
-
-        assert!(fs.files.contains_key(&f_new));
+        assert!(res.is_none());
+        assert!(fs.files.contains_key(&f_old));
+        assert!(!fs.files.contains_key(&f_new));
     }
 
     #[test]
@@ -434,7 +532,7 @@ mod tests {
         fs::create_dir_all(&tpl_secure).unwrap();
         fs::create_dir_all(&tpl_new).unwrap();
 
-        let mut fs = SecretFs::default();
+        let mut fs = SecretFileRegistry::default();
         fs.mappings.push(PathMapping::new(&tpl, "/secrets"));
         fs.mappings.push(PathMapping::new(&tpl_secure, "/vault"));
 

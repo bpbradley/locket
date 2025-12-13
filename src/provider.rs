@@ -12,6 +12,7 @@ use op::{OpConfig, OpProvider};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
 compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
@@ -107,16 +108,16 @@ pub struct ProviderSelection {
 
 impl ProviderSelection {
     /// Build a runtime provider from configuration
-    pub async fn build(&self) -> Result<Box<dyn SecretsProvider>, ProviderError> {
+    pub async fn build(&self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
         match self.kind {
             #[cfg(feature = "op")]
-            ProviderKind::Op => Ok(Box::new(OpProvider::new(self.cfg.op.clone()).await?)),
+            ProviderKind::Op => Ok(Arc::new(OpProvider::new(self.cfg.op.clone()).await?)),
             #[cfg(feature = "connect")]
-            ProviderKind::OpConnect => Ok(Box::new(
+            ProviderKind::OpConnect => Ok(Arc::new(
                 OpConnectProvider::new(self.cfg.connect.clone()).await?,
             )),
             #[cfg(feature = "bws")]
-            ProviderKind::Bws => Ok(Box::new(BwsProvider::new(self.cfg.bws.clone()).await?)),
+            ProviderKind::Bws => Ok(Arc::new(BwsProvider::new(self.cfg.bws.clone()).await?)),
         }
     }
 }

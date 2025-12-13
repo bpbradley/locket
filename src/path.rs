@@ -2,7 +2,7 @@ use crate::secrets::SecretError;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 /// Extension trait for Path to provide additional functionality
-/// and convenience methods for use within SecretFs and locket Path handling.
+/// and convenience methods for use within SecretFileRegistry and locket Path handling.
 pub trait PathExt {
     /// Cleans the path by removing redundant components like `\\`, `.`, and `..`
     fn clean(&self) -> PathBuf;
@@ -117,6 +117,10 @@ impl Default for PathMapping {
 
 pub fn parse_absolute(s: &str) -> Result<PathBuf, String> {
     Ok(Path::new(s).absolute())
+}
+
+pub fn parse_secret_path(s: &str) -> Result<crate::secrets::Secret, String> {
+    crate::secrets::Secret::from_file(s).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

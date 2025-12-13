@@ -2,14 +2,12 @@
 use crate::{
     health::StatusFile,
     logging::Logger,
-    provider::{Provider, SecretsProvider},
-    secrets::{FsEvent, SecretManager, SecretsOpts},
+    provider::Provider,
+    secrets::{SecretFileManager, SecretFileOpts},
     signal,
-    watch::{DebounceDuration, FsWatcher, WatchHandler},
+    watch::{DebounceDuration, FileHandler, FsWatcher},
 };
-use async_trait::async_trait;
 use clap::{Args, ValueEnum};
-use std::path::PathBuf;
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -36,7 +34,7 @@ pub struct RunArgs {
 
     /// Secret Management Configuration
     #[command(flatten)]
-    pub manager: SecretsOpts,
+    pub manager: SecretFileOpts,
 
     /// Debounce duration for filesystem events in watch mode.
     /// Events occurring within this duration will be coalesced into a single update
@@ -93,7 +91,13 @@ pub async fn run(args: RunArgs) -> ExitCode {
         return ExitCode::Config;
     }
 
-    let mut manager = SecretManager::new(manager);
+    let manager = match SecretFileManager::new(manager, provider) {
+        Ok(m) => m,
+        Err(e) => {
+            error!(error=%e, "failed to initialize SecretFileManager");
+            return ExitCode::Config;
+        }
+    };
 
     match manager.collisions() {
         Ok(()) => {}
@@ -103,7 +107,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         }
     };
 
-    if let Err(e) = manager.inject_all(provider.as_ref()).await {
+    if let Err(e) = manager.inject_all().await {
         error!(error=%e, "inject_all failed");
         return ExitCode::IoErr;
     }
@@ -124,40 +128,15 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let handler = SecretsWatcher {
-                secrets: &mut manager,
-                provider: provider.as_ref(),
-            };
-            let mut watcher = FsWatcher::new(debounce, handler);
+            let handler = FileHandler::new(manager);
+            let watcher = FsWatcher::new(debounce, handler);
             match watcher.run(signal::recv_shutdown()).await {
-                Ok(()) => ExitCode::Ok,
+                Ok(_) => ExitCode::Ok,
                 Err(e) => {
                     error!(error=%e, "watch errored");
                     ExitCode::IoErr
                 }
             }
         }
-    }
-}
-
-struct SecretsWatcher<'a> {
-    secrets: &'a mut SecretManager,
-    provider: &'a dyn SecretsProvider,
-}
-
-#[async_trait]
-impl<'a> WatchHandler for SecretsWatcher<'a> {
-    fn paths(&self) -> Vec<PathBuf> {
-        self.secrets
-            .options()
-            .mapping
-            .iter()
-            .map(|m| m.src().into())
-            .collect()
-    }
-
-    async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()> {
-        self.secrets.handle_fs_event(self.provider, event).await?;
-        Ok(())
     }
 }

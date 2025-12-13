@@ -42,7 +42,7 @@ cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoi
 
 [docker-test]
 description = "Run test of docker image"
-path = "tests/docker"
+path = "tests/docker/sidecar"
 cmd = "docker compose -f compose.tests.yaml -p tests up"
 
 [release-rc]

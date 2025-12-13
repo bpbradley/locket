@@ -4,7 +4,6 @@
 //! and "coalescing" (merging multiple rapid events into a single logical operation)
 //! to prevent the secret manager from thrashing.
 
-use crate::secrets::FsEvent;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use notify::{
@@ -18,6 +17,12 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
+mod file;
+#[cfg(feature = "exec")]
+mod process;
+pub use file::FileHandler;
+#[cfg(feature = "exec")]
+pub use process::{ExecError, ProcessHandler};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -34,6 +39,14 @@ pub enum WatchError {
     SourceMissing(PathBuf),
 }
 
+/// Filesystem events for SecretFileRegistry
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub enum FsEvent {
+    Write(PathBuf),
+    Remove(PathBuf),
+    Move { from: PathBuf, to: PathBuf },
+}
+
 /// Handler trait for reacting to filesystem events
 /// Implementors define what paths to watch and how to handle events on those paths.
 #[async_trait]
@@ -43,7 +56,7 @@ pub trait WatchHandler: Send + Sync {
     fn paths(&self) -> Vec<PathBuf>;
 
     /// Handle filesystem event dispatched by the watcher.
-    async fn handle(&mut self, event: FsEvent) -> anyhow::Result<()>;
+    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
 }
 
 enum ControlFlow {
@@ -81,7 +94,7 @@ impl<H: WatchHandler> FsWatcher<H> {
     /// 2. Buffer incoming filesystem events.
     /// 3. Debounce events
     /// 4. Flush coalesced events to `handler.handle()` when debounce period expires
-    pub async fn run<F>(&mut self, shutdown: F) -> Result<(), WatchError>
+    pub async fn run<F>(mut self, shutdown: F) -> Result<H, WatchError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -109,8 +122,8 @@ impl<H: WatchHandler> FsWatcher<H> {
 
             let event = tokio::select! {
                 _ = shutdown.as_mut() => {
-                    info!("shutdown signal received; exiting watcher");
-                    return Ok(());
+                    info!("shutdown signal received");
+                    break; // Exit the loop
                 }
                 signal = rx.recv() => {
                     match signal {
@@ -135,10 +148,11 @@ impl<H: WatchHandler> FsWatcher<H> {
                 }
                 ControlFlow::Break => {
                     info!("exiting watcher loop.");
-                    return Ok(());
+                    break;
                 }
             }
         }
+        Ok(self.handler)
     }
 
     /// Debounce loop to wait for a quiet period before processing events so as not to overwhelm the handler
@@ -205,10 +219,8 @@ impl<H: WatchHandler> FsWatcher<H> {
         let events: Vec<_> = self.events.drain().collect();
         debug!(count = events.len(), "processing batched fs events");
 
-        for ev in events {
-            if let Err(e) = self.handler.handle(ev).await {
-                warn!(error=?e, "failed to handle fs event");
-            }
+        if let Err(e) = self.handler.handle(events).await {
+            warn!(error=?e, "failed to handle fs events");
         }
     }
 

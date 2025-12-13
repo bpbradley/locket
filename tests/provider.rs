@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use locket::{
+    path::PathMapping,
     provider::{ProviderError, SecretsProvider},
-    secrets::{InjectFailurePolicy, PathMapping, SecretError, SecretManager, SecretsOpts},
+    secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretFileOpts},
 };
 use secrecy::SecretString;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::tempdir;
 use tracing::debug;
 
@@ -49,7 +51,7 @@ impl SecretsProvider for MockProvider {
 fn setup(
     tpl_name: &str,
     tpl_content: &str,
-) -> (tempfile::TempDir, std::path::PathBuf, SecretsOpts) {
+) -> (tempfile::TempDir, std::path::PathBuf, SecretFileOpts) {
     let tmp = tempdir().unwrap();
     let tpl_dir = tmp.path().join("templates");
     let out_dir = tmp.path().join("secrets");
@@ -58,7 +60,7 @@ fn setup(
 
     std::fs::write(tpl_dir.join(tpl_name), tpl_content).unwrap();
 
-    let opts = SecretsOpts::default()
+    let opts = SecretFileOpts::default()
         .with_mapping(vec![PathMapping::new(&tpl_dir, &out_dir)])
         .with_secret_dir(out_dir.clone());
 
@@ -74,11 +76,14 @@ async fn test_happy_path_template_rendering() {
     );
 
     // Provider has both secrets
-    let provider = MockProvider::new(vec![("mock://user", "admin"), ("mock://pass", "secret123")]);
+    let provider = Arc::new(MockProvider::new(vec![
+        ("mock://user", "admin"),
+        ("mock://pass", "secret123"),
+    ]));
 
-    let manager = SecretManager::new(opts);
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
-    manager.inject_all(&provider).await.unwrap();
+    manager.inject_all().await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
     assert_eq!(result, "user: admin\npass: secret123");
@@ -89,10 +94,10 @@ async fn test_whole_file_replacement() {
     let (_tmp, out_dir, opts) = setup("id_rsa", "mock://ssh/key");
 
     let key_content = "-----BEGIN RSA PRIVATE KEY-----...";
-    let provider = MockProvider::new(vec![("mock://ssh/key", key_content)]);
-    let manager = SecretManager::new(opts);
+    let provider = Arc::new(MockProvider::new(vec![("mock://ssh/key", key_content)]));
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
-    manager.inject_all(&provider).await.unwrap();
+    manager.inject_all().await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("id_rsa")).unwrap();
     assert_eq!(result, key_content); // Should be replaced entirely
@@ -105,10 +110,10 @@ async fn test_policy_error_aborts() {
 
     opts.policy = InjectFailurePolicy::Error;
 
-    let provider = MockProvider::new(vec![]); // Empty provider
-    let manager = SecretManager::new(opts);
+    let provider = Arc::new(MockProvider::new(vec![])); // Empty provider
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
-    let result = manager.inject_all(&provider).await;
+    let result = manager.inject_all().await;
 
     assert!(result.is_err());
 
@@ -125,11 +130,11 @@ async fn test_policy_copy_unmodified() {
 
     opts.policy = InjectFailurePolicy::CopyUnmodified;
 
-    let provider = MockProvider::new(vec![]);
-    let manager = SecretManager::new(opts);
+    let provider = Arc::new(MockProvider::new(vec![]));
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
     // Should succeed (return Ok) despite missing secret
-    manager.inject_all(&provider).await.unwrap();
+    manager.inject_all().await.unwrap();
 
     // Should contain original template text
     let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
@@ -143,10 +148,10 @@ async fn test_ignore_unknown_providers() {
     let content = "A: {{ op://vault/item }}\nB: {{ mock://valid }}";
     let (_tmp, out_dir, opts) = setup("mixed.yaml", content);
 
-    let provider = MockProvider::new(vec![("mock://valid", "value")]);
-    let manager = SecretManager::new(opts);
+    let provider = Arc::new(MockProvider::new(vec![("mock://valid", "value")]));
+    let manager = SecretFileManager::new(opts, provider).unwrap();
 
-    manager.inject_all(&provider).await.unwrap();
+    manager.inject_all().await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("mixed.yaml")).unwrap();
 

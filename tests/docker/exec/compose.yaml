@@ -1,0 +1,14 @@
+---
+name: provider
+services:
+  demo:
+    image: busybox
+    user: "1000:1000"
+    command:
+      - sh
+      - -c
+      - "while true; do env; sleep 30; done;"
+    environment:
+      - SECRET_TEXT=$TEXT
+      - SECRET_PASSWORD=$PASSWORD
+      - SECRET_KEY=$SSHKEY
