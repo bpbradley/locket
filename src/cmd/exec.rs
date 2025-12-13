@@ -29,27 +29,6 @@ pub struct ExecArgs {
     )]
     pub interactive: Option<bool>,
 
-    /// Timeout duration for process termination signals.
-    /// Unitless numbers are interpreted as seconds.
-    #[arg(
-        long,
-        env = "LOCKET_EXEC_TIMEOUT",
-        default_value_t = ProcessTimeout::default(),
-    )]
-    pub timeout: ProcessTimeout,
-
-    /// Debounce duration for filesystem events in watch mode.
-    /// Events occurring within this duration will be coalesced into a single update
-    /// so as to not overwhelm the secrets manager with rapid successive updates from
-    /// filesystem noise. Handles human-readable strings like "100ms", "2s", etc.
-    /// Unitless numbers are interpreted as milliseconds.
-    #[arg(long, env = "WATCH_DEBOUNCE", default_value_t = DebounceDuration::default())]
-    debounce: DebounceDuration,
-
-    /// Logging configuration
-    #[command(flatten)]
-    pub logger: Logger,
-
     /// Files containing environment variables which may contain secret references
     #[arg(
         long,
@@ -76,6 +55,27 @@ pub struct ExecArgs {
         action = clap::ArgAction::Append,
     )]
     pub env: Vec<Secret>,
+
+    /// Timeout duration for process termination signals.
+    /// Unitless numbers are interpreted as seconds.
+    #[arg(
+        long,
+        env = "LOCKET_EXEC_TIMEOUT",
+        default_value_t = ProcessTimeout::default(),
+    )]
+    pub timeout: ProcessTimeout,
+
+    /// Debounce duration for filesystem events in watch mode.
+    /// Events occurring within this duration will be coalesced into a single update
+    /// so as to not overwhelm the secrets manager with rapid successive updates from
+    /// filesystem noise. Handles human-readable strings like "100ms", "2s", etc.
+    /// Unitless numbers are interpreted as milliseconds.
+    #[arg(long, env = "WATCH_DEBOUNCE", default_value_t = DebounceDuration::default())]
+    debounce: DebounceDuration,
+
+    /// Logging configuration
+    #[command(flatten)]
+    pub logger: Logger,
 
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
