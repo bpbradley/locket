@@ -7,6 +7,13 @@
 
 Start the secret sidecar agent.
 All secrets will be collected and materialized according to configuration.
+Example:
+    ```sh
+    locket run --provider bws --bws-token-file /path/to/token \
+        --secret=/path/to/secrets.yaml \
+        --secret=key=@key.pem \
+        --map /templates=/run/secrets/locket
+    ```
 
 ### Options
 
