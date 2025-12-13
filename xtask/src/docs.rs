@@ -60,7 +60,7 @@ impl DocGenerator {
             let name = sub.get_name();
             let filename = format!("{}.md", name);
 
-            if let Some(about) = sub.get_long_about().or_else(|| cmd.get_about()) {
+            if let Some(about) = sub.get_about() {
                 writeln!(
                     &mut index_buffer,
                     "- [`{}`](./{}) - {}",
