@@ -8,11 +8,12 @@ use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::ExitStatus;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Error)]
 pub enum ExecError {
@@ -45,16 +46,20 @@ pub struct ProcessHandler {
     env_hash: u64,
     child: Option<Child>,
     forwarder: Option<JoinHandle<()>>,
+    interactive: bool,
+    timeout: Duration,
 }
 
 impl ProcessHandler {
-    pub fn new(env: EnvManager, cmd: Vec<String>) -> Self {
+    pub fn new(env: EnvManager, cmd: Vec<String>, interactive: bool, timeout: impl Into<Duration>) -> Self {
         ProcessHandler {
             env,
             cmd,
             env_hash: 0,
             child: None,
             forwarder: None,
+            interactive,
+            timeout: timeout.into(),
         }
     }
 
@@ -71,13 +76,10 @@ impl ProcessHandler {
     }
 
     fn spawn_forwarder(child_pid: u32) -> JoinHandle<()> {
-        let pid = Pid::from_raw(child_pid as i32);
+        // Use negative PID to target the Process Group
+        let pgid = Pid::from_raw(-(child_pid as i32));
 
         tokio::spawn(async move {
-            // Define signals to proxy
-            // We intentionally include INT/TERM here.
-            // While the main loop also catches them, forwarding them ensures
-            // the child receives the specific signal the user sent.
             let signals = vec![
                 (SignalKind::interrupt(), Signal::SIGINT, "SIGINT"),
                 (SignalKind::terminate(), Signal::SIGTERM, "SIGTERM"),
@@ -108,9 +110,8 @@ impl ProcessHandler {
 
             // Forwarding Loop
             while let Some((sig, name)) = rx.recv().await {
-                debug!("forwarding {} to child {}", name, pid);
-                if signal::kill(pid, sig).is_err() {
-                    // Child is dead... RIP. stop forwarding
+                debug!("forwarding {} to process group {}", name, pgid);
+                if signal::kill(pgid, sig).is_err() {
                     break;
                 }
             }
@@ -121,27 +122,29 @@ impl ProcessHandler {
         &mut self,
         env_map: &HashMap<String, secrecy::SecretString>,
     ) -> anyhow::Result<()> {
-        // Try to gracefully stop existing process (if it exists)
         self.stop().await;
 
         if self.cmd.is_empty() {
             return Ok(());
         }
 
-        // Prepare new command
         let mut command = Command::new(&self.cmd[0]);
         command.args(&self.cmd[1..]);
         command.envs(env_map.iter().map(|(k, v)| (k, v.expose_secret())));
-        command.stdout(std::process::Stdio::inherit());
-        command.stderr(std::process::Stdio::inherit());
+        if self.interactive {
+            command.stdin(std::process::Stdio::inherit());
+            command.stdout(std::process::Stdio::inherit());
+            command.stderr(std::process::Stdio::inherit());
+        } else {
+            command.process_group(0);
+            command.stdin(std::process::Stdio::null());
+        }
 
-        // Spawn child
         info!(cmd = ?self.cmd, "Spawning child process");
         let child = command.spawn()?;
 
-        // Spawn signal forwarder
-        if let Some(pid) = child.id() {
-            self.forwarder = Some(Self::spawn_forwarder(pid));
+        if let Some(id) = child.id() {
+            self.forwarder = Some(Self::spawn_forwarder(id));
         }
 
         self.child = Some(child);
@@ -151,10 +154,8 @@ impl ProcessHandler {
 
     pub async fn wait(&mut self) -> Result<(), ExecError> {
         let child = self.child.as_mut().ok_or(ExecError::NoChild)?;
-
         let status = child.wait().await?;
 
-        // Clean up forwarder
         if let Some(handle) = self.forwarder.take() {
             handle.abort();
         }
@@ -173,28 +174,53 @@ impl ProcessHandler {
     }
 
     pub async fn stop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            debug!("Stopping child process (pid: {:?})", child.id());
+        if let Some(handle) = self.forwarder.take() {
+            handle.abort();
+        }
 
-            // Send SIGTERM
-            if let Some(id) = child.id() {
-                let pid = Pid::from_raw(id as i32);
-                if let Err(e) = signal::kill(pid, Signal::SIGTERM) {
-                    debug!("Failed to send SIGTERM: {}", e);
-                }
+        if let Some(mut child) = self.child.take() {
+            let pgid = if self.interactive {
+                // Target the specific Process
+                child.id().map(|id| Pid::from_raw(id as i32))
+            } else {
+                // Target the Process Group
+                child.id().map(|id| Pid::from_raw(-(id as i32)))
+            };
+
+            debug!("Stopping child process group (pgid: {:?})", pgid);
+
+            if let Some(p) = pgid
+                && let Err(e) = signal::kill(p, Signal::SIGTERM)
+            {
+                debug!("Failed to send SIGTERM to group: {}", e);
             }
 
-            // Wait with Timeout TODO make configurable
-            let timeout = std::time::Duration::from_secs(5);
+            let sleep = tokio::time::sleep(self.timeout);
+            tokio::pin!(sleep);
 
-            match tokio::time::timeout(timeout, child.wait()).await {
-                Ok(_) => {
-                    debug!("Child exited gracefully");
+            let mut interrupt =
+                signal(SignalKind::interrupt()).expect("failed to install interrupt handler");
+
+            tokio::select! {
+                res = child.wait() => {
+                    match res {
+                        Ok(status) => debug!("Child exited gracefully with {}", status),
+                        Err(e) => error!("Error waiting for child: {}", e),
+                    }
                 }
-                Err(_) => {
-                    tracing::warn!("Child did not exit within 5s, sending SIGKILL");
-                    let _ = child.kill().await; // Force kill
-                    let _ = child.wait().await; // Prevent zombie
+                _ = &mut sleep => {
+                    warn!("Child timed out after {:?}, sending SIGKILL to group", self.timeout);
+                    if let Some(p) = pgid {
+                         let _ = signal::kill(p, Signal::SIGKILL);
+                    }
+                    let _ = child.wait().await;
+                }
+                _ = interrupt.recv() => {
+                    warn!("Received Ctrl+C during shutdown, sending SIGKILL to group");
+                    if let Some(p) = pgid {
+                         let _ = signal::kill(p, Signal::SIGKILL);
+                    }
+                    let _ = child.wait().await;
                 }
             }
         }

@@ -7,14 +7,34 @@ use crate::{
     watch::{DebounceDuration, ExecError, FsWatcher, ProcessHandler},
 };
 use clap::Args;
+use std::str::FromStr;
+use std::time::Duration;
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
 #[derive(Args, Debug)]
 pub struct ExecArgs {
     /// Mode of operation
-    #[arg(long = "mode", env = "LOCKET_EXEC_WATCH", default_value_t = false)]
+    #[arg(long, env = "LOCKET_EXEC_WATCH", default_value_t = false)]
     pub watch: bool,
+
+    #[arg(
+        long,
+        env = "LOCKET_EXEC_INTERACTIVE",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        require_equals = true,
+    )]
+    pub interactive: Option<bool>,
+
+    /// Timeout duration for process termination signals.
+    /// Unitless numbers are interpreted as seconds.
+    #[arg(
+        long,
+        env = "LOCKET_EXEC_TIMEOUT",
+        default_value_t = ProcessTimeout::default(),
+    )]
+    pub timeout: ProcessTimeout,
 
     /// Debounce duration for filesystem events in watch mode.
     /// Events occurring within this duration will be coalesced into a single update
@@ -76,7 +96,8 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
     let env_manager = EnvManager::new(args.env, provider);
 
     // Initialize ProcessHandler
-    let mut handler = ProcessHandler::new(env_manager, args.cmd.clone());
+    let interactive = args.interactive.unwrap_or(!args.watch);
+    let mut handler = ProcessHandler::new(env_manager, args.cmd.clone(), interactive, args.timeout);
 
     // Initial Start
     // We must start the process at least once regardless of mode.
@@ -117,3 +138,40 @@ impl From<ExecError> for ExitCode {
         ExitCode::Software
     }
 }
+
+/// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessTimeout(pub Duration);
+
+/// Defaults to milliseconds if no unit specified, otherwise uses humantime parsing.
+impl FromStr for ProcessTimeout {
+    type Err = humantime::DurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        /* Defaults to seconds if no unit specified */
+        if let Ok(s) = s.parse::<u64>() {
+            return Ok(ProcessTimeout(Duration::from_secs(s)));
+        }
+        let duration = humantime::parse_duration(s)?;
+        Ok(ProcessTimeout(duration))
+    }
+}
+
+impl std::fmt::Display for ProcessTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", humantime::format_duration(self.0))
+    }
+}
+
+impl From<ProcessTimeout> for Duration {
+    fn from(val: ProcessTimeout) -> Self {
+        val.0
+    }
+}
+
+impl Default for ProcessTimeout {
+    fn default() -> Self {
+        ProcessTimeout(Duration::from_secs(30))
+    }
+}
+
