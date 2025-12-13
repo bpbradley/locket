@@ -9,13 +9,14 @@
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--watch` | `LOCKET_EXEC_WATCH` | `false` | Mode of operation <br> **Choices:** `true`, `false` |
-| `--interactive` | `LOCKET_EXEC_INTERACTIVE` |  |  <br> **Choices:** `true`, `false` |
+| `--watch` | `LOCKET_EXEC_WATCH` | `false` | Watch mode will monitor for changes to .env files and restart the command if changes are detected <br> **Choices:** `true`, `false` |
+| `--interactive` | `LOCKET_EXEC_INTERACTIVE` |  | Run the command in interactive mode, attaching stdin/stdout/stderr. If not specified, defaults to true in non-watch mode and false in watch mode <br> **Choices:** `true`, `false` |
 | `--timeout` | `LOCKET_EXEC_TIMEOUT` | `30s` | Timeout duration for process termination signals. Unitless numbers are interpreted as seconds |
 | `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise. Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds |
 | `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json` |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
-| `--env` | `LOCKET_EXEC_ENV` |  | Secrets to be injected in environment |
+| `--env-file` | `LOCKET_ENV_FILE` |  | Files containing environment variables which may contain secret references |
+| `--env` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
 ### Provider Configuration
 
 | Command | Env | Default | Description |

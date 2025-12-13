@@ -119,6 +119,10 @@ pub fn parse_absolute(s: &str) -> Result<PathBuf, String> {
     Ok(Path::new(s).absolute())
 }
 
+pub fn parse_secret_path(s: &str) -> Result<crate::secrets::Secret, String> {
+    crate::secrets::Secret::from_file(s).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

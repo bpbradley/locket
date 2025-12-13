@@ -5,10 +5,6 @@ use crate::secrets::Secret;
 use clap::Args;
 use secrecy::ExposeSecret;
 
-fn parse_secret_path(s: &str) -> Result<Secret, String> {
-    Secret::from_file(s).map_err(|e| e.to_string())
-}
-
 #[derive(Args, Debug)]
 pub struct UpArgs {
     /// Provider configuration
@@ -17,12 +13,14 @@ pub struct UpArgs {
 
     /// Files containing environment variables which may contain secret references
     #[arg(
+        long,
         env = "LOCKET_ENV_FILE",
         value_name = "/path/to/.env",
+        alias = "env_file",
         value_delimiter = ',',
         hide_env_values = true,
         help_heading = None,
-        value_parser = parse_secret_path,
+        value_parser = crate::path::parse_secret_path,
         action = clap::ArgAction::Append,
     )]
     pub env_file: Vec<Secret>,
