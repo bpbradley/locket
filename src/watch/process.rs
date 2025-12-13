@@ -51,7 +51,12 @@ pub struct ProcessHandler {
 }
 
 impl ProcessHandler {
-    pub fn new(env: EnvManager, cmd: Vec<String>, interactive: bool, timeout: impl Into<Duration>) -> Self {
+    pub fn new(
+        env: EnvManager,
+        cmd: Vec<String>,
+        interactive: bool,
+        timeout: impl Into<Duration>,
+    ) -> Self {
         ProcessHandler {
             env,
             cmd,
