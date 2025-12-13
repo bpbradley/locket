@@ -38,6 +38,7 @@ pub enum Command {
 
     /// Execute a command with secrets injected into the process environment.
     /// Example:
+    /// <br>
     /// ```sh
     /// locket exec --provider bws \
     ///     --bws-token-file /path/to/token \
@@ -45,6 +46,7 @@ pub enum Command {
     ///     -e OVERRIDE={{ reference }} \
     ///     -- docker compose up -d
     /// ```
+    /// </br>
     #[cfg(feature = "exec")]
     Exec(Box<exec::ExecArgs>),
 
