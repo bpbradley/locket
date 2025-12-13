@@ -3,30 +3,24 @@
 > [!TIP]
 > All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
 
-## `locket compose`
-
-Docker Compose provider API
+## `locket exec`
 
 ### Options
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--project-name` | `COMPOSE_PROJECT_NAME` |  | Compose Project Name |
-
----
-
-## `locket compose up`
-
-Injects secrets into a Docker Compose service environment with `docker compose up`
-
-### Options
+| `--watch` | `LOCKET_EXEC_WATCH` | `false` | Mode of operation <br> **Choices:** `true`, `false` |
+| `--interactive` | `LOCKET_EXEC_INTERACTIVE` |  |  <br> **Choices:** `true`, `false` |
+| `--timeout` | `LOCKET_EXEC_TIMEOUT` | `30s` | Timeout duration for process termination signals. Unitless numbers are interpreted as seconds |
+| `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise. Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds |
+| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json` |
+| `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
+| `--env` | `LOCKET_EXEC_ENV` |  | Secrets to be injected in environment |
+### Provider Configuration
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--provider` | `SECRETS_PROVIDER` |  | Secrets provider <br> **Choices:** `op`, `op-connect`, `bws` |
-| `<env_file>` | `LOCKET_ENV_FILE` |  | Files containing environment variables which may contain secret references |
-| `--env` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
-| `<service>` |  |  | Service name from Docker Compose |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
@@ -52,21 +46,4 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
 | `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Secrets Manager machine token |
 | `--bws.token-file` | `BWS_MACHINE_TOKEN_FILE` |  | Path to file containing Bitwarden Secrets Manager machine token |
-
----
-
-## `locket compose down`
-
-Handler for Docker Compose `down`, but no-op because secrets are not persisted
-
-_No options._
-
-
----
-
-## `locket compose metadata`
-
-Handler for Docker Compose `metadata` command so that docker can query plugin capabilities
-
-_No options._
-
+| `<cmd>` |  |  | Command to execute with secrets injected into environment Example: locket exec -e locket.env -- docker compose up -d |
