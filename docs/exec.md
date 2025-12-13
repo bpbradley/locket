@@ -6,7 +6,9 @@
 ## `locket exec`
 
 Execute a command with secrets injected into the process environment.
+
 Example:
+
     ```sh
     locket exec --provider bws --bws-token-file /path/to/token \
         -e locket.env -e OVERRIDE={{ reference }} \

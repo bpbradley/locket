@@ -60,7 +60,7 @@ impl DocGenerator {
             let name = sub.get_name();
             let filename = format!("{}.md", name);
 
-            if let Some(about) = sub.get_about() {
+            if let Some(about) = sub.get_long_about().or_else(|| cmd.get_about()) {
                 writeln!(
                     &mut index_buffer,
                     "- [`{}`](./{}) - {}",
@@ -160,7 +160,7 @@ fn write_command_section(
 
     writeln!(writer, "## `{}`\n", display_name)?;
 
-    if let Some(about) = cmd.get_about() {
+    if let Some(about) = cmd.get_long_about().or_else(|| cmd.get_about()) {
         writeln!(writer, "{}\n", about)?;
     }
     let mut groups: IndexMap<Option<String>, Vec<&Arg>> = IndexMap::new();
