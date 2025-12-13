@@ -1,5 +1,6 @@
+use locket::path::PathMapping;
 use locket::provider::{ProviderError, SecretsProvider};
-use locket::secrets::{PathMapping, Secret, SecretError, SecretFileManager, SecretFileOpts};
+use locket::secrets::{Secret, SecretError, SecretFileManager, SecretFileOpts};
 use secrecy::SecretString;
 use std::collections::HashMap;
 use std::sync::Arc;

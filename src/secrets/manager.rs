@@ -1,6 +1,6 @@
+use crate::path::{PathExt, PathMapping, parse_absolute};
 use crate::provider::SecretsProvider;
 use crate::secrets::fs::SecretFileRegistry;
-use crate::secrets::path::{PathExt, PathMapping, parse_absolute};
 use crate::secrets::types::{
     InjectFailurePolicy, MemSize, Secret, SecretError, SecretFile, SecretSource,
 };

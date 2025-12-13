@@ -1,5 +1,5 @@
+use crate::path::PathExt;
 use crate::provider::ProviderError;
-use crate::secrets::path::PathExt;
 use clap::ValueEnum;
 use std::borrow::Cow;
 use std::collections::HashMap;

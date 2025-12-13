@@ -1,4 +1,5 @@
-use locket::secrets::{PathMapping, SecretError, SecretFileOpts};
+use locket::path::PathMapping;
+use locket::secrets::{SecretError, SecretFileOpts};
 use tempfile::tempdir;
 
 #[test]

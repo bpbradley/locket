@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use locket::{
+    path::PathMapping,
     provider::{ProviderError, SecretsProvider},
-    secrets::{InjectFailurePolicy, PathMapping, SecretError, SecretFileManager, SecretFileOpts},
+    secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretFileOpts},
 };
 use secrecy::SecretString;
 use std::collections::HashMap;

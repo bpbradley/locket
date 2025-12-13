@@ -1,4 +1,4 @@
-use crate::secrets::parse_absolute;
+use crate::path::parse_absolute;
 use clap::Args;
 use std::path::PathBuf;
 #[derive(Args, Debug)]
