@@ -26,11 +26,25 @@ pub struct Cli {
 pub enum Command {
     /// Start the secret sidecar agent.
     /// All secrets will be collected and materialized according to configuration.
-    /// Example: locket run --provider bws --bws-token-file /path/to/token --secret=/path/to/secrets.yaml --secret=key=@key.pem --map /templates=/run/secrets/locket
+    /// Example:
+    /// ```sh
+    /// locket run --provider bws \
+    ///     --bws-token-file /path/to/token \
+    ///     --secret=/path/to/secrets.yaml \
+    ///     --secret=key=@key.pem \
+    ///     --map /templates=/run/secrets/locket
+    /// ```
     Run(Box<run::RunArgs>),
 
     /// Execute a command with secrets injected into the process environment.
-    /// Example: locket exec --provider bws --bws-token-file /path/to/token -e locket.env -e OVERRIDE={{ reference }} -- docker compose up -d
+    /// Example:
+    /// ```sh
+    /// locket exec --provider bws \
+    ///     --bws-token-file /path/to/token \
+    ///     -e locket.env \
+    ///     -e OVERRIDE={{ reference }} \
+    ///     -- docker compose up -d
+    /// ```
     #[cfg(feature = "exec")]
     Exec(Box<exec::ExecArgs>),
 

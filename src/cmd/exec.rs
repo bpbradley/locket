@@ -29,7 +29,6 @@ pub struct ExecArgs {
     )]
     pub interactive: Option<bool>,
 
-
     /// Files containing environment variables which may contain secret references
     #[arg(
         long,
@@ -57,7 +56,7 @@ pub struct ExecArgs {
     )]
     pub env: Vec<Secret>,
 
-        /// Timeout duration for process termination signals.
+    /// Timeout duration for process termination signals.
     /// Unitless numbers are interpreted as seconds.
     #[arg(
         long,
