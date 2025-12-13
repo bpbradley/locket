@@ -5,7 +5,7 @@
 
 ## `locket exec`
 
-Execute a command with secrets injected into the process environment. Example: <br> ```sh locket exec --provider bws \ --bws-token-file /path/to/token \ -e locket.env \ -e OVERRIDE={{ reference }} \ -- docker compose up -d ``` </br>
+Execute a command with secrets injected into the process environment. Example: `locket exec --provider bws --bws-token-file /path/to/token -e locket.env -e OVERRIDE={{ reference }} -- docker compose up -d`
 
 ### Options
 
