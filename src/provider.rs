@@ -1,6 +1,11 @@
-//! Secrets provider implementation
+//! Secrets provider abstractions and implementations.
 //!
-//! Providers will inject secrets from templates
+//! This module defines the `SecretsProvider` trait,
+//! which abstracts over different backend secret management services for batch
+//! resolution of secret references.
+//!
+//! It also provides implementations for specific providers
+//! and a selection mechanism to choose the provider at runtime
 use async_trait::async_trait;
 #[cfg(feature = "bws")]
 use bws::{BwsConfig, BwsProvider};
@@ -67,18 +72,24 @@ pub enum ProviderError {
     },
 }
 
+/// Abstraction for a backend service that resolves secret references.
 #[async_trait]
 pub trait SecretsProvider: Send + Sync {
     /// Batch resolve a list of secret references.
     ///
-    /// The input is a list of keys found in the template (e.g. "op://vault/item/field").
-    /// Returns a Map of { Reference -> SecretValue }.
+    /// The input is a slice of unique keys found in the templates (e.g., `["op://vault/item/field", ...]`).
+    /// The implementation should return a Map of `{ Reference -> SecretValue }`.
+    ///
+    /// If a reference cannot be resolved, it should simply be omitted from the result map
+    /// rather than returning an error, allowing the template renderer to leave the tag unresolved.
     async fn fetch_map(
         &self,
         references: &[&str],
     ) -> Result<HashMap<String, SecretString>, ProviderError>;
 
-    /// Returns true if the key string looks like a reference this provider supports.
+    /// Returns `true` if the key string matches the syntax this provider supports.
+    ///
+    /// This is used to filter keys before attempting to fetch them.
     fn accepts_key(&self, key: &str) -> bool;
 }
 
@@ -97,7 +108,7 @@ pub enum ProviderKind {
 
 #[derive(Args, Debug, Clone)]
 pub struct ProviderSelection {
-    /// Secrets provider
+    /// Secrets provider backend to use.
     #[arg(long = "provider", env = "SECRETS_PROVIDER", value_enum)]
     pub kind: ProviderKind,
 

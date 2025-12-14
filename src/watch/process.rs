@@ -40,6 +40,18 @@ impl From<ExitStatus> for ExecError {
     }
 }
 
+/// Watch handler that manages a child process, restarting it
+/// when the environment changes.
+///
+/// It spawns the child process with the resolved environment
+/// from the provided `EnvManager`. When file system events are
+/// detected, it checks if the environment has changed, and if so,
+/// it restarts the child process with the new environment.
+///
+/// It also forwards signals received by the parent to the child process, or process group.
+/// There are some differences in behavior when running in interactive mode, namely that
+/// stdin/stdout/stderr are inherited directly, and signals are sent to the specific child process
+/// rather than the process group.
 pub struct ProcessHandler {
     env: EnvManager,
     cmd: Vec<String>,

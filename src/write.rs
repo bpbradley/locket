@@ -1,9 +1,16 @@
+//! Utilities for writing files atomically with explicit permissions.
+//!
+//! This module provides the `FileWriter` struct, which can write data to files
+//! using temporary files and atomic renames to ensure that consumers never
+//! see partially written files. It also ensures that the destination directories
+//! exist with the correct permissions before writing.
 use clap::Args;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+/// Utilities for writing files atomically with explicit permissions.
 #[derive(Clone, Args)]
 pub struct FileWriter {
     /// File permission mode
@@ -22,8 +29,10 @@ impl FileWriter {
         }
     }
 
-    /// Creates a temp file with specific permissions, writes data,
-    /// then atomically swaps it into place.
+    /// Writes data to a temporary file and atomically swaps it into place.
+    ///
+    /// This ensures that consumers never see a partially written file.
+    /// It also ensures the destination directory exists with the configured permissions.
     pub fn atomic_write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
         let parent = self.prepare(path)?;
 
@@ -44,7 +53,7 @@ impl FileWriter {
         Ok(())
     }
 
-    /// Streams data from source to destination using a temp file.
+    /// Streams data from source to destination using a temporary file for atomicity.
     pub fn atomic_copy(&self, from: &Path, to: &Path) -> io::Result<()> {
         let parent = self.prepare(to)?;
         let mut source = File::open(from)?;

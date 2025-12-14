@@ -1,20 +1,34 @@
+//! Filesystem path normalization and security utilities.
+//!
+//! This module provides the [`PathExt`] trait, which standardizes how `locket` handles
+//! file paths.
+//!
+//! Using these utilities prevents path traversal vulnerabilities when handling user inputs.
+
 use crate::secrets::SecretError;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
-/// Extension trait for Path to provide additional functionality
-/// and convenience methods for use within SecretFileRegistry and locket Path handling.
+
+/// Extension trait for `Path` to provide robust normalization and security checks.
 pub trait PathExt {
-    /// Cleans the path by removing redundant components like `\\`, `.`, and `..`
+    /// Logically cleans the path by resolving `.` and `..` components.
+    ///
+    /// This is a lexical operation. It does not touch the filesystem,
+    /// does not resolve symlinks, and does not verify existence.
     fn clean(&self) -> PathBuf;
-    /// Converts the path to an absolute path based on the current working directory
-    /// This method does not touch the disk so it will not ensure the file exists,
-    /// nor will it resolve symlinks. It will also clean the path.
-    /// In the event that the absolute path cannot be determined, it will
-    /// return the cleaned version of the original path.
+    /// Converts the path to an absolute path anchored to the current working directory.
+    ///
+    /// This method attempts to use `std::path::absolute` but falls back to `clean()`
+    /// if the current directory cannot be determined.
     fn absolute(&self) -> PathBuf;
-    /// Small wrapper around canonicalize that returns SecretError
-    /// instead of std::io::Error.
-    /// This will resolve symlinks and require that the path exists.
+    /// Canonicalizes the path on the filesystem.
+    ///
+    /// This operation hits the disk. It resolves all symlinks
+    /// and strictly requires that the file exists. This is the preferred method
+    /// for validating user input.
+    ///
+    /// # Errors
+    /// Returns `SecretError::SourceMissing` if the path does not exist.
     fn canon(&self) -> Result<PathBuf, SecretError>;
 }
 
@@ -57,7 +71,9 @@ impl PathExt for Path {
     }
 }
 
-/// Mapping of source path to destination path for secret files
+/// A validated mapping of a source path to a destination path.
+///
+/// Used for mapping secret templates (input) to their materialized locations (output).
 #[derive(Debug, Clone)]
 pub struct PathMapping {
     src: PathBuf,
@@ -65,12 +81,19 @@ pub struct PathMapping {
 }
 
 impl PathMapping {
+    /// Creates a new mapping with absolute paths.
+    ///
+    /// This does NOT verify existence.
     pub fn new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Self {
         Self {
             src: src.as_ref().absolute(),
             dst: dst.as_ref().absolute(),
         }
     }
+    /// Creates a new mapping where the source MUST exist.
+    ///
+    /// This calls `canon()` on the source, ensuring it is a valid path on disk.
+    /// The destination does not need to exist, so it is only made absolute.
     pub fn try_new(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<Self, SecretError> {
         let mapping = Self {
             src: src.as_ref().canon()?,
@@ -84,6 +107,7 @@ impl PathMapping {
     pub fn dst(&self) -> &Path {
         &self.dst
     }
+    /// Re-resolves the source path against the filesystem.
     pub fn resolve(&mut self) -> Result<(), SecretError> {
         self.src = self.src.canon()?;
         Ok(())

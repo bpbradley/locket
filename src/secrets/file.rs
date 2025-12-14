@@ -3,6 +3,8 @@ use crate::path::PathExt;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+/// Representation of a secret file, which contains secret references
+/// and is intended to be materialized to a specific destination path.
 #[derive(Debug, Clone)]
 pub struct SecretFile {
     source: SecretSource,

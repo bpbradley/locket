@@ -1,3 +1,8 @@
+//! Secret file registry
+//!
+//! This module defines the `SecretFileRegistry`, which maintains
+//! a mapping of secret source files to their intended output destinations
+//! based on configured path mappings and `SecretFile` definitions.
 use crate::path::{PathExt, PathMapping};
 use crate::secrets::{MemSize, SecretError, SecretSource, file::SecretFile};
 use std::collections::{BTreeMap, HashMap};
@@ -19,6 +24,14 @@ struct RegistryEntry {
     kind: RegistryKind,
 }
 
+/// Registry of secret files, tracking their source paths and intended destinations.
+///
+/// It supports operations to upsert files based on mappings,
+/// remove files or directories, resolve output paths,
+/// and optimistically rebase directories on move events.
+///
+/// The registry ensures that pinned files are respected
+/// and that mapping precedence is correctly handled to avoid collisions.
 #[derive(Debug, Default)]
 pub struct SecretFileRegistry {
     mappings: Vec<PathMapping>,

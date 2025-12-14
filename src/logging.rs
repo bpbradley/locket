@@ -1,3 +1,8 @@
+//! Logging configuration for general purpose use, with clap configuration.
+//!
+//! Supports log format (text or JSON) and log level (trace, debug, info, warn, error).
+//! Uses `tracing` and `tracing-subscriber` for implementation.
+
 use clap::{Args, ValueEnum};
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::prelude::*;

@@ -1,3 +1,16 @@
+//! 1Password Connect provider implementation.
+//! This module defines an `OpConnectProvider` that implements
+//! the `SecretsProvider` trait for fetching secrets from
+//! a 1Password Connect server.
+//!
+//! It supports resolving vault and item names to UUIDs,
+//! fetching item details, and extracting secret fields.
+//! It also includes caching for name-to-UUID resolution
+//! to minimize API calls.
+//!
+//! The provider uses the reqwest HTTP client
+//! and handles authentication via bearer tokens.
+
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use clap::Args;

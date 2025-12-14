@@ -1,3 +1,9 @@
+//! Bitwarden Secrets Manager provider implementation.
+//! This module defines a `BwsProvider` that implements
+//! the `SecretsProvider` trait for fetching secrets
+//!
+//! It uses the official Bitwarden SDK
+
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use bitwarden::{

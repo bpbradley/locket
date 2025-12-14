@@ -1,3 +1,8 @@
+//! Secret file management.
+//!
+//! This module defines the `SecretFileManager`, which is responsible for
+//! managing secret files based on file-backed templates containing secret references.
+
 use crate::path::{PathExt, PathMapping, parse_absolute};
 use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
@@ -153,6 +158,11 @@ impl Default for SecretFileOpts {
     }
 }
 
+/// Manager for secret files, responsible for resolving and materializing secrets
+/// based on templates and secret references.
+///
+/// It maintains a registry of secret files, handles file system events,
+/// and interacts with a secrets provider to fetch secret values.
 pub struct SecretFileManager {
     opts: SecretFileOpts,
     registry: SecretFileRegistry,

@@ -1,8 +1,11 @@
-//! Filesystem watch: monitor templates dir and re-apply sync on changes.
+//! Filesystem watching with debouncing and event coalescing.
 //!
-//! Internally handles the complexity of "debouncing" (waiting for a quiet period)
-//! and "coalescing" (merging multiple rapid events into a single logical operation)
-//! to prevent the secret manager from thrashing.
+//! This module providers a generic filesystem watcher, which can be used in various contexts.
+//! It handles the complexity of "debouncing" (waiting for a quiet period)
+//! and "coalescing" (merging multiple rapid events, like Create+Modify)
+//! to prevent the secret manager from thrashing or performing redundant updates.
+//! Implementers provide a `WatchHandler` trait to specify which paths to watch
+//! and how to handle the resulting events.
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -48,14 +51,15 @@ pub enum FsEvent {
 }
 
 /// Handler trait for reacting to filesystem events
-/// Implementors define what paths to watch and how to handle events on those paths.
 #[async_trait]
 pub trait WatchHandler: Send + Sync {
-    /// Return the list of paths to monitor.
-    /// Files must exist prior to starting the watcher.
+    /// Returns the list of paths to monitor.
+    ///
+    /// Note: Files must exist prior to starting the watcher to be watched successfully.
+    /// Non-existent paths will be rejected with WatchError::SourceMissing.
     fn paths(&self) -> Vec<PathBuf>;
 
-    /// Handle filesystem event dispatched by the watcher.
+    /// Process a batch of coalesced filesystem events which occured within the debounce window.
     async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
 }
 
@@ -64,10 +68,7 @@ enum ControlFlow {
     Break,
 }
 
-/// Filesystem watcher that monitors specified paths and dispatches events to a handler.
-///
-/// This struct owns the `notify` watcher and manages the lifecycle of event
-/// collection, debouncing, and flushing.
+/// A Filesystem watcher that manages the lifecycle of event collection, debouncing, and flushing.
 pub struct FsWatcher<H: WatchHandler> {
     handler: H,
     debounce: Duration,
@@ -78,7 +79,7 @@ impl<H: WatchHandler> FsWatcher<H> {
     /// Create a new FsWatcher.
     ///
     /// * `debounce`: The quiet period required before flushing events.
-    /// * `handler`: Operational logic to execute on filesystem events.
+    /// * `handler`: The logic to execute when events occur.
     pub fn new(debounce: impl Into<Duration>, handler: H) -> Self {
         Self {
             handler,
@@ -89,11 +90,14 @@ impl<H: WatchHandler> FsWatcher<H> {
 
     /// Run the watcher loop until `shutdown` resolves.
     ///
-    /// This function blocks the current task. It will:
+    /// This blocks the current task. It will:
     /// 1. Register watches on all paths provided by the handler.
-    /// 2. Buffer incoming filesystem events.
-    /// 3. Debounce events
-    /// 4. Flush coalesced events to `handler.handle()` when debounce period expires
+    /// 2. Buffer incoming events.
+    /// 3. Wait for the `debounce` duration to pass without new events.
+    /// 4. Flush the coalesced events to `handler.handle()`.
+    ///
+    /// # Errors
+    /// Returns `WatchError` if the underlying `notify` watcher fails or paths are missing.
     pub async fn run<F>(mut self, shutdown: F) -> Result<H, WatchError>
     where
         F: Future<Output = ()> + Send + 'static,

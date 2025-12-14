@@ -1,3 +1,11 @@
+//! Core primitives for secret management and definition.
+//!
+//! This module defines the `Secret` type, which abstracts over the source of a secret
+//! (i.e literal string, file path) and its identification (named vs. anonymous).
+//!
+//! It also handles the low-level "reading" mechanics via `SecretSource` and `SourceReader`,
+//! ensuring that file reads are memory-limited.
+
 use crate::path::PathExt;
 use crate::provider::ProviderError;
 use std::borrow::Cow;
@@ -55,20 +63,35 @@ pub enum SecretError {
     Parse(String),
 }
 
+/// The primitive definition of a secret, which is ultimately responsible for holding
+/// secret reference data.
+///
+/// It also holds additional context which indicates whether the secret is named (i.e.
+/// has an explicit key) or anonymous (no key, just a source).
+///
+/// The consumer of the secret is responsible for interpreting the use context.
+/// For example, in the SecretFileManager, anonymous secrets are treated the same as Named
+/// file backed secrets, except the key is derived from the file name.
+/// However in the EnvManager, anonymous secrets are treated as .env files.
 #[derive(Debug, Clone)]
 pub enum Secret {
-    /// An anonymous secret source.
-    /// The consumer decides how to handle it.
-    /// Input: "path/to/file" or "@path/to/file"
+    /// An anonymous secret source (e.g., a file path or string literal)
+    ///
+    /// The consumer decides how to handle the secret the context
+    ///
+    /// Input format: usually `"path/to/file"` or `"@path/to/file"`
     Anonymous(SecretSource),
 
     /// A named secret with an explicit key.
-    /// Input: "KEY=VALUE" or "KEY=@path/to/file"
+    ///
+    /// Input format: `"KEY=VALUE"` or `"KEY=@path/to/file"`
     Named { key: String, source: SecretSource },
 }
 
 impl Secret {
-    /// Creates a Named secret from a Key/Value pair.
+    /// Creates a Named secret from a Key/Value pair string.
+    ///
+    /// If `val` starts with `@`, it is treated as a file path.
     fn from_kv(key: String, val: String) -> Result<Self, SecretError> {
         // If val starts with @, it's a file source. Otherwise, literal.
         let source = if let Some(path) = val.strip_prefix('@') {
@@ -80,17 +103,18 @@ impl Secret {
         Ok(Self::Named { key, source })
     }
 
+    /// Creates an Anonymous secret from a file path.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, SecretError> {
         let source = SecretSource::file(path)?;
         Ok(Self::Anonymous(source))
     }
 
-    /// Helper to batch convert a HashMap into Named secrets
+    /// Helper to batch convert a Map into Named secrets.
     pub fn try_from_map(map: HashMap<String, String>) -> Result<Vec<Self>, SecretError> {
         map.into_iter().map(|(k, v)| Self::from_kv(k, v)).collect()
     }
 
-    /// Utility to access the inner source regardless of variant.
+    /// Access the inner source definition.
     pub fn source(&self) -> &SecretSource {
         match self {
             Secret::Anonymous(s) => s,
@@ -125,11 +149,12 @@ impl FromStr for Secret {
     }
 }
 
+/// The origin of the secret template content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretSource {
-    /// Template loaded from a file path
+    /// Template loaded from a file path on disk.
     File(PathBuf),
-    /// Template loaded from a string literal
+    /// Template provided as a raw string literal.
     Literal {
         label: Option<String>,
         template: String,
@@ -137,22 +162,32 @@ pub enum SecretSource {
 }
 
 impl SecretSource {
+    /// Create a source from a file path.
+    ///
+    /// # Errors
+    /// Returns error if the path cannot be canonicalized (does not exist).
     pub fn file(path: impl AsRef<Path>) -> Result<Self, SecretError> {
         let canon = path.as_ref().canon()?;
         Ok(Self::File(canon))
     }
+
+    /// Create a source from a string literal.
     pub fn literal(label: impl Into<String>, text: impl Into<String>) -> Self {
         Self::Literal {
             label: Some(label.into()),
             template: text.into(),
         }
     }
+
+    /// Returns a reader to fetch the content.
     pub fn read(&self) -> SourceReader<'_> {
         SourceReader {
             source: self,
             max_size: MemSize::MAX,
         }
     }
+
+    /// Returns a label describing the source.
     pub fn label(&self) -> Cow<'_, str> {
         match self {
             Self::File(p) => p.to_string_lossy(),
@@ -161,6 +196,8 @@ impl SecretSource {
             }
         }
     }
+
+    /// If the source is a file, returns its path.
     pub fn path(&self) -> Option<&Path> {
         match self {
             SecretSource::File(p) => Some(p),
@@ -169,23 +206,25 @@ impl SecretSource {
     }
 }
 
-impl From<PathBuf> for SecretSource {
-    fn from(p: PathBuf) -> Self {
-        Self::File(p)
-    }
-}
-
+/// Reader for fetching secret source content.
 pub struct SourceReader<'a> {
     source: &'a SecretSource,
     max_size: MemSize,
 }
 
 impl<'a> SourceReader<'a> {
+    /// Apply a maximum size limit (in bytes) to the read operation.
+    /// Because the reader buffers the entire source into memory, this may be necessary for consumers
+    /// to avoid excessive memory usage.
     pub fn limit(mut self, size: MemSize) -> Self {
         self.max_size = size;
         self
     }
 
+    /// Fetches the content.
+    ///
+    /// # Errors
+    /// Returns `SecretError::SourceTooLarge` if the file exceeds the configured limit.
     pub fn fetch(self) -> Result<Option<Cow<'a, str>>, SecretError> {
         match self.source {
             SecretSource::File(path) => match std::fs::metadata(path) {

@@ -1,3 +1,7 @@
+//! Signal handling for graceful shutdown.
+//!
+//! Handles SIGTERM and SIGINT so that indefinitely running tasks
+//! can use them to trigger exit for a graceful shutdown.
 use tracing::info;
 
 /// Blocks until a shutdown signal is received.

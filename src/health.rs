@@ -1,3 +1,8 @@
+//! Healthcheck probe for the `locket run` sidecar service.
+//!
+//! The health is determined by the presence of a "ready" status file,
+//! which is created when all secrets have been successfully materialized.
+//! If the file is absent, the sidecar is considered unhealthy.
 use crate::path::parse_absolute;
 use clap::Args;
 use std::path::PathBuf;

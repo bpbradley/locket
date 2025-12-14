@@ -1,4 +1,12 @@
 //! 1password (op) based provider implementation
+//! This module defines an `OpProvider` that implements
+//! the `SecretsProvider` trait for fetching secrets
+//!
+//! It interacts with the 1Password CLI tool (`op`)
+//! to retrieve secrets based on provided references.
+//!
+//! The provider supports authentication via service account tokens
+//! and can be configured with an optional config directory.
 
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;

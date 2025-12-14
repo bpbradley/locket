@@ -1,3 +1,7 @@
+//! Main entry point for the secret-sidecar binary.
+//!
+//! This binary provides the `locket` command-line interface,
+//! and otherwise serves as a thin dispatch layer for `locket`
 use clap::Parser;
 use locket::cmd;
 use locket::cmd::{Cli, Command};

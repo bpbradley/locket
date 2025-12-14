@@ -1,3 +1,9 @@
+//! Template parsing and rendering for secret references.
+//!
+//! This module provides the `Template` struct, which can parse text
+//! containing `{{ ... }}` tags representing secret references.
+//! It can extract the keys used in the template and render the
+//! template by replacing tags with actual secret values, provided by the caller.
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -5,6 +11,7 @@ use std::collections::HashSet;
 ///
 /// This struct is responsible for parsing the `{{ ... }}` syntax
 /// and rendering the template with provided secret values.
+/// It is designed to be zero-allocation when no tags are present.
 #[derive(Debug, Clone, Copy)]
 pub struct Template<'a> {
     source: &'a str,
@@ -26,6 +33,10 @@ impl<'a> Template<'a> {
         self.iter_tags().map(|(_, key)| key).collect()
     }
 
+    /// Renders the template using a closure to resolve keys.
+    ///
+    /// If a key resolves to `Some(value)`, the tag is replaced.
+    /// If it resolves to `None`, the tag is left literally in the output.
     pub fn render_with<F, S>(&self, lookup: F) -> Cow<'a, str>
     where
         F: Fn(&str) -> Option<S>,
@@ -73,8 +84,21 @@ impl<'a> Template<'a> {
 
     /// Render the template by replacing tags with values provided in the `map`.
     ///
-    /// * If a key is present in the map, the entire tag `{{ key }}` is replaced by the value.
-    /// * If a key is NOT present in the map, the tag is left strictly unmodified
+    /// * If a key is present in the map, the entire tag `{{ key }}` is replaced.
+    /// * If a key is NOT present, the tag is left unmodified.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use locket::template::Template;
+    /// use std::collections::HashMap;
+    ///
+    /// let tpl = Template::new("User: {{ user }}");
+    /// let mut map = HashMap::new();
+    /// map.insert("user".to_string(), "admin");
+    ///
+    /// assert_eq!(tpl.render(&map), "User: admin");
+    /// ```
     pub fn render<S>(&self, values: &std::collections::HashMap<String, S>) -> Cow<'a, str>
     where
         S: AsRef<str>,

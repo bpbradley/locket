@@ -1,3 +1,10 @@
+//! Docker Compose provider communication and error handling.
+//!
+//! This module implements the communication protocol
+//! used by Docker Compose to interact with provider plugins.
+//! It defines structured messages for info, error, debug, and environment variable setting.
+//! It also defines a `ComposeError` enum for error handling
+//! and a `ComposeMsg` struct for emitting messages to stdout in the expected JSON format.
 use crate::provider::ProviderError;
 use crate::secrets::SecretError;
 use serde::Serialize;

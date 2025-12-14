@@ -1,5 +1,14 @@
-use clap::{Parser, Subcommand};
+//! CLI entry point and subcommand dispatch.
+//!
+//! This module defines the top-level `locket` command-line interface.
+//! It dispatches execution to specific handlers:
+//!
+//! * **Run**: Sidecar mode (`locket run`).
+//! * **Exec**: Process injection wrapper (`locket exec`).
+//! * **Healthcheck**: Health probe for sidecar
+//! * **Compose**: Docker Compose provider integration.
 
+use clap::{Parser, Subcommand};
 #[cfg(feature = "compose")]
 mod compose;
 #[cfg(feature = "exec")]

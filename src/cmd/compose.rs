@@ -1,3 +1,10 @@
+//! Handlers for Docker Compose Provider service
+//!
+//! Provider services are expected to handle `up` and `down` commands,
+//! to be invoked by `docker compose` CLI prior to starting or stopping services.
+//! This also implemented the optional `metadata` command, which allows Docker
+//! to query the provider for its capabilities.
+//! The metadata is derived from clap configuration on-demand.
 use clap::{Args, Subcommand};
 
 pub mod down;
