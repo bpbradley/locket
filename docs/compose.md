@@ -23,7 +23,7 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider <br> **Choices:** `op`, `op-connect`, `bws` |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br> **Choices:** `op`, `op-connect`, `bws` |
 | `--env-file` | `LOCKET_ENV_FILE` |  | Files containing environment variables which may contain secret references |
 | `--env` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
 | `<service>` |  |  | Service name from Docker Compose |

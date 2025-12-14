@@ -15,10 +15,11 @@
 ## Overview
 locket is a small CLI tool, packaged as a tiny rootless and distroless Docker image, designed to orchestrate secrets for dependent applications and services. locket is designed to work with most secrets providers, and it will orchestrate the retrieval of secrets and injection of them into dependent services. locket can help keep sensitive files off disk completely in tmpfs, or just somewhere out of revision control.
 
-Currently, locket operates in two modes for two distinct purposes.
+Currently, locket supports the following modes
 
-1. [Sidecar mode](#sidecar-mode): Inject secrets into configuration files stored in a shared, ephemeral tmpfs volume. locket will render files with secret references replaced with actual secrets so that dependent services can use them.
-1. [Provider mode](#provider-mode): locket can be installed as a Docker CLI plugin, and it will inject secrets directly into the dependent process enviornment before it starts.
+1. [Sidecar](#sidecar-mode): Inject secrets into configuration files stored in a shared, ephemeral tmpfs volume. locket will render files with secret references replaced with actual secrets so that dependent services can use them.
+1. [Provider](#provider-mode): locket can be installed as a Docker CLI plugin, and it will inject secrets directly into the dependent process enviornment before it starts.
+1. [Orchestrator](#orchestration): locket can be installed on the host, and `locket exec` is able to manage a specified subcommand, injecting secrets into its process environment. It can also watch for changes to environment files, and restart the dependent service automatically.
 
 ## Providers
 
@@ -188,6 +189,55 @@ Otherwise, install the prebuilt binary directly for your architecture. The scrip
 1. Symlink locket -> cli-plugins/locket `ln -sf $(which locket) ~/.docker/cli-plugins/docker-locket`
 1. Confirm docker sees it. `docker info | grep locket`
 
+## Orchestration
+
+Process orchestration is achievable via the `locket exec` command, which allows locket to act as a parent process / supervisor for a specified subcommand. It resolves secrets from your templates or `.env` files and injects them directly into the environment of a subprocess.
+
+Optionally, the `--watch` flag can be provided so that locket will watch for changes to any
+.env files provided, and restart the child process or process group. 
+
+Full configuration reference available at [docs/exec.md](./docs/exec.md)
+
+> [!IMPORTANT]
+> locket must be installed on the host system to use this mode. Follow the [steps here](#install-prebuilt-binaries)
+
+### Basic Usage
+
+Simply wrap your command with `locket exec`. You can supply secrets via individual files, `.env` files, or inline arguments.
+
+```bash
+locket exec \
+    --provider bws \
+    --bws.token-file /path/to/token \
+    --env .env \
+    --env .env.override \
+    --env MY_SECRET={{reference}}\
+    -- docker compose up -d
+```
+Now, any provided env variables will be available to docker, so your compose can
+reference `$MY_SECRET` for example, and it will have the resolved secret available, without ever needing it on disk or in host environment.
+
+### Interactive Example
+
+```sh
+locket exec \
+  --provider bws \
+  --bws.token-file /etc/tokens/bws \
+  -e MY_SECRET={{3832b656-a93b-45ad-bdfa-b267016802c3}} \
+  -- python3
+
+2025-12-14T19:29:10.126886Z  INFO Starting locket v0.14.0 `exec` service 
+2025-12-14T19:29:10.708684Z  INFO resolving environment and starting process...
+2025-12-14T19:29:10.709115Z  INFO batch fetching secrets count=1
+2025-12-14T19:29:10.839831Z  INFO Spawning child process cmd=["python3"]
+Python 3.11.2 (main, Apr 28 2025, 14:11:48) [GCC 12.2.0] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import os
+>>> os.environ["MY_SECRET"]
+'ABB80C10E50A96B3CE9480D880B2CAED1A7D205A'
+>>> 
+```
+
 ## Example: Hot-Reloading Traefik configurations with Secrets
 
 Traefik supports Dynamic Configuration via files, which it watches for changes. By pairing Traefik with locket, you can inject secrets (like Dashboard credentials, TLS certificates, or middleware auth) into your configuration files and have Traefik hot-reload them automatically without a restart.
@@ -271,9 +321,9 @@ volumes:
 ### Before v1.0.0
 
 1. Have support for at least 4 providers
-1. **exec Command**: A wrapper mode (`locket exec --env .env -- docker compose up -d`) that injects secrets into the child process environment without writing files.
 1. **Templating Engine**: Adding attributes to the secret reference which can transform secrets before injection. For example `{{ secret_reference | base64 }}` to encode the secret as base64, or `{{ secret_reference | totp }}` to interpret the secret as a totp code.
 
 ### Beyond
 
+1. **Docker Engine Plugin**: Support for locket as a native Docker Engine plugin will allow direct creation of Docker volumes using locket.
 1. **Swarm Operator**: Native integration for Docker Swarm secrets.

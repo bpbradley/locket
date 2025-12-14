@@ -37,7 +37,7 @@ locket run --provider bws --bws-token-file /path/to/token \
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider <br> **Choices:** `op`, `op-connect`, `bws` |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br> **Choices:** `op`, `op-connect`, `bws` |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
