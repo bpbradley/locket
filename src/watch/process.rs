@@ -57,6 +57,7 @@ pub struct ProcessHandler {
     cmd: Vec<String>,
     env_hash: u64,
     child: Option<Child>,
+    pgid: Option<Pid>,
     forwarder: Option<JoinHandle<()>>,
     interactive: bool,
     timeout: Duration,
@@ -74,6 +75,7 @@ impl ProcessHandler {
             cmd,
             env_hash: 0,
             child: None,
+            pgid: None,
             forwarder: None,
             interactive,
             timeout: timeout.into(),
@@ -92,10 +94,7 @@ impl ProcessHandler {
         hasher.finish()
     }
 
-    fn spawn_forwarder(child_pid: u32) -> JoinHandle<()> {
-        // Use negative PID to target the Process Group
-        let pgid = Pid::from_raw(-(child_pid as i32));
-
+    fn spawn_forwarder(pgid: Pid) -> JoinHandle<()> {
         tokio::spawn(async move {
             let signals = vec![
                 (SignalKind::interrupt(), Signal::SIGINT, "SIGINT"),
@@ -127,7 +126,7 @@ impl ProcessHandler {
 
             // Forwarding Loop
             while let Some((sig, name)) = rx.recv().await {
-                debug!("forwarding {} to process group {}", name, pgid);
+                debug!("forwarding {} to process {}", name, pgid);
                 if signal::kill(pgid, sig).is_err() {
                     break;
                 }
@@ -161,7 +160,13 @@ impl ProcessHandler {
         let child = command.spawn()?;
 
         if let Some(id) = child.id() {
-            self.forwarder = Some(Self::spawn_forwarder(id));
+            let pid = if self.interactive {
+                Pid::from_raw(id as i32)
+            } else {
+                Pid::from_raw(-(id as i32))
+            };
+            self.pgid = Some(pid);
+            self.forwarder = Some(Self::spawn_forwarder(pid));
         }
 
         self.child = Some(child);
@@ -195,21 +200,21 @@ impl ProcessHandler {
             handle.abort();
         }
 
-        if let Some(mut child) = self.child.take() {
-            let pgid = if self.interactive {
-                // Target the specific Process
-                child.id().map(|id| Pid::from_raw(id as i32))
-            } else {
-                // Target the Process Group
-                child.id().map(|id| Pid::from_raw(-(id as i32)))
-            };
+        let pgid = self.pgid.take();
 
+        if let Some(mut child) = self.child.take() {
             debug!("Stopping child process group (pgid: {:?})", pgid);
 
-            if let Some(p) = pgid
-                && let Err(e) = signal::kill(p, Signal::SIGTERM)
-            {
-                debug!("Failed to send SIGTERM to group: {}", e);
+            if let Some(p) = pgid {
+                let sig = if self.interactive { 
+                    Signal::SIGINT 
+                } else { 
+                    Signal::SIGTERM 
+                };
+
+                if let Err(e) = signal::kill(p, sig) {
+                    debug!("Failed to send stop signal: {}", e);
+                }
             }
 
             let sleep = tokio::time::sleep(self.timeout);
