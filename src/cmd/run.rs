@@ -122,14 +122,14 @@ pub async fn run(args: RunArgs) -> ExitCode {
         RunMode::OneShot => ExitCode::Ok,
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
-            signal::recv_shutdown().await;
+            signal::recv_shutdown(false).await;
 
             info!("shutdown complete");
             ExitCode::Ok
         }
         RunMode::Watch => {
             let watcher = FsWatcher::new(debounce, manager);
-            match watcher.run(signal::recv_shutdown()).await {
+            match watcher.run(signal::recv_shutdown(false)).await {
                 Ok(_) => ExitCode::Ok,
                 Err(e) => {
                     error!(error=%e, "watch errored");

@@ -94,9 +94,9 @@ impl ProcessHandler {
         hasher.finish()
     }
 
-    fn spawn_forwarder(pgid: Pid) -> JoinHandle<()> {
+    fn spawn_forwarder(pgid: Pid, interactive: bool) -> JoinHandle<()> {
         tokio::spawn(async move {
-            let signals = vec![
+            let mut signals = vec![
                 (SignalKind::interrupt(), Signal::SIGINT, "SIGINT"),
                 (SignalKind::terminate(), Signal::SIGTERM, "SIGTERM"),
                 (SignalKind::hangup(), Signal::SIGHUP, "SIGHUP"),
@@ -105,6 +105,12 @@ impl ProcessHandler {
                 (SignalKind::user_defined2(), Signal::SIGUSR2, "SIGUSR2"),
                 (SignalKind::window_change(), Signal::SIGWINCH, "SIGWINCH"),
             ];
+
+            // In interactive mode, we don't forward SIGINT and SIGQUIT
+            // as they are handled directly by stdin in interactive mode.
+            if interactive {
+                signals.retain(|(_, sig, _)| *sig != Signal::SIGINT && *sig != Signal::SIGQUIT);
+            }
 
             let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
@@ -166,7 +172,7 @@ impl ProcessHandler {
                 Pid::from_raw(-(id as i32))
             };
             self.pgid = Some(pid);
-            self.forwarder = Some(Self::spawn_forwarder(pid));
+            self.forwarder = Some(Self::spawn_forwarder(pid, self.interactive));
         }
 
         self.child = Some(child);
@@ -205,16 +211,10 @@ impl ProcessHandler {
         if let Some(mut child) = self.child.take() {
             debug!("Stopping child process group (pgid: {:?})", pgid);
 
-            if let Some(p) = pgid {
-                let sig = if self.interactive { 
-                    Signal::SIGINT 
-                } else { 
-                    Signal::SIGTERM 
-                };
-
-                if let Err(e) = signal::kill(p, sig) {
-                    debug!("Failed to send stop signal: {}", e);
-                }
+            if let Some(p) = pgid
+                && let Err(e) = signal::kill(p, Signal::SIGTERM)
+            {
+                debug!("Failed to send stop signal: {}", e);
             }
 
             let sleep = tokio::time::sleep(self.timeout);
