@@ -5,7 +5,7 @@ use crate::{
     provider::Provider,
     secrets::{SecretFileManager, SecretFileOpts},
     signal,
-    watch::{DebounceDuration, FileHandler, FsWatcher},
+    watch::{DebounceDuration, FsWatcher},
 };
 use clap::{Args, ValueEnum};
 use sysexits::ExitCode;
@@ -128,8 +128,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let handler = FileHandler::new(manager);
-            let watcher = FsWatcher::new(debounce, handler);
+            let watcher = FsWatcher::new(debounce, manager);
             match watcher.run(signal::recv_shutdown()).await {
                 Ok(_) => ExitCode::Ok,
                 Err(e) => {

@@ -8,7 +8,9 @@ use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
 use crate::secrets::{MemSize, Secret, SecretError, SecretSource, file::SecretFile};
 use crate::template::Template;
+use crate::watch::{FsEvent, WatchHandler};
 use crate::write::FileWriter;
+use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use secrecy::ExposeSecret;
 use std::borrow::Cow;
@@ -376,7 +378,7 @@ impl SecretFileManager {
         Ok(())
     }
 
-    pub fn handle_remove(&mut self, src: &Path) -> Result<(), SecretError> {
+    fn handle_remove(&mut self, src: &Path) -> Result<(), SecretError> {
         let removed = self.registry.remove(&src.clean());
         if removed.is_empty() {
             debug!(
@@ -439,7 +441,7 @@ impl SecretFileManager {
         }
     }
 
-    pub async fn handle_move(&mut self, old: &Path, new: &Path) -> Result<(), SecretError> {
+    async fn handle_move(&mut self, old: &Path, new: &Path) -> Result<(), SecretError> {
         let from_clean = old.clean();
         let to_clean = new.canon().unwrap_or_else(|_| new.absolute());
 
@@ -481,7 +483,7 @@ impl SecretFileManager {
         Ok(())
     }
 
-    pub async fn handle_write(&mut self, src: &Path) -> Result<(), SecretError> {
+    async fn handle_write(&mut self, src: &Path) -> Result<(), SecretError> {
         let src = src.clean();
         if src.is_dir() {
             debug!(?src, "directory write event; scanning for children");
@@ -504,6 +506,29 @@ impl SecretFileManager {
             }
             None => {
                 // File ignored
+            }
+        }
+        Ok(())
+    }
+}
+
+/// File system watch handler for SecretFileManager.
+///
+/// It responds to file system events by updating or removing
+/// the corresponding secret files as needed. Its purpose is to
+/// reflect changes in template source files to the managed secret files.
+#[async_trait]
+impl WatchHandler for SecretFileManager {
+    fn paths(&self) -> Vec<PathBuf> {
+        self.sources()
+    }
+
+    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()> {
+        for event in events {
+            match event {
+                FsEvent::Write(src) => self.handle_write(&src).await?,
+                FsEvent::Remove(src) => self.handle_remove(&src)?,
+                FsEvent::Move { from, to } => self.handle_move(&from, &to).await?,
             }
         }
         Ok(())

@@ -20,10 +20,8 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
-mod file;
 #[cfg(feature = "exec")]
 mod process;
-pub use file::FileHandler;
 #[cfg(feature = "exec")]
 pub use process::{ExecError, ProcessHandler};
 
