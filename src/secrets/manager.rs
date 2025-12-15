@@ -209,9 +209,8 @@ impl SecretFileManager {
     }
 
     pub fn sources(&self) -> Vec<PathBuf> {
-        let pinned = self.iter_secrets().filter_map(|f| match f.source() {
-            SecretSource::File(p) => Some(p.clone()),
-            _ => None,
+        let pinned = self.registry.iter().filter_map(|f| {
+            f.source().path().map(|p| p.to_path_buf())
         });
 
         let mapped = self.opts.mapping.iter().map(|m| m.src().to_path_buf());
