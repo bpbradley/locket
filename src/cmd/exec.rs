@@ -145,7 +145,19 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
         tokio::select! {
             res = handler.wait() => {
                 match res {
-                    Ok(_) => ExitCode::Ok,
+                    Ok(status) => {
+                        if status.success() {
+                            ExitCode::Ok
+                        } else {
+                            if let Some(code) = status.code() {
+                                error!("Process exited with code {}", code);
+                                ExitCode::Software
+                            } else {
+                                error!("Process terminated by signal");
+                                ExitCode::Software
+                            }
+                        }
+                    }
                     Err(e) => {
                         error!(error = %e, "process execution failed");
                         e.into()

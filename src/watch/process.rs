@@ -9,12 +9,11 @@ use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::ExitStatus;
-use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::process::Command;
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::Notify;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -62,7 +61,7 @@ pub struct ProcessHandler {
     target: Option<Pid>,
     forwarder: Option<JoinHandle<()>>,
     monitor: Option<JoinHandle<()>>,
-    exit_notify: Arc<Notify>,
+    exit_rx: watch::Receiver<Option<ExitStatus>>,
     interactive: bool,
     timeout: Duration,
 }
@@ -74,6 +73,7 @@ impl ProcessHandler {
         interactive: bool,
         timeout: impl Into<Duration>,
     ) -> Self {
+        let (_, exit_rx) = watch::channel(None);
         ProcessHandler {
             env,
             cmd,
@@ -81,7 +81,7 @@ impl ProcessHandler {
             target: None,
             forwarder: None,
             monitor: None,
-            exit_notify: Arc::new(Notify::new()),
+            exit_rx,
             interactive,
             timeout: timeout.into(),
         }
@@ -182,16 +182,14 @@ impl ProcessHandler {
             self.forwarder = Some(Self::spawn_forwarder(pid, self.interactive));
         }
 
-        let notify = Arc::new(Notify::new());
-        self.exit_notify = notify.clone();
-
-        let notify_sender = notify.clone();
+        let (tx, rx) = watch::channel(None);
+        self.exit_rx = rx;
 
         self.monitor = Some(tokio::spawn(async move {
             match child.wait().await {
                 Ok(status) => {
                     info!("Child process exited: {}", status);
-                    notify_sender.notify_one();
+                    let _ = tx.send(Some(status));
                 }
                 Err(e) => {
                     error!("Monitor failed to wait on child: {}", e);
@@ -202,13 +200,26 @@ impl ProcessHandler {
         Ok(())
     }
 
-    pub async fn wait(&mut self) -> Result<(), ExecError> {
+    pub async fn wait(&mut self) -> Result<ExitStatus, ExecError> {
         // Since we moved the child to the background task, we can't wait on it directly.
-        // But we can wait on the notification.
-        self.exit_notify.notified().await;
+        // But we can wait on the receiver for the exit status.
+        if let Some(status) = *self.exit_rx.borrow() {
+            return Ok(status);
+        }
 
-        // In one-shot mode, we assume if it notified, it's done.
-        Ok(())
+        let mut rx = self.exit_rx.clone();
+        loop {
+            // changed() waits for the value to update
+            if rx.changed().await.is_err() {
+                // Sender dropped
+                return Err(ExecError::NoChild);
+            }
+
+            // Check the new value
+            if let Some(status) = *rx.borrow() {
+                return Ok(status);
+            }
+        }
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
@@ -325,12 +336,13 @@ impl WatchHandler for ProcessHandler {
         Ok(())
     }
     fn exit_notify(&self) -> BoxFuture<'static, ()> {
-        let notify = self.exit_notify.clone();
-        let child_exit = async move { notify.notified().await };
-
+        let mut rx = self.exit_rx.clone();
         let os_signal = wait_for_signal(self.interactive);
 
-        // Exit when either the child exits or an OS signal is received
+        let child_exit = async move {
+            let _ = rx.wait_for(|val| val.is_some()).await;
+        };
+
         Box::pin(async move {
             tokio::select! {
                 _ = child_exit => debug!("ProcessHandler: Child exited naturally"),
