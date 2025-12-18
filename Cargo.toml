@@ -17,11 +17,11 @@ members = [".", "xtask"]
 
 [features]
 default = ["op", "connect", "bws", "compose", "exec"]
-op = ["tokio/process", "dep:futures"]
-connect = ["dep:reqwest", "dep:url", "dep:percent-encoding", "dep:futures"]
-bws = ["dep:bitwarden", "dep:uuid", "dep:futures", "dep:rustls-webpki"]
+op = ["tokio/process"]
+connect = ["dep:reqwest", "dep:url", "dep:percent-encoding"]
+bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
-exec = ["dep:dotenvy", "dep:nix"]
+exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
 
 [dependencies]
 anyhow = "1"
@@ -42,7 +42,7 @@ paste = "1"
 sanitize-filename = "0.6"
 humantime = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal", "fs"] }
-futures = { version = "0.3", optional = true}
+futures = { version = "0.3"}
 reqwest = { version = "0.12", features = ["json", "rustls-tls-webpki-roots"], default-features = false, optional = true }
 url = { version = "2", optional = true }
 percent-encoding = { version = "2.3", optional = true }

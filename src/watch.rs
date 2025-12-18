@@ -8,6 +8,7 @@
 //! and how to handle the resulting events.
 
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
@@ -59,6 +60,12 @@ pub trait WatchHandler: Send + Sync {
 
     /// Process a batch of coalesced filesystem events which occured within the debounce window.
     async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
+
+    /// Returns a future that resolves when the handler finishes naturally.
+    /// Default: Never resolves (Pending), suitable for infinite services that are only stopped via shutdown.
+    fn exit_notify(&self) -> BoxFuture<'static, ()> {
+        Box::pin(std::future::pending())
+    }
 }
 
 enum ControlFlow {
@@ -121,10 +128,15 @@ impl<H: WatchHandler> FsWatcher<H> {
 
         loop {
             debug!("waiting for fs event");
+            let exit = self.handler.exit_notify();
 
             let event = tokio::select! {
                 _ = shutdown.as_mut() => {
                     info!("shutdown signal received");
+                    break; // Exit the loop
+                }
+                _ = exit => {
+                    info!("handler exit signal received");
                     break; // Exit the loop
                 }
                 signal = rx.recv() => {

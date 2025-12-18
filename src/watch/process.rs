@@ -1,6 +1,7 @@
 use super::{FsEvent, WatchHandler};
 use crate::env::EnvManager;
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use secrecy::ExposeSecret;
@@ -8,10 +9,12 @@ use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::ExitStatus;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -56,9 +59,10 @@ pub struct ProcessHandler {
     env: EnvManager,
     cmd: Vec<String>,
     env_hash: u64,
-    child: Option<Child>,
-    pgid: Option<Pid>,
+    target: Option<Pid>,
     forwarder: Option<JoinHandle<()>>,
+    monitor: Option<JoinHandle<()>>,
+    exit_notify: Arc<Notify>,
     interactive: bool,
     timeout: Duration,
 }
@@ -74,9 +78,10 @@ impl ProcessHandler {
             env,
             cmd,
             env_hash: 0,
-            child: None,
-            pgid: None,
+            target: None,
             forwarder: None,
+            monitor: None,
+            exit_notify: Arc::new(Notify::new()),
             interactive,
             timeout: timeout.into(),
         }
@@ -86,7 +91,6 @@ impl ProcessHandler {
         let mut hasher = DefaultHasher::new();
         let mut keys: Vec<_> = map.keys().collect();
         keys.sort();
-
         for k in keys {
             k.hash(&mut hasher);
             map.get(k).unwrap().expose_secret().hash(&mut hasher);
@@ -94,7 +98,7 @@ impl ProcessHandler {
         hasher.finish()
     }
 
-    fn spawn_forwarder(pgid: Pid, interactive: bool) -> JoinHandle<()> {
+    fn spawn_forwarder(target: Pid, interactive: bool) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut signals = vec![
                 (SignalKind::interrupt(), Signal::SIGINT, "SIGINT"),
@@ -132,8 +136,8 @@ impl ProcessHandler {
 
             // Forwarding Loop
             while let Some((sig, name)) = rx.recv().await {
-                debug!("forwarding {} to process {}", name, pgid);
-                if signal::kill(pgid, sig).is_err() {
+                debug!("forwarding {} to process {}", name, target);
+                if signal::kill(target, sig).is_err() {
                     break;
                 }
             }
@@ -162,8 +166,11 @@ impl ProcessHandler {
             command.stdin(std::process::Stdio::null());
         }
 
+        // We handle killing manually via target in stop() and Drop
+        command.kill_on_drop(false);
+
         info!(cmd = ?self.cmd, "Spawning child process");
-        let child = command.spawn()?;
+        let mut child = command.spawn()?;
 
         if let Some(id) = child.id() {
             let pid = if self.interactive {
@@ -171,28 +178,37 @@ impl ProcessHandler {
             } else {
                 Pid::from_raw(-(id as i32))
             };
-            self.pgid = Some(pid);
+            self.target = Some(pid);
             self.forwarder = Some(Self::spawn_forwarder(pid, self.interactive));
         }
 
-        self.child = Some(child);
+        let notify = Arc::new(Notify::new());
+        self.exit_notify = notify.clone();
+
+        let notify_sender = notify.clone();
+
+        self.monitor = Some(tokio::spawn(async move {
+            match child.wait().await {
+                Ok(status) => {
+                    info!("Child process exited: {}", status);
+                    notify_sender.notify_one();
+                }
+                Err(e) => {
+                    error!("Monitor failed to wait on child: {}", e);
+                }
+            }
+        }));
 
         Ok(())
     }
 
     pub async fn wait(&mut self) -> Result<(), ExecError> {
-        let child = self.child.as_mut().ok_or(ExecError::NoChild)?;
-        let status = child.wait().await?;
+        // Since we moved the child to the background task, we can't wait on it directly.
+        // But we can wait on the notification.
+        self.exit_notify.notified().await;
 
-        if let Some(handle) = self.forwarder.take() {
-            handle.abort();
-        }
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err(ExecError::from(status))
-        }
+        // In one-shot mode, we assume if it notified, it's done.
+        Ok(())
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
@@ -206,43 +222,48 @@ impl ProcessHandler {
             handle.abort();
         }
 
-        let pgid = self.pgid.take();
+        let target = self.target.take();
+        let mut monitor = self.monitor.take();
 
-        if let Some(mut child) = self.child.take() {
-            debug!("Stopping child process group (pgid: {:?})", pgid);
+        if let Some(p) = target {
+            debug!("Stopping process {:?}", p);
 
-            if let Some(p) = pgid
-                && let Err(e) = signal::kill(p, Signal::SIGTERM)
-            {
-                debug!("Failed to send stop signal: {}", e);
+            if let Err(e) = signal::kill(p, Signal::SIGTERM) {
+                debug!("Failed to send SIGTERM: {}", e);
             }
 
-            let sleep = tokio::time::sleep(self.timeout);
-            tokio::pin!(sleep);
+            if let Some(monitor_handle) = &mut monitor {
+                let sleep = tokio::time::sleep(self.timeout);
+                tokio::pin!(sleep);
 
-            let mut interrupt =
-                signal(SignalKind::interrupt()).expect("failed to install interrupt handler");
+                let mut interrupt =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                        .expect("failed to install interrupt handler");
 
-            tokio::select! {
-                res = child.wait() => {
-                    match res {
-                        Ok(status) => debug!("Child exited gracefully with {}", status),
-                        Err(e) => error!("Error waiting for child: {}", e),
+                let mut finished = false;
+
+                tokio::select! {
+                    res = &mut *monitor_handle => {
+                        match res {
+                            Ok(_) => debug!("Child exited gracefully"),
+                            Err(e) => error!("Monitor task failed: {}", e),
+                        }
+                        finished = true;
+                    }
+                    _ = &mut sleep => {
+                        warn!("Child timed out after {:?}, sending SIGKILL", self.timeout);
+                        let _ = signal::kill(p, Signal::SIGKILL);
+                    }
+                    _ = interrupt.recv() => {
+                        warn!("Received Ctrl+C during shutdown, sending SIGKILL");
+                        let _ = signal::kill(p, Signal::SIGKILL);
                     }
                 }
-                _ = &mut sleep => {
-                    warn!("Child timed out after {:?}, sending SIGKILL to group", self.timeout);
-                    if let Some(p) = pgid {
-                         let _ = signal::kill(p, Signal::SIGKILL);
-                    }
-                    let _ = child.wait().await;
-                }
-                _ = interrupt.recv() => {
-                    warn!("Received Ctrl+C during shutdown, sending SIGKILL to group");
-                    if let Some(p) = pgid {
-                         let _ = signal::kill(p, Signal::SIGKILL);
-                    }
-                    let _ = child.wait().await;
+
+                // MUST await it to ensure the zombie is reaped.
+                // Since we just sent SIGKILL, this await should return immediately.
+                if !finished && let Err(e) = monitor_handle.await {
+                    error!("Failed to join monitor task after kill: {}", e);
                 }
             }
         }
@@ -251,20 +272,20 @@ impl ProcessHandler {
 
 impl Drop for ProcessHandler {
     fn drop(&mut self) {
-        // Abort the forwarder
         if let Some(handle) = self.forwarder.take() {
             handle.abort();
         }
 
-        // Clean up the child process
-        if let Some(mut child) = self.child.take() {
-            match child.try_wait() {
-                Ok(Some(_)) => {} // Already done
-                _ => {
-                    debug!("ProcessHandler dropped, killing child process");
-                    let _ = child.start_kill();
-                }
-            }
+        if let Some(handle) = self.monitor.take() {
+            handle.abort();
+        }
+
+        // Last Resort Kill
+        // Since using kill_on_drop(false), aborting the monitor drops the Child
+        // but DOES NOT kill the process. We must do it manually.
+        if let Some(pid) = self.target {
+            debug!("ProcessHandler dropped, force killing PID {:?}", pid);
+            let _ = signal::kill(pid, Signal::SIGKILL);
         }
     }
 }
@@ -302,5 +323,9 @@ impl WatchHandler for ProcessHandler {
             }
         }
         Ok(())
+    }
+    fn exit_notify(&self) -> BoxFuture<'static, ()> {
+        let notify = self.exit_notify.clone();
+        Box::pin(async move { notify.notified().await })
     }
 }
