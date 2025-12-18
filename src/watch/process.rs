@@ -1,5 +1,5 @@
 use super::{FsEvent, WatchHandler};
-use crate::env::EnvManager;
+use crate::{env::EnvManager, signal::wait_for_signal};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use nix::sys::signal::{self, Signal};
@@ -326,6 +326,16 @@ impl WatchHandler for ProcessHandler {
     }
     fn exit_notify(&self) -> BoxFuture<'static, ()> {
         let notify = self.exit_notify.clone();
-        Box::pin(async move { notify.notified().await })
+        let child_exit = async move { notify.notified().await };
+
+        let os_signal = wait_for_signal(self.interactive);
+
+        // Exit when either the child exits or an OS signal is received
+        Box::pin(async move {
+            tokio::select! {
+                _ = child_exit => debug!("ProcessHandler: Child exited naturally"),
+                _ = os_signal => debug!("ProcessHandler: OS Signal received"),
+            }
+        })
     }
 }

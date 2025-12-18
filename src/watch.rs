@@ -7,6 +7,7 @@
 //! Implementers provide a `WatchHandler` trait to specify which paths to watch
 //! and how to handle the resulting events.
 
+use crate::signal;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -61,10 +62,10 @@ pub trait WatchHandler: Send + Sync {
     /// Process a batch of coalesced filesystem events which occured within the debounce window.
     async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
 
-    /// Returns a future that resolves when the handler finishes naturally.
-    /// Default: Never resolves (Pending), suitable for infinite services that are only stopped via shutdown.
+    /// Returns a future that resolves when the handler wants to exit.
+    /// Default: Waits for SIGINT/SIGTERM.
     fn exit_notify(&self) -> BoxFuture<'static, ()> {
-        Box::pin(std::future::pending())
+        Box::pin(signal::wait_for_signal(false))
     }
 }
 
@@ -103,16 +104,12 @@ impl<H: WatchHandler> FsWatcher<H> {
     ///
     /// # Errors
     /// Returns `WatchError` if the underlying `notify` watcher fails or paths are missing.
-    pub async fn run<F>(mut self, shutdown: F) -> Result<H, WatchError>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
+    pub async fn run(mut self) -> Result<H, WatchError> {
         let (tx, mut rx) = mpsc::channel::<NotifyResult<Event>>(100);
         let tx_fs = tx.clone();
         let mut watcher = recommended_watcher(move |res| {
             let _ = tx_fs.blocking_send(res);
         })?;
-        tokio::pin!(shutdown);
         for watched in self.handler.paths() {
             if !watched.exists() {
                 return Err(WatchError::SourceMissing(watched.to_path_buf()));
@@ -131,10 +128,6 @@ impl<H: WatchHandler> FsWatcher<H> {
             let exit = self.handler.exit_notify();
 
             let event = tokio::select! {
-                _ = shutdown.as_mut() => {
-                    info!("shutdown signal received");
-                    break; // Exit the loop
-                }
                 _ = exit => {
                     info!("handler exit signal received");
                     break; // Exit the loop
@@ -156,7 +149,7 @@ impl<H: WatchHandler> FsWatcher<H> {
             }
 
             // Enter debounce loop to coalesce rapid successive events
-            match self.debounce_loop(&mut rx, &mut shutdown).await? {
+            match self.debounce_loop(&mut rx).await? {
                 ControlFlow::Continue => {
                     self.flush_events().await;
                 }
@@ -170,14 +163,10 @@ impl<H: WatchHandler> FsWatcher<H> {
     }
 
     /// Debounce loop to wait for a quiet period before processing events so as not to overwhelm the handler
-    async fn debounce_loop<F>(
+    async fn debounce_loop(
         &mut self,
         rx: &mut mpsc::Receiver<NotifyResult<Event>>,
-        shutdown: &mut std::pin::Pin<&mut F>,
-    ) -> Result<ControlFlow, WatchError>
-    where
-        F: Future<Output = ()>,
-    {
+    ) -> Result<ControlFlow, WatchError> {
         debug!("Debouncing events for {:?}", self.debounce);
         let deadline = Instant::now() + self.debounce;
 
@@ -191,9 +180,8 @@ impl<H: WatchHandler> FsWatcher<H> {
                 _ = &mut sleep => {
                     return Ok(ControlFlow::Continue);
                 }
-
-                _ = shutdown.as_mut() => {
-                    info!("shutdown signal received");
+                _ = self.handler.exit_notify() => {
+                    info!("handler exit signal received during debounce.");
                     return Ok(ControlFlow::Break);
                 }
                 // New event received before timeout.

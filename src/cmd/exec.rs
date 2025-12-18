@@ -130,7 +130,7 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
         let watcher = FsWatcher::new(args.debounce, handler);
 
         // Run the watcher loop until a shutdown signal (Ctrl+C/SIGTERM) is received
-        match watcher.run(signal::recv_shutdown(interactive)).await {
+        match watcher.run().await {
             Ok(mut handler) => {
                 info!("watch loop terminated gracefully");
                 handler.stop().await;
@@ -145,16 +145,14 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
         tokio::select! {
             res = handler.wait() => {
                 match res {
-                    Ok(_) => {
-                        ExitCode::Ok
-                    }
+                    Ok(_) => ExitCode::Ok,
                     Err(e) => {
                         error!(error = %e, "process execution failed");
                         e.into()
                     }
                 }
             }
-            _ = signal::recv_shutdown(interactive) => {
+            _ = signal::wait_for_signal(interactive) => {
                 handler.stop().await;
                 ExitCode::Ok
             }

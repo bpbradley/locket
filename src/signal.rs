@@ -5,7 +5,7 @@ use tracing::{debug, info};
 /// Listens for shutdown signals.
 ///
 /// when `interactive` is true, ignore SIGINT/SIGQUIT which should be handled by interactive process. Exits only on SIGTERM.
-pub async fn recv_shutdown(interactive: bool) {
+pub async fn wait_for_signal(interactive: bool) {
     // SIGTERM always triggers shutdown
     let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
 
