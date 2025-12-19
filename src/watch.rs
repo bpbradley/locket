@@ -18,6 +18,7 @@ use notify::{
 };
 use std::time::Duration;
 use std::{path::PathBuf, str::FromStr};
+use sysexits::ExitCode;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
@@ -64,9 +65,16 @@ pub trait WatchHandler: Send + Sync {
 
     /// Returns a future that resolves when the handler wants to exit.
     /// Default: Waits for SIGINT/SIGTERM.
-    fn exit_notify(&self) -> BoxFuture<'static, ()> {
-        Box::pin(signal::wait_for_signal(false))
+    fn exit_notify(&self) -> BoxFuture<'static, ExitCode> {
+        Box::pin(async move {
+            signal::wait_for_signal(false).await;
+            ExitCode::Ok
+        })
     }
+    /// Any special handlers needed for resource cleanup should be implemented here.
+    /// We cannot cleanup in the exit_notify because we cannot mutably borrow self there.
+    /// And we may need to mutably borrow self to cleanup resources.
+    async fn cleanup(&mut self) {}
 }
 
 enum ControlFlow {

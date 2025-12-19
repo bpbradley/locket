@@ -3,8 +3,7 @@ use crate::{
     logging::Logger,
     provider::Provider,
     secrets::Secret,
-    signal,
-    watch::{DebounceDuration, ExecError, FsWatcher, ProcessHandler},
+    watch::{DebounceDuration, ExecError, FsWatcher, ProcessHandler, WatchHandler},
 };
 use clap::Args;
 use std::str::FromStr;
@@ -108,9 +107,10 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
         }
     };
 
-    // Initialize EnvManager (Stateless)
-    // We pass the raw secrets; resolution happens inside the handler.
-    let env_manager = EnvManager::new(args.env, provider);
+    // Initialize EnvManager
+    let mut env_secrets = args.env;
+    env_secrets.extend(args.env_file);
+    let env_manager = EnvManager::new(env_secrets, provider);
 
     // Initialize ProcessHandler
     let interactive = args.interactive.unwrap_or(!args.watch);
@@ -129,46 +129,22 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
     if args.watch {
         let watcher = FsWatcher::new(args.debounce, handler);
 
-        // Run the watcher loop until a shutdown signal (Ctrl+C/SIGTERM) is received
         match watcher.run().await {
             Ok(mut handler) => {
                 info!("watch loop terminated gracefully");
-                handler.stop().await;
-                ExitCode::Ok
+                let code = handler.exit_notify().await;
+                handler.cleanup().await;
+                code
             }
             Err(e) => {
                 error!(error = %e, "watch loop failed");
-                ExitCode::Software
+                ExitCode::IoErr
             }
         }
     } else {
-        tokio::select! {
-            res = handler.wait() => {
-                match res {
-                    Ok(status) => {
-                        if status.success() {
-                            ExitCode::Ok
-                        } else {
-                            if let Some(code) = status.code() {
-                                error!("Process exited with code {}", code);
-                                ExitCode::Software
-                            } else {
-                                error!("Process terminated by signal");
-                                ExitCode::Software
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!(error = %e, "process execution failed");
-                        e.into()
-                    }
-                }
-            }
-            _ = signal::wait_for_signal(interactive) => {
-                handler.stop().await;
-                ExitCode::Ok
-            }
-        }
+        let code = handler.exit_notify().await;
+        handler.cleanup().await;
+        code
     }
 }
 

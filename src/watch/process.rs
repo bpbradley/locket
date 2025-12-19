@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::time::Duration;
+use sysexits::ExitCode;
 use thiserror::Error;
 use tokio::process::Command;
 use tokio::signal::unix::{SignalKind, signal};
@@ -335,19 +336,37 @@ impl WatchHandler for ProcessHandler {
         }
         Ok(())
     }
-    fn exit_notify(&self) -> BoxFuture<'static, ()> {
+    fn exit_notify(&self) -> BoxFuture<'static, ExitCode> {
         let mut rx = self.exit_rx.clone();
         let os_signal = wait_for_signal(self.interactive);
 
         let child_exit = async move {
             let _ = rx.wait_for(|val| val.is_some()).await;
+            *rx.borrow()
         };
 
         Box::pin(async move {
             tokio::select! {
-                _ = child_exit => debug!("ProcessHandler: Child exited naturally"),
-                _ = os_signal => debug!("ProcessHandler: OS Signal received"),
+                Some(status) = child_exit => {
+                    if status.success() {
+                        ExitCode::Ok
+                    } else {
+                        // Maybe can try to better map to specific ExitCodes.
+                        // For now just log the actual code and return software error.
+                        if let Some(code) = status.code() {
+                            tracing::error!("Child process exited with code {}", code);
+                        } else {
+                            tracing::error!("Child process terminated by signal");
+                        }
+                        ExitCode::Software
+                    }
+                }
+                _ = os_signal => ExitCode::Ok,
             }
         })
+    }
+
+    async fn cleanup(&mut self) {
+        self.stop().await;
     }
 }
