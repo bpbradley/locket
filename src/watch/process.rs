@@ -2,13 +2,17 @@ use super::{FsEvent, WatchHandler};
 use crate::{env::EnvManager, signal::wait_for_signal};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use nix::sys::signal::{self, Signal};
+use nix::sys::{
+    signal::{self, Signal},
+    termios::{SetArg, Termios, tcgetattr, tcsetattr},
+};
 use nix::unistd::Pid;
 use secrecy::ExposeSecret;
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::ExitStatus;
+use std::sync::Mutex;
 use std::time::Duration;
 use sysexits::ExitCode;
 use thiserror::Error;
@@ -63,6 +67,7 @@ pub struct ProcessHandler {
     forwarder: Option<JoinHandle<()>>,
     monitor: Option<JoinHandle<()>>,
     exit_rx: watch::Receiver<Option<ExitStatus>>,
+    termios: Option<Mutex<Termios>>,
     interactive: bool,
     timeout: Duration,
 }
@@ -75,6 +80,11 @@ impl ProcessHandler {
         timeout: impl Into<Duration>,
     ) -> Self {
         let (_, exit_rx) = watch::channel(None);
+        let termios = if interactive {
+            tcgetattr(std::io::stdin()).ok().map(Mutex::new)
+        } else {
+            None
+        };
         ProcessHandler {
             env,
             cmd,
@@ -83,6 +93,7 @@ impl ProcessHandler {
             forwarder: None,
             monitor: None,
             exit_rx,
+            termios,
             interactive,
             timeout: timeout.into(),
         }
@@ -143,6 +154,14 @@ impl ProcessHandler {
                 }
             }
         })
+    }
+
+    fn reset_tty(&self) {
+        if let Some(mutex) = &self.termios
+            && let Ok(guard) = mutex.lock()
+        {
+            let _ = tcsetattr(std::io::stdin(), SetArg::TCSANOW, &guard);
+        }
     }
 
     async fn restart(
@@ -277,6 +296,8 @@ impl ProcessHandler {
                 if !finished && let Err(e) = monitor_handle.await {
                     error!("Failed to join monitor task after kill: {}", e);
                 }
+
+                self.reset_tty();
             }
         }
     }
@@ -299,6 +320,7 @@ impl Drop for ProcessHandler {
             debug!("ProcessHandler dropped, force killing PID {:?}", pid);
             let _ = signal::kill(pid, Signal::SIGKILL);
         }
+        self.reset_tty();
     }
 }
 
