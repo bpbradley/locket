@@ -7,8 +7,7 @@
 //! Implementers provide a `EventHandler` trait to specify which paths to watch
 //! and how to handle the resulting events.
 
-use crate::events::{EventHandler, FsEvent};
-use indexmap::IndexMap;
+use crate::events::{EventHandler, FsEvent, FsEventRegistry};
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
@@ -48,7 +47,7 @@ enum ControlFlow {
 pub struct FsWatcher<H: EventHandler> {
     handler: H,
     debounce: Duration,
-    events: EventRegistry,
+    events: FsEventRegistry,
 }
 
 impl<H: EventHandler> FsWatcher<H> {
@@ -60,7 +59,7 @@ impl<H: EventHandler> FsWatcher<H> {
         Self {
             handler,
             debounce: debounce.into(),
-            events: EventRegistry::new(),
+            events: FsEventRegistry::new(),
         }
     }
 
@@ -231,108 +230,6 @@ impl<H: EventHandler> FsWatcher<H> {
             },
             _ => None,
         }
-    }
-}
-
-/// Registry to collect and coalesce filesystem events.
-///
-/// It ensures that if a file is written, moved, and then deleted within the
-/// debounce window, the handler sees only the relevant outcome.
-pub struct EventRegistry {
-    map: IndexMap<PathBuf, FsEvent>,
-}
-
-/// Implementation of the EventRegistry
-impl EventRegistry {
-    pub fn new() -> Self {
-        Self {
-            map: IndexMap::new(),
-        }
-    }
-
-    /// Update the registry with a new event
-    pub fn register(&mut self, event: FsEvent) {
-        match event {
-            FsEvent::Write(ref path) => {
-                self.update(path.clone(), event);
-            }
-            FsEvent::Remove(ref path) => {
-                self.update(path.clone(), event);
-            }
-            FsEvent::Move { ref from, ref to } => {
-                self.handle_move(from.clone(), to.clone());
-            }
-        }
-    }
-
-    /// Handle a move event by resolving it against existing events in the registry
-    /// to produce the correct resultant event. This handler attempts to logically resolve the eventual
-    /// state of the file after a move, considering prior writes or moves.
-    fn handle_move(&mut self, from: PathBuf, to: PathBuf) {
-        // Resolve what the event for 'to' should be, based on the state of 'from'.
-        let event = match self.map.get(&from) {
-            // Write(A) -> Move(A->B) === Write(B).
-            Some(FsEvent::Write(_)) => FsEvent::Write(to.clone()),
-
-            // Move(Origin->A) -> Move(A->B) === Move(Origin->B).
-            Some(FsEvent::Move { from: origin, .. }) => FsEvent::Move {
-                from: origin.clone(),
-                to: to.clone(),
-            },
-            // Just move
-            _ => FsEvent::Move {
-                from: from.clone(),
-                to: to.clone(),
-            },
-        };
-
-        // Clean up the old path (it no longer exists at that location)
-        self.map.shift_remove(&from);
-
-        // Register the new event at the new location
-        self.update(to, event);
-    }
-
-    /// Update the registry with a new event for a given path, applying coalescing logic
-    /// to avoid redundant or conflicting events.
-    fn update(&mut self, path: PathBuf, new_event: FsEvent) {
-        match (self.map.get(&path), &new_event) {
-            //  Write -> Remove === Ignore
-            (Some(FsEvent::Write(_)), FsEvent::Remove(_)) => {
-                self.map.shift_remove(&path);
-            }
-
-            // Move -> Remove === Remove(Origin).
-            (Some(FsEvent::Move { .. }), FsEvent::Remove(_)) => {
-                self.map.insert(path, new_event);
-            }
-
-            // Remove -> Write === Write.
-            (Some(FsEvent::Remove(_)), FsEvent::Write(_)) => {
-                self.map.insert(path, new_event);
-            }
-
-            // Default: The new event overwrites the old state.
-            _ => {
-                self.map.insert(path, new_event);
-            }
-        }
-    }
-
-    /// Drain all registered events for processing
-    pub fn drain(&mut self) -> impl Iterator<Item = FsEvent> + '_ {
-        self.map.drain(..).map(|(_, event)| event)
-    }
-
-    /// Returns true if no events are pending flush
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-}
-
-impl Default for EventRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
