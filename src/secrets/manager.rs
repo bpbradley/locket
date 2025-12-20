@@ -525,10 +525,14 @@ impl EventHandler for SecretFileManager {
 
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
         for event in events {
-            match event {
-                FsEvent::Write(src) => self.handle_write(&src).await?,
-                FsEvent::Remove(src) => self.handle_remove(&src)?,
-                FsEvent::Move { from, to } => self.handle_move(&from, &to).await?,
+            let result = match event {
+                FsEvent::Write(src) => self.handle_write(&src).await,
+                FsEvent::Remove(src) => self.handle_remove(&src),
+                FsEvent::Move { from, to } => self.handle_move(&from, &to).await,
+            };
+
+            if let Err(e) = result {
+                warn!(error = ?e, "failed to process fs event");
             }
         }
         Ok(())

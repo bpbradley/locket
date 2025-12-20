@@ -61,7 +61,7 @@ pub trait EventHandler: Send + Sync {
     fn paths(&self) -> Vec<PathBuf>;
 
     /// Process a batch of coalesced filesystem events which occured within the debounce window.
-    /// 
+    ///
     /// Returns an error if the handler should fail fatally. Otherwise, errors should be logged internally
     /// The caller of this method should consider Errors as fatal and exit.
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError>;
