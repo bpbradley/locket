@@ -1,11 +1,11 @@
 use crate::{
     env::EnvManager,
-    events::EventHandler,
+    events::{EventHandler, HandlerError},
     logging::Logger,
-    process::{ExecError, ProcessManager},
+    process::ProcessManager,
     provider::Provider,
     secrets::Secret,
-    watch::{DebounceDuration, FsWatcher},
+    watch::{DebounceDuration, FsWatcher, WatchError},
 };
 use clap::Args;
 use std::str::FromStr;
@@ -134,25 +134,44 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
         match watcher.run().await {
             Ok(mut handler) => {
                 info!("watch loop terminated gracefully");
-                let code = handler.exit_notify().await;
                 handler.cleanup().await;
-                code
+                ExitCode::Ok
             }
+            Err(WatchError::Handler(e)) => e.into(),
             Err(e) => {
-                error!(error = %e, "watch loop failed");
+                if !matches!(e, WatchError::Handler(_)) {
+                    error!(error = %e, "watch loop failed");
+                }
                 ExitCode::IoErr
             }
         }
     } else {
-        let code = handler.exit_notify().await;
+        let result = handler.wait().await;
         handler.cleanup().await;
-        code
+        match result {
+            Ok(_) => ExitCode::Ok,
+            Err(e) => e.into(),
+        }
     }
 }
 
-impl From<ExecError> for ExitCode {
-    fn from(_err: ExecError) -> Self {
-        ExitCode::Software
+impl From<HandlerError> for ExitCode {
+    fn from(e: HandlerError) -> Self {
+        match e {
+            HandlerError::Exited(status) => {
+                if status.code().is_some() {
+                    // TODO: Need to map i32 to ExitCode properly
+                    ExitCode::Software
+                } else {
+                    ExitCode::Software
+                }
+            }
+            HandlerError::Interrupted => ExitCode::Ok,
+            HandlerError::Io(_) => ExitCode::IoErr,
+            HandlerError::Env(_) | HandlerError::Secret(_) => ExitCode::Config,
+            HandlerError::Provider(_) => ExitCode::Unavailable,
+            _ => ExitCode::Software,
+        }
     }
 }
 

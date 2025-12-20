@@ -1,6 +1,6 @@
 use crate::{
     env::EnvManager,
-    events::{EventHandler, FsEvent, wait_for_signal},
+    events::{EventHandler, FsEvent, HandlerError, wait_for_signal},
 };
 use async_trait::async_trait;
 use futures::future::BoxFuture;
@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::Mutex;
 use std::time::Duration;
-use sysexits::ExitCode;
 use thiserror::Error;
 use tokio::process::Command;
 use tokio::signal::unix::{SignalKind, signal};
@@ -331,7 +330,7 @@ impl EventHandler for ProcessManager {
         self.env.files()
     }
 
-    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()> {
+    async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
         if events.is_empty() {
             return Ok(());
         }
@@ -359,7 +358,7 @@ impl EventHandler for ProcessManager {
         }
         Ok(())
     }
-    fn exit_notify(&self) -> BoxFuture<'static, ExitCode> {
+    fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
         let mut rx = self.exit_rx.clone();
         let os_signal = wait_for_signal(self.interactive);
 
@@ -371,20 +370,11 @@ impl EventHandler for ProcessManager {
         Box::pin(async move {
             tokio::select! {
                 Some(status) = child_exit => {
-                    if status.success() {
-                        ExitCode::Ok
-                    } else {
-                        // Maybe can try to better map to specific ExitCodes.
-                        // For now just log the actual code and return software error.
-                        if let Some(code) = status.code() {
-                            tracing::error!("Child process exited with code {}", code);
-                        } else {
-                            tracing::error!("Child process terminated by signal");
-                        }
-                        ExitCode::Software
-                    }
+                    HandlerError::from_status(status)
                 }
-                _ = os_signal => ExitCode::Ok,
+                _ = os_signal => {
+                    Ok(())
+                }
             }
         })
     }

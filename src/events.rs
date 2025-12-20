@@ -1,17 +1,54 @@
-//! Signal handling utilities used for graceful shutdown
+use crate::{env::EnvError, provider::ProviderError, secrets::SecretError};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::path::PathBuf;
-use sysexits::ExitCode;
+use std::process::ExitStatus;
+use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{debug, info};
 
-/// Filesystem events for SecretFileRegistry
+/// Filesystem events
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum FsEvent {
     Write(PathBuf),
     Remove(PathBuf),
     Move { from: PathBuf, to: PathBuf },
+}
+
+/// Errors that can occur during event handling or process lifecycle management.
+#[derive(Debug, Error)]
+pub enum HandlerError {
+    #[error(transparent)]
+    Env(#[from] EnvError),
+
+    #[error(transparent)]
+    Secret(#[from] SecretError),
+
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+
+    #[error("Process I/O error")]
+    Io(#[from] std::io::Error),
+
+    #[error("Process exited with status {0}")]
+    Exited(ExitStatus),
+
+    #[error("Process terminated by signal")]
+    Signaled,
+
+    #[error("Operation interrupted")]
+    Interrupted,
+}
+
+impl HandlerError {
+    /// Helper to convert an ExitStatus into a Result
+    pub fn from_status(status: ExitStatus) -> Result<(), Self> {
+        if status.success() {
+            Ok(())
+        } else {
+            Err(Self::Exited(status))
+        }
+    }
 }
 
 /// Handler trait for reacting to locket events
@@ -24,18 +61,18 @@ pub trait EventHandler: Send + Sync {
     fn paths(&self) -> Vec<PathBuf>;
 
     /// Process a batch of coalesced filesystem events which occured within the debounce window.
-    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
+    async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError>;
 
     /// Returns a future that resolves when the handler wants to exit.
     /// Default: Waits for SIGINT/SIGTERM.
-    fn exit_notify(&self) -> BoxFuture<'static, ExitCode> {
+    fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
         Box::pin(async move {
             wait_for_signal(false).await;
-            ExitCode::Ok
+            Ok(())
         })
     }
     /// Any special handlers needed for resource cleanup should be implemented here.
-    /// We cannot cleanup in the exit_notify because we cannot mutably borrow self there.
+    /// We cannot cleanup in wait because we cannot mutably borrow self there.
     /// And we may need to mutably borrow self to cleanup resources.
     async fn cleanup(&mut self) {}
 }

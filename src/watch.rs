@@ -34,6 +34,9 @@ pub enum WatchError {
 
     #[error("source path missing: {0}")]
     SourceMissing(PathBuf),
+
+    #[error(transparent)]
+    Handler(#[from] crate::events::HandlerError),
 }
 
 enum ControlFlow {
@@ -92,7 +95,7 @@ impl<H: EventHandler> FsWatcher<H> {
 
         loop {
             debug!("waiting for fs event");
-            let exit = self.handler.exit_notify();
+            let exit = self.handler.wait();
 
             let event = tokio::select! {
                 _ = exit => {
@@ -147,7 +150,7 @@ impl<H: EventHandler> FsWatcher<H> {
                 _ = &mut sleep => {
                     return Ok(ControlFlow::Continue);
                 }
-                _ = self.handler.exit_notify() => {
+                _ = self.handler.wait() => {
                     info!("handler exit signal received during debounce.");
                     return Ok(ControlFlow::Break);
                 }

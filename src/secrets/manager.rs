@@ -3,7 +3,7 @@
 //! This module defines the `SecretFileManager`, which is responsible for
 //! managing secret files based on file-backed templates containing secret references.
 
-use crate::events::{EventHandler, FsEvent};
+use crate::events::{EventHandler, FsEvent, HandlerError};
 use crate::path::{PathExt, PathMapping, parse_absolute};
 use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
@@ -523,7 +523,7 @@ impl EventHandler for SecretFileManager {
         self.sources()
     }
 
-    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()> {
+    async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
         for event in events {
             match event {
                 FsEvent::Write(src) => self.handle_write(&src).await?,
