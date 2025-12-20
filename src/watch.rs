@@ -98,9 +98,14 @@ impl<H: EventHandler> FsWatcher<H> {
             let exit = self.handler.wait();
 
             let event = tokio::select! {
-                _ = exit => {
-                    info!("handler exit signal received");
-                    break; // Exit the loop
+                res = exit => {
+                    match res {
+                        Ok(_) => {
+                            info!("handler exit signal received");
+                            break;
+                        }
+                        Err(e) => return Err(WatchError::Handler(e)),
+                    }
                 }
                 signal = rx.recv() => {
                     match signal {
@@ -121,7 +126,7 @@ impl<H: EventHandler> FsWatcher<H> {
             // Enter debounce loop to coalesce rapid successive events
             match self.debounce_loop(&mut rx).await? {
                 ControlFlow::Continue => {
-                    self.flush_events().await;
+                    self.flush_events().await?;
                 }
                 ControlFlow::Break => {
                     info!("exiting watcher loop.");
@@ -150,9 +155,14 @@ impl<H: EventHandler> FsWatcher<H> {
                 _ = &mut sleep => {
                     return Ok(ControlFlow::Continue);
                 }
-                _ = self.handler.wait() => {
-                    info!("handler exit signal received during debounce.");
-                    return Ok(ControlFlow::Break);
+                res = self.handler.wait() => {
+                    match res {
+                        Ok(_) => {
+                            info!("handler exit signal received during debounce.");
+                            return Ok(ControlFlow::Break);
+                        }
+                        Err(e) => return Err(WatchError::Handler(e)),
+                    }
                 }
                 // New event received before timeout.
                 signal = rx.recv() => {
@@ -183,17 +193,16 @@ impl<H: EventHandler> FsWatcher<H> {
     }
 
     /// Flush the registered events to the handler for processing
-    async fn flush_events(&mut self) {
+    async fn flush_events(&mut self) -> Result<(), WatchError> {
         if self.events.is_empty() {
-            return;
+            return Ok(());
         }
 
         let events: Vec<_> = self.events.drain().collect();
         debug!(count = events.len(), "processing batched fs events");
 
-        if let Err(e) = self.handler.handle(events).await {
-            warn!(error=?e, "failed to handle fs events");
-        }
+        self.handler.handle(events).await?;
+        Ok(())
     }
 
     /// Map a notify Event to an FsEvent, if relevant
