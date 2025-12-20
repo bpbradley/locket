@@ -3,12 +3,12 @@
 //! This module defines the `SecretFileManager`, which is responsible for
 //! managing secret files based on file-backed templates containing secret references.
 
+use crate::events::{EventHandler, FsEvent};
 use crate::path::{PathExt, PathMapping, parse_absolute};
 use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
 use crate::secrets::{MemSize, Secret, SecretError, SecretSource, file::SecretFile};
 use crate::template::Template;
-use crate::watch::{FsEvent, WatchHandler};
 use crate::write::FileWriter;
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
@@ -518,7 +518,7 @@ impl SecretFileManager {
 /// the corresponding secret files as needed. Its purpose is to
 /// reflect changes in template source files to the managed secret files.
 #[async_trait]
-impl WatchHandler for SecretFileManager {
+impl EventHandler for SecretFileManager {
     fn paths(&self) -> Vec<PathBuf> {
         self.sources()
     }

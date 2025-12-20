@@ -1,10 +1,10 @@
 // run.rs
 use crate::{
+    events,
     health::StatusFile,
     logging::Logger,
     provider::Provider,
     secrets::{SecretFileManager, SecretFileOpts},
-    signal,
     watch::{DebounceDuration, FsWatcher},
 };
 use clap::{Args, ValueEnum};
@@ -122,7 +122,7 @@ pub async fn run(args: RunArgs) -> ExitCode {
         RunMode::OneShot => ExitCode::Ok,
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
-            signal::wait_for_signal(false).await;
+            events::wait_for_signal(false).await;
 
             info!("shutdown complete");
             ExitCode::Ok

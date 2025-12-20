@@ -1,6 +1,44 @@
 //! Signal handling utilities used for graceful shutdown
+use async_trait::async_trait;
+use futures::future::BoxFuture;
+use std::path::PathBuf;
+use sysexits::ExitCode;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{debug, info};
+
+/// Filesystem events for SecretFileRegistry
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub enum FsEvent {
+    Write(PathBuf),
+    Remove(PathBuf),
+    Move { from: PathBuf, to: PathBuf },
+}
+
+/// Handler trait for reacting to locket events
+#[async_trait]
+pub trait EventHandler: Send + Sync {
+    /// Returns the list of file paths this handler monitors.
+    ///
+    /// Note: Files must exist prior to starting the watcher to be watched successfully.
+    /// Non-existent paths will be rejected with WatchError::SourceMissing.
+    fn paths(&self) -> Vec<PathBuf>;
+
+    /// Process a batch of coalesced filesystem events which occured within the debounce window.
+    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
+
+    /// Returns a future that resolves when the handler wants to exit.
+    /// Default: Waits for SIGINT/SIGTERM.
+    fn exit_notify(&self) -> BoxFuture<'static, ExitCode> {
+        Box::pin(async move {
+            wait_for_signal(false).await;
+            ExitCode::Ok
+        })
+    }
+    /// Any special handlers needed for resource cleanup should be implemented here.
+    /// We cannot cleanup in the exit_notify because we cannot mutably borrow self there.
+    /// And we may need to mutably borrow self to cleanup resources.
+    async fn cleanup(&mut self) {}
+}
 
 /// Listens for shutdown signals.
 ///

@@ -1,5 +1,7 @@
-use super::{FsEvent, WatchHandler};
-use crate::{env::EnvManager, signal::wait_for_signal};
+use crate::{
+    env::EnvManager,
+    events::{EventHandler, FsEvent, wait_for_signal},
+};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use nix::sys::{
@@ -47,8 +49,7 @@ impl From<ExitStatus> for ExecError {
     }
 }
 
-/// Watch handler that manages a child process, restarting it
-/// when the environment changes.
+/// Manages a child process, restarting it when the environment changes.
 ///
 /// It spawns the child process with the resolved environment
 /// from the provided `EnvManager`. When file system events are
@@ -59,7 +60,7 @@ impl From<ExitStatus> for ExecError {
 /// There are some differences in behavior when running in interactive mode, namely that
 /// stdin/stdout/stderr are inherited directly, and signals are sent to the specific child process
 /// rather than the process group.
-pub struct ProcessHandler {
+pub struct ProcessManager {
     env: EnvManager,
     cmd: Vec<String>,
     env_hash: u64,
@@ -72,7 +73,7 @@ pub struct ProcessHandler {
     timeout: Duration,
 }
 
-impl ProcessHandler {
+impl ProcessManager {
     pub fn new(
         env: EnvManager,
         cmd: Vec<String>,
@@ -85,7 +86,7 @@ impl ProcessHandler {
         } else {
             None
         };
-        ProcessHandler {
+        ProcessManager {
             env,
             cmd,
             env_hash: 0,
@@ -303,7 +304,7 @@ impl ProcessHandler {
     }
 }
 
-impl Drop for ProcessHandler {
+impl Drop for ProcessManager {
     fn drop(&mut self) {
         if let Some(handle) = self.forwarder.take() {
             handle.abort();
@@ -317,7 +318,7 @@ impl Drop for ProcessHandler {
         // Since using kill_on_drop(false), aborting the monitor drops the Child
         // but DOES NOT kill the process. We must do it manually.
         if let Some(pid) = self.target {
-            debug!("ProcessHandler dropped, force killing PID {:?}", pid);
+            debug!("ProcessManager dropped, force killing PID {:?}", pid);
             let _ = signal::kill(pid, Signal::SIGKILL);
         }
         self.reset_tty();
@@ -325,7 +326,7 @@ impl Drop for ProcessHandler {
 }
 
 #[async_trait]
-impl WatchHandler for ProcessHandler {
+impl EventHandler for ProcessManager {
     fn paths(&self) -> Vec<PathBuf> {
         self.env.files()
     }

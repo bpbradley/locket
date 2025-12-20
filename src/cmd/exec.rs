@@ -1,9 +1,11 @@
 use crate::{
     env::EnvManager,
+    events::EventHandler,
     logging::Logger,
+    process::{ExecError, ProcessManager},
     provider::Provider,
     secrets::Secret,
-    watch::{DebounceDuration, ExecError, FsWatcher, ProcessHandler, WatchHandler},
+    watch::{DebounceDuration, FsWatcher},
 };
 use clap::Args;
 use std::str::FromStr;
@@ -112,9 +114,9 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
     env_secrets.extend(args.env_file);
     let env_manager = EnvManager::new(env_secrets, provider);
 
-    // Initialize ProcessHandler
+    // Initialize ProcessManager
     let interactive = args.interactive.unwrap_or(!args.watch);
-    let mut handler = ProcessHandler::new(env_manager, args.cmd.clone(), interactive, args.timeout);
+    let mut handler = ProcessManager::new(env_manager, args.cmd.clone(), interactive, args.timeout);
 
     // Initial Start
     // We must start the process at least once regardless of mode.

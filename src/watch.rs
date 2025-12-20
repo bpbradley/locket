@@ -4,12 +4,10 @@
 //! It handles the complexity of "debouncing" (waiting for a quiet period)
 //! and "coalescing" (merging multiple rapid events, like Create+Modify)
 //! to prevent the secret manager from thrashing or performing redundant updates.
-//! Implementers provide a `WatchHandler` trait to specify which paths to watch
+//! Implementers provide a `EventHandler` trait to specify which paths to watch
 //! and how to handle the resulting events.
 
-use crate::signal;
-use async_trait::async_trait;
-use futures::future::BoxFuture;
+use crate::events::{EventHandler, FsEvent};
 use indexmap::IndexMap;
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
@@ -18,15 +16,10 @@ use notify::{
 };
 use std::time::Duration;
 use std::{path::PathBuf, str::FromStr};
-use sysexits::ExitCode;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
-#[cfg(feature = "exec")]
-mod process;
-#[cfg(feature = "exec")]
-pub use process::{ExecError, ProcessHandler};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -43,53 +36,19 @@ pub enum WatchError {
     SourceMissing(PathBuf),
 }
 
-/// Filesystem events for SecretFileRegistry
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-pub enum FsEvent {
-    Write(PathBuf),
-    Remove(PathBuf),
-    Move { from: PathBuf, to: PathBuf },
-}
-
-/// Handler trait for reacting to filesystem events
-#[async_trait]
-pub trait WatchHandler: Send + Sync {
-    /// Returns the list of paths to monitor.
-    ///
-    /// Note: Files must exist prior to starting the watcher to be watched successfully.
-    /// Non-existent paths will be rejected with WatchError::SourceMissing.
-    fn paths(&self) -> Vec<PathBuf>;
-
-    /// Process a batch of coalesced filesystem events which occured within the debounce window.
-    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
-
-    /// Returns a future that resolves when the handler wants to exit.
-    /// Default: Waits for SIGINT/SIGTERM.
-    fn exit_notify(&self) -> BoxFuture<'static, ExitCode> {
-        Box::pin(async move {
-            signal::wait_for_signal(false).await;
-            ExitCode::Ok
-        })
-    }
-    /// Any special handlers needed for resource cleanup should be implemented here.
-    /// We cannot cleanup in the exit_notify because we cannot mutably borrow self there.
-    /// And we may need to mutably borrow self to cleanup resources.
-    async fn cleanup(&mut self) {}
-}
-
 enum ControlFlow {
     Continue,
     Break,
 }
 
 /// A Filesystem watcher that manages the lifecycle of event collection, debouncing, and flushing.
-pub struct FsWatcher<H: WatchHandler> {
+pub struct FsWatcher<H: EventHandler> {
     handler: H,
     debounce: Duration,
     events: EventRegistry,
 }
 
-impl<H: WatchHandler> FsWatcher<H> {
+impl<H: EventHandler> FsWatcher<H> {
     /// Create a new FsWatcher.
     ///
     /// * `debounce`: The quiet period required before flushing events.
