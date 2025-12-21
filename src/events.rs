@@ -1,3 +1,13 @@
+//! Core interfaces for event handling.
+//!
+//! Defines a reactor pattern around a central event loop that:
+//! 1. Monitors resources (Filesystem, Signals, etc.).
+//! 2. Stabilizes volatile inputs (debouncing , coalescing...).
+//! 3. Dispatches actionable events to registered [`EventHandler`]s.
+//!
+//! This decoupling allows event producers (like a filesystem watcher) to be agnostic about
+//! event consumers (like a process manager or template renderer).
+
 #[cfg(any(feature = "exec", feature = "compose"))]
 use crate::env::EnvError;
 use crate::{provider::ProviderError, secrets::SecretError};
@@ -10,15 +20,11 @@ use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{debug, info};
 
-/// Filesystem events
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-pub enum FsEvent {
-    Write(PathBuf),
-    Remove(PathBuf),
-    Move { from: PathBuf, to: PathBuf },
-}
-
-/// Errors that can occur during event handling or process lifecycle management.
+/// A unified error type for the event loop.
+///
+/// Serves largely as a control plane for error propagation. It normalizes
+/// domain-specific failures into a common format that the
+/// event loop can reason about to decide whether to continue, retry, or abort.
 #[derive(Debug, Error)]
 pub enum HandlerError {
     #[cfg(any(feature = "exec", feature = "compose"))]
@@ -55,33 +61,63 @@ impl HandlerError {
     }
 }
 
-/// Handler trait for reacting to locket events
+/// The primary interface for components that participate in the event loop.
+///
+/// Implementors of this trait are reactors. They define the scope of
+/// interest (`paths`) and the logic to execute when the state changes (`handle`).
 #[async_trait]
 pub trait EventHandler: Send + Sync {
-    /// Returns the list of file paths this handler monitors.
+    /// Defines the scope of resources this handler is interested in.
     ///
-    /// Note: Files must exist prior to starting the watcher to be watched successfully.
-    /// Non-existent paths will be rejected with WatchError::SourceMissing.
+    /// The event loop uses this to configure the underlying monitors (e.g., `inotify`).
+    /// The handler must guarantee that these resources are valid targets for monitoring.
     fn paths(&self) -> Vec<PathBuf>;
 
-    /// Process a batch of coalesced filesystem events which occured within the debounce window.
+    /// Reacts to a batch of events.
     ///
-    /// Returns an error if the handler should fail fatally. Otherwise, errors should be logged internally
-    /// The caller of this method should consider Errors as fatal and exit.
+    /// This is the core logic of the reactor. It receives a stable, coalesced list
+    /// of changes which must be processed.
+    ///
+    /// # Errors
+    /// * **Ok(()):** The event was handled (successfully or not), and the reactor
+    ///   remains in a valid state to process future events. Transient failures
+    ///   should be logged internally and return `Ok`.
+    /// * **Err(HandlerError):** The reactor has encountered a fatal, unrecoverable
+    ///   state. The event loop should terminate.
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError>;
 
-    /// Returns a future that resolves when the handler wants to exit.
-    /// Default: Waits for SIGINT/SIGTERM.
+    /// A future that resolves when the event loop should exit.
+    ///
+    /// This allows the reactor to proactively control the application lifecycle,
+    /// such as when a managed child process exits or a specific completion condition is met.
+    ///
+    /// The default implementation waits for OS termination signals (SIGINT/SIGTERM).
     fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
         Box::pin(async move {
             wait_for_signal(false).await;
             Ok(())
         })
     }
-    /// Any special handlers needed for resource cleanup should be implemented here.
-    /// We cannot cleanup in wait because we cannot mutably borrow self there.
-    /// And we may need to mutably borrow self to cleanup resources.
+
+    /// Performs teardown and resource release.
+    ///
+    /// This hook allows the reactor to perform graceful shutdown operations (e.g.,
+    /// sending SIGTERM to children, removing lockfiles) before the application exits.
     async fn cleanup(&mut self) {}
+}
+
+/// Represents an actionable change in the monitored environment.
+///
+/// Currently focused on filesystem changes, as this is the only relevant event source.
+/// It is broadly a unit of work for the event loop.
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub enum FsEvent {
+    /// A resource has been modified or created and is ready for processing.
+    Write(PathBuf),
+    /// A resource has been removed.
+    Remove(PathBuf),
+    /// A resource has changed location.
+    Move { from: PathBuf, to: PathBuf },
 }
 
 /// Registry to collect and coalesce filesystem events.
