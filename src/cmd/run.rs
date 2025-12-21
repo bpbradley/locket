@@ -1,11 +1,11 @@
 // run.rs
 use crate::{
+    events,
     health::StatusFile,
     logging::Logger,
     provider::Provider,
     secrets::{SecretFileManager, SecretFileOpts},
-    signal,
-    watch::{DebounceDuration, FileHandler, FsWatcher},
+    watch::{DebounceDuration, FsWatcher},
 };
 use clap::{Args, ValueEnum};
 use sysexits::ExitCode;
@@ -122,15 +122,14 @@ pub async fn run(args: RunArgs) -> ExitCode {
         RunMode::OneShot => ExitCode::Ok,
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
-            signal::recv_shutdown().await;
+            events::wait_for_signal(false).await;
 
             info!("shutdown complete");
             ExitCode::Ok
         }
         RunMode::Watch => {
-            let handler = FileHandler::new(manager);
-            let watcher = FsWatcher::new(debounce, handler);
-            match watcher.run(signal::recv_shutdown()).await {
+            let watcher = FsWatcher::new(debounce, manager);
+            match watcher.run().await {
                 Ok(_) => ExitCode::Ok,
                 Err(e) => {
                     error!(error=%e, "watch errored");

@@ -1,14 +1,13 @@
 use crate::{
     env::EnvManager,
+    events::EventHandler,
     logging::Logger,
+    process::{ProcessManager, ProcessTimeout},
     provider::Provider,
     secrets::Secret,
-    signal,
-    watch::{DebounceDuration, ExecError, FsWatcher, ProcessHandler},
+    watch::{DebounceDuration, FsWatcher, WatchError},
 };
 use clap::Args;
-use std::str::FromStr;
-use std::time::Duration;
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -108,13 +107,14 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
         }
     };
 
-    // Initialize EnvManager (Stateless)
-    // We pass the raw secrets; resolution happens inside the handler.
-    let env_manager = EnvManager::new(args.env, provider);
+    // Initialize EnvManager
+    let mut env_secrets = args.env;
+    env_secrets.extend(args.env_file);
+    let env_manager = EnvManager::new(env_secrets, provider);
 
-    // Initialize ProcessHandler
+    // Initialize ProcessManager
     let interactive = args.interactive.unwrap_or(!args.watch);
-    let mut handler = ProcessHandler::new(env_manager, args.cmd.clone(), interactive, args.timeout);
+    let mut handler = ProcessManager::new(env_manager, args.cmd.clone(), interactive, args.timeout);
 
     // Initial Start
     // We must start the process at least once regardless of mode.
@@ -129,65 +129,26 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
     if args.watch {
         let watcher = FsWatcher::new(args.debounce, handler);
 
-        // Run the watcher loop until a shutdown signal (Ctrl+C/SIGTERM) is received
-        match watcher.run(signal::recv_shutdown()).await {
+        match watcher.run().await {
             Ok(mut handler) => {
                 info!("watch loop terminated gracefully");
-                handler.stop().await;
+                handler.cleanup().await;
                 ExitCode::Ok
             }
+            Err(WatchError::Handler(_)) => ExitCode::Software,
             Err(e) => {
-                error!(error = %e, "watch loop failed");
-                ExitCode::Software
+                if !matches!(e, WatchError::Handler(_)) {
+                    error!(error = %e, "watch loop failed");
+                }
+                ExitCode::IoErr
             }
         }
     } else {
-        if let Err(e) = handler.wait().await {
-            error!(error = %e, "process execution failed");
-            return e.into();
+        let result = handler.wait().await;
+        handler.cleanup().await;
+        match result {
+            Ok(_) => ExitCode::Ok,
+            Err(_) => ExitCode::Software, //TODO migrate away from sysexits. Too much context loss.
         }
-        ExitCode::Ok
-    }
-}
-
-impl From<ExecError> for ExitCode {
-    fn from(_err: ExecError) -> Self {
-        ExitCode::Software
-    }
-}
-
-/// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
-#[derive(Debug, Clone, Copy)]
-pub struct ProcessTimeout(pub Duration);
-
-/// Defaults to milliseconds if no unit specified, otherwise uses humantime parsing.
-impl FromStr for ProcessTimeout {
-    type Err = humantime::DurationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        /* Defaults to seconds if no unit specified */
-        if let Ok(s) = s.parse::<u64>() {
-            return Ok(ProcessTimeout(Duration::from_secs(s)));
-        }
-        let duration = humantime::parse_duration(s)?;
-        Ok(ProcessTimeout(duration))
-    }
-}
-
-impl std::fmt::Display for ProcessTimeout {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", humantime::format_duration(self.0))
-    }
-}
-
-impl From<ProcessTimeout> for Duration {
-    fn from(val: ProcessTimeout) -> Self {
-        val.0
-    }
-}
-
-impl Default for ProcessTimeout {
-    fn default() -> Self {
-        ProcessTimeout(Duration::from_secs(30))
     }
 }

@@ -16,12 +16,14 @@ pub mod cmd;
 pub mod compose;
 #[cfg(any(feature = "exec", feature = "compose"))]
 pub mod env;
+pub mod events;
 pub mod health;
 pub mod logging;
 pub mod path;
+#[cfg(feature = "exec")]
+pub mod process;
 pub mod provider;
 pub mod secrets;
-pub mod signal;
 pub mod template;
 pub mod watch;
 pub mod write;

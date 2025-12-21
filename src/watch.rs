@@ -4,11 +4,10 @@
 //! It handles the complexity of "debouncing" (waiting for a quiet period)
 //! and "coalescing" (merging multiple rapid events, like Create+Modify)
 //! to prevent the secret manager from thrashing or performing redundant updates.
-//! Implementers provide a `WatchHandler` trait to specify which paths to watch
+//! Implementers provide a `EventHandler` trait to specify which paths to watch
 //! and how to handle the resulting events.
 
-use async_trait::async_trait;
-use indexmap::IndexMap;
+use crate::events::{EventHandler, FsEvent, FsEventRegistry};
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
@@ -20,12 +19,6 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
-mod file;
-#[cfg(feature = "exec")]
-mod process;
-pub use file::FileHandler;
-#[cfg(feature = "exec")]
-pub use process::{ExecError, ProcessHandler};
 
 #[derive(Debug, Error)]
 pub enum WatchError {
@@ -40,27 +33,9 @@ pub enum WatchError {
 
     #[error("source path missing: {0}")]
     SourceMissing(PathBuf),
-}
 
-/// Filesystem events for SecretFileRegistry
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-pub enum FsEvent {
-    Write(PathBuf),
-    Remove(PathBuf),
-    Move { from: PathBuf, to: PathBuf },
-}
-
-/// Handler trait for reacting to filesystem events
-#[async_trait]
-pub trait WatchHandler: Send + Sync {
-    /// Returns the list of paths to monitor.
-    ///
-    /// Note: Files must exist prior to starting the watcher to be watched successfully.
-    /// Non-existent paths will be rejected with WatchError::SourceMissing.
-    fn paths(&self) -> Vec<PathBuf>;
-
-    /// Process a batch of coalesced filesystem events which occured within the debounce window.
-    async fn handle(&mut self, events: Vec<FsEvent>) -> anyhow::Result<()>;
+    #[error(transparent)]
+    Handler(#[from] crate::events::HandlerError),
 }
 
 enum ControlFlow {
@@ -69,13 +44,13 @@ enum ControlFlow {
 }
 
 /// A Filesystem watcher that manages the lifecycle of event collection, debouncing, and flushing.
-pub struct FsWatcher<H: WatchHandler> {
+pub struct FsWatcher<H: EventHandler> {
     handler: H,
     debounce: Duration,
-    events: EventRegistry,
+    events: FsEventRegistry,
 }
 
-impl<H: WatchHandler> FsWatcher<H> {
+impl<H: EventHandler> FsWatcher<H> {
     /// Create a new FsWatcher.
     ///
     /// * `debounce`: The quiet period required before flushing events.
@@ -84,7 +59,7 @@ impl<H: WatchHandler> FsWatcher<H> {
         Self {
             handler,
             debounce: debounce.into(),
-            events: EventRegistry::new(),
+            events: FsEventRegistry::new(),
         }
     }
 
@@ -98,16 +73,12 @@ impl<H: WatchHandler> FsWatcher<H> {
     ///
     /// # Errors
     /// Returns `WatchError` if the underlying `notify` watcher fails or paths are missing.
-    pub async fn run<F>(mut self, shutdown: F) -> Result<H, WatchError>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
+    pub async fn run(mut self) -> Result<H, WatchError> {
         let (tx, mut rx) = mpsc::channel::<NotifyResult<Event>>(100);
         let tx_fs = tx.clone();
         let mut watcher = recommended_watcher(move |res| {
             let _ = tx_fs.blocking_send(res);
         })?;
-        tokio::pin!(shutdown);
         for watched in self.handler.paths() {
             if !watched.exists() {
                 return Err(WatchError::SourceMissing(watched.to_path_buf()));
@@ -123,11 +94,17 @@ impl<H: WatchHandler> FsWatcher<H> {
 
         loop {
             debug!("waiting for fs event");
+            let exit = self.handler.wait();
 
             let event = tokio::select! {
-                _ = shutdown.as_mut() => {
-                    info!("shutdown signal received");
-                    break; // Exit the loop
+                res = exit => {
+                    match res {
+                        Ok(_) => {
+                            info!("handler exit signal received");
+                            break;
+                        }
+                        Err(e) => return Err(WatchError::Handler(e)),
+                    }
                 }
                 signal = rx.recv() => {
                     match signal {
@@ -146,9 +123,9 @@ impl<H: WatchHandler> FsWatcher<H> {
             }
 
             // Enter debounce loop to coalesce rapid successive events
-            match self.debounce_loop(&mut rx, &mut shutdown).await? {
+            match self.debounce_loop(&mut rx).await? {
                 ControlFlow::Continue => {
-                    self.flush_events().await;
+                    self.flush_events().await?;
                 }
                 ControlFlow::Break => {
                     info!("exiting watcher loop.");
@@ -160,14 +137,10 @@ impl<H: WatchHandler> FsWatcher<H> {
     }
 
     /// Debounce loop to wait for a quiet period before processing events so as not to overwhelm the handler
-    async fn debounce_loop<F>(
+    async fn debounce_loop(
         &mut self,
         rx: &mut mpsc::Receiver<NotifyResult<Event>>,
-        shutdown: &mut std::pin::Pin<&mut F>,
-    ) -> Result<ControlFlow, WatchError>
-    where
-        F: Future<Output = ()>,
-    {
+    ) -> Result<ControlFlow, WatchError> {
         debug!("Debouncing events for {:?}", self.debounce);
         let deadline = Instant::now() + self.debounce;
 
@@ -181,10 +154,14 @@ impl<H: WatchHandler> FsWatcher<H> {
                 _ = &mut sleep => {
                     return Ok(ControlFlow::Continue);
                 }
-
-                _ = shutdown.as_mut() => {
-                    info!("shutdown signal received");
-                    return Ok(ControlFlow::Break);
+                res = self.handler.wait() => {
+                    match res {
+                        Ok(_) => {
+                            info!("handler exit signal received during debounce.");
+                            return Ok(ControlFlow::Break);
+                        }
+                        Err(e) => return Err(WatchError::Handler(e)),
+                    }
                 }
                 // New event received before timeout.
                 signal = rx.recv() => {
@@ -215,17 +192,16 @@ impl<H: WatchHandler> FsWatcher<H> {
     }
 
     /// Flush the registered events to the handler for processing
-    async fn flush_events(&mut self) {
+    async fn flush_events(&mut self) -> Result<(), WatchError> {
         if self.events.is_empty() {
-            return;
+            return Ok(());
         }
 
         let events: Vec<_> = self.events.drain().collect();
         debug!(count = events.len(), "processing batched fs events");
 
-        if let Err(e) = self.handler.handle(events).await {
-            warn!(error=?e, "failed to handle fs events");
-        }
+        self.handler.handle(events).await?;
+        Ok(())
     }
 
     /// Map a notify Event to an FsEvent, if relevant
@@ -254,108 +230,6 @@ impl<H: WatchHandler> FsWatcher<H> {
             },
             _ => None,
         }
-    }
-}
-
-/// Registry to collect and coalesce filesystem events.
-///
-/// It ensures that if a file is written, moved, and then deleted within the
-/// debounce window, the handler sees only the relevant outcome.
-pub struct EventRegistry {
-    map: IndexMap<PathBuf, FsEvent>,
-}
-
-/// Implementation of the EventRegistry
-impl EventRegistry {
-    pub fn new() -> Self {
-        Self {
-            map: IndexMap::new(),
-        }
-    }
-
-    /// Update the registry with a new event
-    pub fn register(&mut self, event: FsEvent) {
-        match event {
-            FsEvent::Write(ref path) => {
-                self.update(path.clone(), event);
-            }
-            FsEvent::Remove(ref path) => {
-                self.update(path.clone(), event);
-            }
-            FsEvent::Move { ref from, ref to } => {
-                self.handle_move(from.clone(), to.clone());
-            }
-        }
-    }
-
-    /// Handle a move event by resolving it against existing events in the registry
-    /// to produce the correct resultant event. This handler attempts to logically resolve the eventual
-    /// state of the file after a move, considering prior writes or moves.
-    fn handle_move(&mut self, from: PathBuf, to: PathBuf) {
-        // Resolve what the event for 'to' should be, based on the state of 'from'.
-        let event = match self.map.get(&from) {
-            // Write(A) -> Move(A->B) === Write(B).
-            Some(FsEvent::Write(_)) => FsEvent::Write(to.clone()),
-
-            // Move(Origin->A) -> Move(A->B) === Move(Origin->B).
-            Some(FsEvent::Move { from: origin, .. }) => FsEvent::Move {
-                from: origin.clone(),
-                to: to.clone(),
-            },
-            // Just move
-            _ => FsEvent::Move {
-                from: from.clone(),
-                to: to.clone(),
-            },
-        };
-
-        // Clean up the old path (it no longer exists at that location)
-        self.map.shift_remove(&from);
-
-        // Register the new event at the new location
-        self.update(to, event);
-    }
-
-    /// Update the registry with a new event for a given path, applying coalescing logic
-    /// to avoid redundant or conflicting events.
-    fn update(&mut self, path: PathBuf, new_event: FsEvent) {
-        match (self.map.get(&path), &new_event) {
-            //  Write -> Remove === Ignore
-            (Some(FsEvent::Write(_)), FsEvent::Remove(_)) => {
-                self.map.shift_remove(&path);
-            }
-
-            // Move -> Remove === Remove(Origin).
-            (Some(FsEvent::Move { .. }), FsEvent::Remove(_)) => {
-                self.map.insert(path, new_event);
-            }
-
-            // Remove -> Write === Write.
-            (Some(FsEvent::Remove(_)), FsEvent::Write(_)) => {
-                self.map.insert(path, new_event);
-            }
-
-            // Default: The new event overwrites the old state.
-            _ => {
-                self.map.insert(path, new_event);
-            }
-        }
-    }
-
-    /// Drain all registered events for processing
-    pub fn drain(&mut self) -> impl Iterator<Item = FsEvent> + '_ {
-        self.map.drain(..).map(|(_, event)| event)
-    }
-
-    /// Returns true if no events are pending flush
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-}
-
-impl Default for EventRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

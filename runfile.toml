@@ -20,6 +20,10 @@ cmd = "cargo run -- healthcheck"
 description = "cargo run"
 cmd = "cargo run -- run"
 
+[exec-watch]
+description = "Run exec in watch mode with python3"
+cmd = "cargo run -- exec --watch --interactive -- python3"
+
 [test]
 description = "cargo test"
 cmd = "cargo test"
