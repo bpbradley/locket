@@ -1,5 +1,6 @@
 use crate::{
     env::EnvManager,
+    error::LocketError,
     events::EventHandler,
     logging::Logger,
     process::{ProcessManager, ProcessTimeout},
@@ -86,7 +87,7 @@ pub struct ExecArgs {
     pub cmd: Vec<String>,
 }
 
-pub async fn exec(args: ExecArgs) -> Result<(), crate::error::LocketError> {
+pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
     args.logger.init()?;
     info!(
         "Starting locket v{} `exec` service ",
@@ -121,6 +122,6 @@ pub async fn exec(args: ExecArgs) -> Result<(), crate::error::LocketError> {
     } else {
         let result = handler.wait().await;
         handler.cleanup().await;
-        result.map_err(crate::error::LocketError::from)
+        result.map_err(LocketError::from)
     }
 }
