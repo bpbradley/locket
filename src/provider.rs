@@ -37,7 +37,7 @@ pub use ProviderSelection as Provider;
 pub enum ProviderError {
     /// Network or API errors
     #[error("network request failed: {0}")]
-    Network(#[source] anyhow::Error),
+    Network(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// The secret reference was valid syntax, but the provider couldn't find it
     #[error("secret not found: {0}")]

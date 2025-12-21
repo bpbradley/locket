@@ -5,8 +5,15 @@
 
 use clap::{Args, ValueEnum};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
+
+#[derive(Debug, Error)]
+pub enum LoggingError {
+    #[error("failed to initialize logging: {0}")]
+    Init(#[from] tracing_subscriber::util::TryInitError),
+}
 
 #[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
 pub enum LogFormat {
@@ -72,19 +79,19 @@ impl Logger {
         let directives = format!("info,locket={}", level);
         EnvFilter::new(directives)
     }
-    pub fn init(&self) -> anyhow::Result<()> {
+    pub fn init(&self) -> Result<(), LoggingError> {
         let filter = self.filter();
         match self.log_format {
             LogFormat::Json => tracing_subscriber::registry()
                 .with(filter)
                 .with(fmt::layer().json().with_current_span(false))
                 .try_init()
-                .map_err(|e| anyhow::anyhow!(e.to_string())),
+                .map_err(LoggingError::from),
             LogFormat::Text => tracing_subscriber::registry()
                 .with(filter)
                 .with(fmt::layer().with_target(false))
                 .try_init()
-                .map_err(|e| anyhow::anyhow!(e.to_string())),
+                .map_err(LoggingError::from),
         }
     }
 }

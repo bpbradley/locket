@@ -102,6 +102,7 @@ impl AppError {
                     sysexits::ExitCode::Config.into()
                 }
                 locket::compose::ComposeError::Argument(_) => sysexits::ExitCode::Usage.into(),
+                locket::compose::ComposeError::Metadata(_) => sysexits::ExitCode::Software.into(),
             },
 
             #[cfg(any(feature = "exec", feature = "compose"))]
@@ -114,7 +115,7 @@ impl AppError {
             },
 
             LocketError::Io(_) => sysexits::ExitCode::IoErr.into(),
-            LocketError::Anyhow(_) => sysexits::ExitCode::Software.into(),
+            LocketError::Logging(_) => sysexits::ExitCode::Config.into(),
         }
     }
 

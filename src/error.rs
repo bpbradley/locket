@@ -33,5 +33,5 @@ pub enum LocketError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Anyhow(#[from] anyhow::Error),
+    Logging(#[from] crate::logging::LoggingError),
 }

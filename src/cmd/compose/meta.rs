@@ -63,7 +63,9 @@ pub async fn metadata(_project: String) -> Result<(), crate::error::LocketError>
         Ok(_) => Ok(()),
         Err(e) => {
             eprintln!("[ERROR] Metadata generation failed: {}", e);
-            Err(crate::error::LocketError::Anyhow(anyhow::anyhow!(e)))
+            Err(crate::error::LocketError::Compose(
+                crate::compose::ComposeError::Metadata(e),
+            ))
         }
     }
 }
