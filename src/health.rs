@@ -6,6 +6,17 @@
 use crate::path::parse_absolute;
 use clap::Args;
 use std::path::PathBuf;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum HealthError {
+    #[error("service is unhealthy: status file not found")]
+    Unhealthy,
+
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
 #[derive(Args, Debug)]
 pub struct StatusFile {
     /// Status file path used for healthchecks

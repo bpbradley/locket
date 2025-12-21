@@ -87,6 +87,10 @@ impl AppError {
                 WatchError::Handler(h) => Self::handler_exit_code(h),
             },
             LocketError::Handler(e) => Self::handler_exit_code(e),
+            LocketError::Health(e) => match e {
+                locket::health::HealthError::Unhealthy => 1,
+                locket::health::HealthError::Io(_) => sysexits::ExitCode::IoErr.into(),
+            },
 
             #[cfg(feature = "exec")]
             LocketError::Process(e) => Self::process_exit_code(e),

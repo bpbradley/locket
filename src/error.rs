@@ -1,5 +1,6 @@
 use crate::{
-    events::HandlerError, provider::ProviderError, secrets::SecretError, watch::WatchError,
+    events::HandlerError, health::HealthError, logging::LoggingError, provider::ProviderError,
+    secrets::SecretError, watch::WatchError,
 };
 use thiserror::Error;
 
@@ -17,6 +18,9 @@ pub enum LocketError {
     #[error(transparent)]
     Handler(#[from] HandlerError),
 
+    #[error(transparent)]
+    Health(#[from] HealthError),
+
     #[cfg(feature = "exec")]
     #[error(transparent)]
     Process(#[from] crate::process::ProcessError),
@@ -33,5 +37,5 @@ pub enum LocketError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Logging(#[from] crate::logging::LoggingError),
+    Logging(#[from] LoggingError),
 }
