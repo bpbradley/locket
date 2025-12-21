@@ -1,15 +1,13 @@
 use crate::{
     env::EnvManager,
-    events::{EventHandler, HandlerError},
+    events::EventHandler,
     logging::Logger,
-    process::ProcessManager,
+    process::{ProcessManager, ProcessTimeout},
     provider::Provider,
     secrets::Secret,
     watch::{DebounceDuration, FsWatcher, WatchError},
 };
 use clap::Args;
-use std::str::FromStr;
-use std::time::Duration;
 use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
@@ -137,7 +135,7 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
                 handler.cleanup().await;
                 ExitCode::Ok
             }
-            Err(WatchError::Handler(e)) => e.into(),
+            Err(WatchError::Handler(_)) => ExitCode::Software,
             Err(e) => {
                 if !matches!(e, WatchError::Handler(_)) {
                     error!(error = %e, "watch loop failed");
@@ -150,63 +148,7 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
         handler.cleanup().await;
         match result {
             Ok(_) => ExitCode::Ok,
-            Err(e) => e.into(),
+            Err(_) => ExitCode::Software, //TODO migrate away from sysexits. Too much context loss.
         }
-    }
-}
-
-impl From<HandlerError> for ExitCode {
-    fn from(e: HandlerError) -> Self {
-        match e {
-            HandlerError::Exited(status) => {
-                if status.code().is_some() {
-                    // TODO: Need to map i32 to ExitCode properly
-                    ExitCode::Software
-                } else {
-                    ExitCode::Software
-                }
-            }
-            HandlerError::Interrupted => ExitCode::Ok,
-            HandlerError::Io(_) => ExitCode::IoErr,
-            HandlerError::Env(_) | HandlerError::Secret(_) => ExitCode::Config,
-            HandlerError::Provider(_) => ExitCode::Unavailable,
-            _ => ExitCode::Software,
-        }
-    }
-}
-
-/// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
-#[derive(Debug, Clone, Copy)]
-pub struct ProcessTimeout(pub Duration);
-
-/// Defaults to milliseconds if no unit specified, otherwise uses humantime parsing.
-impl FromStr for ProcessTimeout {
-    type Err = humantime::DurationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        /* Defaults to seconds if no unit specified */
-        if let Ok(s) = s.parse::<u64>() {
-            return Ok(ProcessTimeout(Duration::from_secs(s)));
-        }
-        let duration = humantime::parse_duration(s)?;
-        Ok(ProcessTimeout(duration))
-    }
-}
-
-impl std::fmt::Display for ProcessTimeout {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", humantime::format_duration(self.0))
-    }
-}
-
-impl From<ProcessTimeout> for Duration {
-    fn from(val: ProcessTimeout) -> Self {
-        val.0
-    }
-}
-
-impl Default for ProcessTimeout {
-    fn default() -> Self {
-        ProcessTimeout(Duration::from_secs(30))
     }
 }

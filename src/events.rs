@@ -9,13 +9,13 @@
 //! event consumers (like a process manager or template renderer).
 
 #[cfg(any(feature = "exec", feature = "compose"))]
-use crate::env::EnvError;
+use crate::{env::EnvError, process::ProcessError};
 use crate::{provider::ProviderError, secrets::SecretError};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use std::path::PathBuf;
-use std::process::ExitStatus;
+use std::process::{ExitCode, ExitStatus};
 use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{debug, info};
@@ -37,6 +37,10 @@ pub enum HandlerError {
     #[error(transparent)]
     Provider(#[from] ProviderError),
 
+    #[cfg(any(feature = "exec", feature = "compose"))]
+    #[error(transparent)]
+    Process(#[from] ProcessError),
+
     #[error("Process I/O error")]
     Io(#[from] std::io::Error),
 
@@ -57,6 +61,23 @@ impl HandlerError {
             Ok(())
         } else {
             Err(Self::Exited(status))
+        }
+    }
+}
+
+impl From<HandlerError> for ExitCode {
+    fn from(e: HandlerError) -> Self {
+        match e {
+            #[cfg(feature = "exec")]
+            HandlerError::Process(proc_err) => proc_err.into(),
+            #[cfg(any(feature = "exec", feature = "compose"))]
+            HandlerError::Env(_) | HandlerError::Secret(_) => {
+                ExitCode::from(sysexits::ExitCode::Config as u8)
+            }
+            HandlerError::Provider(_) => ExitCode::from(sysexits::ExitCode::Unavailable as u8),
+            HandlerError::Io(_) => ExitCode::from(sysexits::ExitCode::IoErr as u8),
+            HandlerError::Interrupted => ExitCode::SUCCESS,
+            _ => ExitCode::from(sysexits::ExitCode::Software as u8),
         }
     }
 }

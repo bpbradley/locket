@@ -1,5 +1,12 @@
+//! Process lifecycle management and signal proxying.
+//!
+//! Implements the `ProcessManager`, which spawns and manages
+//! a child process with a dynamically resolved environment.
+//! It listens for filesystem events via the `EventHandler` trait,
+//! and restarts the child process when relevant changes occur.
+
 use crate::{
-    env::EnvManager,
+    env::{EnvError, EnvManager},
     events::{EventHandler, FsEvent, HandlerError, wait_for_signal},
 };
 use async_trait::async_trait;
@@ -13,7 +20,8 @@ use secrecy::ExposeSecret;
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::process::ExitStatus;
+use std::process::{ExitCode, ExitStatus};
+use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
 use thiserror::Error;
@@ -23,28 +31,83 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+/// Errors specific to process lifecycle management.
 #[derive(Debug, Error)]
-pub enum ExecError {
-    #[error("child process failed with code {0}")]
-    Code(i32),
+pub enum ProcessError {
+    #[error(transparent)]
+    Env(#[from] EnvError),
 
-    #[error("child process terminated by signal")]
-    Signal,
-
-    #[error("failed to wait on child: {0}")]
+    #[error("process I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("no child process is currently running")]
-    NoChild,
+    #[error("child process exited with status {0}")]
+    Exited(ExitStatus),
+
+    #[error("child process terminated by signal")]
+    Signaled,
 }
 
-impl From<ExitStatus> for ExecError {
-    fn from(status: ExitStatus) -> Self {
-        if let Some(code) = status.code() {
-            Self::Code(code)
+impl ProcessError {
+    pub fn from_status(status: ExitStatus) -> Result<(), Self> {
+        if status.success() {
+            Ok(())
         } else {
-            Self::Signal
+            Err(Self::Exited(status))
         }
+    }
+}
+
+impl From<ProcessError> for ExitCode {
+    fn from(e: ProcessError) -> Self {
+        match e {
+            ProcessError::Exited(status) => {
+                if let Some(code) = status.code() {
+                    ExitCode::from(code as u8)
+                } else {
+                    ExitCode::from(sysexits::ExitCode::Software as u8)
+                }
+            }
+            ProcessError::Signaled => ExitCode::from(128 + 15),
+
+            // Environment errors might come wrapped in ProcessError now too
+            ProcessError::Env(_) => ExitCode::from(sysexits::ExitCode::Config as u8),
+            ProcessError::Io(_) => ExitCode::from(sysexits::ExitCode::IoErr as u8),
+        }
+    }
+}
+
+/// Default timeout for waiting for a child process to exit gracefully after SIGTERM.
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessTimeout(pub Duration);
+
+/// Defaults to seconds if no unit specified, otherwise uses humantime parsing.
+impl FromStr for ProcessTimeout {
+    type Err = humantime::DurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(s) = s.parse::<u64>() {
+            return Ok(ProcessTimeout(Duration::from_secs(s)));
+        }
+        let duration = humantime::parse_duration(s)?;
+        Ok(ProcessTimeout(duration))
+    }
+}
+
+impl std::fmt::Display for ProcessTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", humantime::format_duration(self.0))
+    }
+}
+
+impl From<ProcessTimeout> for Duration {
+    fn from(val: ProcessTimeout) -> Self {
+        val.0
+    }
+}
+
+impl Default for ProcessTimeout {
+    fn default() -> Self {
+        ProcessTimeout(Duration::from_secs(30))
     }
 }
 
@@ -63,10 +126,15 @@ pub struct ProcessManager {
     env: EnvManager,
     cmd: Vec<String>,
     env_hash: u64,
+    /// The OS PID of the currently running child process.
     target: Option<Pid>,
+    /// Background task that forwards OS signals to the child.
     forwarder: Option<JoinHandle<()>>,
+    /// Background task that waits for the child to exit.
     monitor: Option<JoinHandle<()>>,
+    /// Channel to notify the main loop when the child exits.
     exit_rx: watch::Receiver<Option<ExitStatus>>,
+    /// Saved terminal state (for restoring TTY after child exit).
     termios: Option<Mutex<Termios>>,
     interactive: bool,
     timeout: Duration,
@@ -167,7 +235,7 @@ impl ProcessManager {
     async fn restart(
         &mut self,
         env_map: &HashMap<String, secrecy::SecretString>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), ProcessError> {
         self.stop().await;
 
         if self.cmd.is_empty() {
@@ -220,32 +288,11 @@ impl ProcessManager {
         Ok(())
     }
 
-    pub async fn wait(&mut self) -> Result<ExitStatus, ExecError> {
-        // Since we moved the child to the background task, we can't wait on it directly.
-        // But we can wait on the receiver for the exit status.
-        if let Some(status) = *self.exit_rx.borrow() {
-            return Ok(status);
-        }
-
-        let mut rx = self.exit_rx.clone();
-        loop {
-            // changed() waits for the value to update
-            if rx.changed().await.is_err() {
-                // Sender dropped
-                return Err(ExecError::NoChild);
-            }
-
-            // Check the new value
-            if let Some(status) = *rx.borrow() {
-                return Ok(status);
-            }
-        }
-    }
-
-    pub async fn start(&mut self) -> anyhow::Result<()> {
+    pub async fn start(&mut self) -> Result<(), ProcessError> {
         let env = self.env.resolve().await?;
         self.env_hash = Self::hash_env(&env);
-        self.restart(&env).await
+        self.restart(&env).await?;
+        Ok(())
     }
 
     pub async fn stop(&mut self) {
@@ -358,6 +405,7 @@ impl EventHandler for ProcessManager {
         }
         Ok(())
     }
+
     fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
         let mut rx = self.exit_rx.clone();
         let os_signal = wait_for_signal(self.interactive);
