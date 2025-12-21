@@ -1,4 +1,6 @@
-use crate::{env::EnvError, provider::ProviderError, secrets::SecretError};
+#[cfg(any(feature = "exec", feature = "compose"))]
+use crate::env::EnvError;
+use crate::{provider::ProviderError, secrets::SecretError};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -19,6 +21,7 @@ pub enum FsEvent {
 /// Errors that can occur during event handling or process lifecycle management.
 #[derive(Debug, Error)]
 pub enum HandlerError {
+    #[cfg(any(feature = "exec", feature = "compose"))]
     #[error(transparent)]
     Env(#[from] EnvError),
 
