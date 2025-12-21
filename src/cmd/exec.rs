@@ -5,11 +5,10 @@ use crate::{
     process::{ProcessManager, ProcessTimeout},
     provider::Provider,
     secrets::Secret,
-    watch::{DebounceDuration, FsWatcher, WatchError},
+    watch::{DebounceDuration, FsWatcher},
 };
 use clap::Args;
-use sysexits::ExitCode;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 #[derive(Args, Debug)]
 pub struct ExecArgs {
@@ -87,11 +86,8 @@ pub struct ExecArgs {
     pub cmd: Vec<String>,
 }
 
-pub async fn exec(args: ExecArgs) -> ExitCode {
-    if let Err(e) = args.logger.init() {
-        error!(error=%e, "init logging failed");
-        return ExitCode::CantCreat;
-    }
+pub async fn exec(args: ExecArgs) -> Result<(), crate::error::LocketError> {
+    args.logger.init()?;
     info!(
         "Starting locket v{} `exec` service ",
         env!("CARGO_PKG_VERSION")
@@ -99,13 +95,7 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
     debug!("effective config: {:#?}", args);
 
     // Initialize Provider
-    let provider = match args.provider.build().await {
-        Ok(p) => p,
-        Err(e) => {
-            error!(error = %e, "failed to initialize secrets provider");
-            return ExitCode::Config;
-        }
-    };
+    let provider = args.provider.build().await?;
 
     // Initialize EnvManager
     let mut env_secrets = args.env;
@@ -119,36 +109,18 @@ pub async fn exec(args: ExecArgs) -> ExitCode {
     // Initial Start
     // We must start the process at least once regardless of mode.
     info!("resolving environment and starting process...");
-    if let Err(e) = handler.start().await {
-        error!(error = %e, "failed to start process");
-        // Distinguish between configuration errors (e.g. template missing) and IO errors
-        return ExitCode::Unavailable;
-    }
+    handler.start().await?;
 
     // Execution Mode Branch
     if args.watch {
         let watcher = FsWatcher::new(args.debounce, handler);
 
-        match watcher.run().await {
-            Ok(mut handler) => {
-                info!("watch loop terminated gracefully");
-                handler.cleanup().await;
-                ExitCode::Ok
-            }
-            Err(WatchError::Handler(_)) => ExitCode::Software,
-            Err(e) => {
-                if !matches!(e, WatchError::Handler(_)) {
-                    error!(error = %e, "watch loop failed");
-                }
-                ExitCode::IoErr
-            }
-        }
+        watcher.run().await?;
+        info!("watch loop terminated gracefully");
+        Ok(())
     } else {
         let result = handler.wait().await;
         handler.cleanup().await;
-        match result {
-            Ok(_) => ExitCode::Ok,
-            Err(_) => ExitCode::Software, //TODO migrate away from sysexits. Too much context loss.
-        }
+        result.map_err(crate::error::LocketError::from)
     }
 }

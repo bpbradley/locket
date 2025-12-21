@@ -16,6 +16,7 @@ pub mod cmd;
 pub mod compose;
 #[cfg(any(feature = "exec", feature = "compose"))]
 pub mod env;
+pub mod error;
 pub mod events;
 pub mod health;
 pub mod logging;

@@ -6,7 +6,6 @@
 //! to query the provider for its capabilities.
 //! The metadata is derived from clap configuration on-demand.
 use clap::{Args, Subcommand};
-use sysexits::ExitCode;
 pub mod down;
 pub mod meta;
 pub mod up;
@@ -32,7 +31,7 @@ pub enum ComposeCommand {
     Metadata,
 }
 
-pub async fn compose(args: ComposeArgs) -> ExitCode {
+pub async fn compose(args: ComposeArgs) -> Result<(), crate::error::LocketError> {
     let project = args.project_name;
     match args.cmd {
         ComposeCommand::Up(args) => up::up(project, *args).await,

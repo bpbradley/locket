@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use std::path::PathBuf;
-use std::process::{ExitCode, ExitStatus};
+use std::process::ExitStatus;
 use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{debug, info};
@@ -44,7 +44,7 @@ pub enum HandlerError {
     #[error("Process I/O error")]
     Io(#[from] std::io::Error),
 
-    #[error("Process exited with status {0}")]
+    #[error("Process exited with {0}")]
     Exited(ExitStatus),
 
     #[error("Process terminated by signal")]
@@ -61,23 +61,6 @@ impl HandlerError {
             Ok(())
         } else {
             Err(Self::Exited(status))
-        }
-    }
-}
-
-impl From<HandlerError> for ExitCode {
-    fn from(e: HandlerError) -> Self {
-        match e {
-            #[cfg(feature = "exec")]
-            HandlerError::Process(proc_err) => proc_err.into(),
-            #[cfg(any(feature = "exec", feature = "compose"))]
-            HandlerError::Env(_) | HandlerError::Secret(_) => {
-                ExitCode::from(sysexits::ExitCode::Config as u8)
-            }
-            HandlerError::Provider(_) => ExitCode::from(sysexits::ExitCode::Unavailable as u8),
-            HandlerError::Io(_) => ExitCode::from(sysexits::ExitCode::IoErr as u8),
-            HandlerError::Interrupted => ExitCode::SUCCESS,
-            _ => ExitCode::from(sysexits::ExitCode::Software as u8),
         }
     }
 }

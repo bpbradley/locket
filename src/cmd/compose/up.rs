@@ -43,16 +43,10 @@ pub struct UpArgs {
     pub service: String,
 }
 
-pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
+pub async fn up(project: String, args: UpArgs) -> Result<(), crate::error::LocketError> {
     ComposeMsg::info(format!("Starting project: {}", project));
 
-    let provider = match args.provider.build().await {
-        Ok(p) => p,
-        Err(e) => {
-            ComposeMsg::error(format!("Failed to initialize provider: {}", e));
-            return sysexits::ExitCode::Config;
-        }
-    };
+    let provider = args.provider.build().await?;
 
     let mut secrets = Vec::with_capacity(args.env_file.len() + args.env.len());
 
@@ -61,18 +55,12 @@ pub async fn up(project: String, args: UpArgs) -> sysexits::ExitCode {
 
     let manager = EnvManager::new(secrets, provider);
 
-    let env = match manager.resolve().await {
-        Ok(map) => map,
-        Err(e) => {
-            ComposeMsg::error(format!("Failed to resolve environment: {}", e));
-            return sysexits::ExitCode::Unavailable;
-        }
-    };
+    let env = manager.resolve().await?;
 
     for (key, value) in env {
         ComposeMsg::set_env(&key, value.expose_secret());
         ComposeMsg::debug(format!("Injected secret: {}", key));
     }
 
-    sysexits::ExitCode::Ok
+    Ok(())
 }

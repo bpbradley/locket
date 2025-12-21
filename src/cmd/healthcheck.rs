@@ -1,6 +1,5 @@
 use crate::health::StatusFile;
 use clap::Args;
-use sysexits::ExitCode;
 
 #[derive(Args, Debug)]
 pub struct HealthArgs {
@@ -9,10 +8,13 @@ pub struct HealthArgs {
     pub status_file: StatusFile,
 }
 
-pub fn healthcheck(args: HealthArgs) -> ExitCode {
+pub fn healthcheck(args: HealthArgs) -> Result<(), crate::error::LocketError> {
     if args.status_file.is_ready() {
-        ExitCode::Ok
+        Ok(())
     } else {
-        ExitCode::Unavailable
+        Err(crate::error::LocketError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "status file not found",
+        )))
     }
 }

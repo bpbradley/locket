@@ -20,7 +20,7 @@ use secrecy::ExposeSecret;
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::process::{ExitCode, ExitStatus};
+use std::process::ExitStatus;
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -53,25 +53,6 @@ impl ProcessError {
             Ok(())
         } else {
             Err(Self::Exited(status))
-        }
-    }
-}
-
-impl From<ProcessError> for ExitCode {
-    fn from(e: ProcessError) -> Self {
-        match e {
-            ProcessError::Exited(status) => {
-                if let Some(code) = status.code() {
-                    ExitCode::from(code as u8)
-                } else {
-                    ExitCode::from(sysexits::ExitCode::Software as u8)
-                }
-            }
-            ProcessError::Signaled => ExitCode::from(128 + 15),
-
-            // Environment errors might come wrapped in ProcessError now too
-            ProcessError::Env(_) => ExitCode::from(sysexits::ExitCode::Config as u8),
-            ProcessError::Io(_) => ExitCode::from(sysexits::ExitCode::IoErr as u8),
         }
     }
 }

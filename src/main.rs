@@ -5,12 +5,13 @@
 use clap::Parser;
 use locket::cmd;
 use locket::cmd::{Cli, Command};
-use sysexits::ExitCode;
+use locket::error::LocketError;
+use std::process::{ExitCode, Termination};
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    match cli.cmd {
+    let result: Result<(), LocketError> = match cli.cmd {
         Command::Run(args) => cmd::run(*args).await,
         #[cfg(feature = "exec")]
         Command::Exec(args) => cmd::exec(*args).await,
@@ -27,7 +28,11 @@ async fn main() -> ExitCode {
                 "URL": "https://github.com/bpbradley/locket"
             });
             println!("{}", metadata);
-            sysexits::ExitCode::Ok
+            Ok(())
         }
+    };
+    match result {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => e.report(),
     }
 }

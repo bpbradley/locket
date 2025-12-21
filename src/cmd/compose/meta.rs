@@ -36,7 +36,7 @@ struct Parameter<'a> {
     enum_values: Option<String>,
 }
 
-pub async fn metadata(_project: String) -> sysexits::ExitCode {
+pub async fn metadata(_project: String) -> Result<(), crate::error::LocketError> {
     let run = || -> Result<(), String> {
         let cmd = Cli::command();
 
@@ -60,10 +60,10 @@ pub async fn metadata(_project: String) -> sysexits::ExitCode {
     };
 
     match run() {
-        Ok(_) => sysexits::ExitCode::Ok,
+        Ok(_) => Ok(()),
         Err(e) => {
             eprintln!("[ERROR] Metadata generation failed: {}", e);
-            sysexits::ExitCode::Software
+            Err(crate::error::LocketError::Anyhow(anyhow::anyhow!(e)))
         }
     }
 }
