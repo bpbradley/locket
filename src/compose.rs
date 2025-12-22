@@ -27,6 +27,9 @@ pub enum ComposeError {
 
     #[error("Invalid Args: {0}")]
     Argument(String),
+
+    #[error("Metadata generation failed: {0}")]
+    Metadata(String),
 }
 
 impl ComposeError {

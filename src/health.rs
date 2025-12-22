@@ -6,6 +6,17 @@
 use crate::path::parse_absolute;
 use clap::Args;
 use std::path::PathBuf;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum HealthError {
+    #[error("service is unhealthy: status file not found")]
+    Unhealthy,
+
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
 #[derive(Args, Debug)]
 pub struct StatusFile {
     /// Status file path used for healthchecks
@@ -25,14 +36,14 @@ impl StatusFile {
     pub fn is_ready(&self) -> bool {
         self.path.exists()
     }
-    pub fn mark_ready(&self) -> anyhow::Result<()> {
+    pub fn mark_ready(&self) -> std::io::Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&self.path, b"ready")?;
         Ok(())
     }
-    pub fn clear(&self) -> anyhow::Result<()> {
+    pub fn clear(&self) -> std::io::Result<()> {
         if self.path.exists() {
             std::fs::remove_file(&self.path)?;
         }

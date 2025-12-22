@@ -1,4 +1,4 @@
-use crate::cmd::Cli;
+use crate::{cmd::Cli, error::LocketError};
 use clap::{Arg, Command, CommandFactory};
 use serde::Serialize;
 use std::borrow::Cow;
@@ -36,7 +36,7 @@ struct Parameter<'a> {
     enum_values: Option<String>,
 }
 
-pub async fn metadata(_project: String) -> sysexits::ExitCode {
+pub async fn metadata(_project: String) -> Result<(), LocketError> {
     let run = || -> Result<(), String> {
         let cmd = Cli::command();
 
@@ -60,10 +60,12 @@ pub async fn metadata(_project: String) -> sysexits::ExitCode {
     };
 
     match run() {
-        Ok(_) => sysexits::ExitCode::Ok,
+        Ok(_) => Ok(()),
         Err(e) => {
             eprintln!("[ERROR] Metadata generation failed: {}", e);
-            sysexits::ExitCode::Software
+            Err(LocketError::Compose(
+                crate::compose::ComposeError::Metadata(e),
+            ))
         }
     }
 }

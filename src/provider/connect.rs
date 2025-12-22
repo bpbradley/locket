@@ -129,7 +129,7 @@ impl OpConnectProvider {
             .bearer_auth(token.expose_secret())
             .send()
             .await
-            .map_err(|e| ProviderError::Network(anyhow::Error::new(e)))?;
+            .map_err(|e| ProviderError::Network(Box::new(e)))?;
 
         let status = resp.status();
 

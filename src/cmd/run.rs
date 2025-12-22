@@ -8,7 +8,6 @@ use crate::{
     watch::{DebounceDuration, FsWatcher},
 };
 use clap::{Args, ValueEnum};
-use sysexits::ExitCode;
 use tracing::{debug, error, info};
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
@@ -53,11 +52,8 @@ pub struct RunArgs {
     provider: Provider,
 }
 
-pub async fn run(args: RunArgs) -> ExitCode {
-    if let Err(e) = args.logger.init() {
-        error!(error=%e, "init logging failed");
-        return ExitCode::CantCreat;
-    }
+pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
+    args.logger.init()?;
     info!(
         "Starting locket v{} `run` service ",
         env!("CARGO_PKG_VERSION")
@@ -78,64 +74,31 @@ pub async fn run(args: RunArgs) -> ExitCode {
         error!(error=%e, "failed to clear status file on startup");
     });
 
-    let provider = match provider.build().await {
-        Ok(p) => p,
-        Err(e) => {
-            error!(error=%e, "invalid provider configuration");
-            return ExitCode::Config;
-        }
-    };
+    let provider = provider.build().await?;
 
-    if let Err(e) = manager.resolve() {
-        error!(error=%e, "failed to resolve secret configuration");
-        return ExitCode::Config;
-    }
+    manager.resolve()?;
 
-    let manager = match SecretFileManager::new(manager, provider) {
-        Ok(m) => m,
-        Err(e) => {
-            error!(error=%e, "failed to initialize SecretFileManager");
-            return ExitCode::Config;
-        }
-    };
+    let manager = SecretFileManager::new(manager, provider)?;
 
-    match manager.collisions() {
-        Ok(()) => {}
-        Err(e) => {
-            error!(error=%e, "secret destination collisions detected");
-            return ExitCode::Config;
-        }
-    };
-
-    if let Err(e) = manager.inject_all().await {
-        error!(error=%e, "inject_all failed");
-        return ExitCode::IoErr;
-    }
+    manager.collisions()?;
+    manager.inject_all().await?;
 
     debug!("injection complete; creating status file");
-    if let Err(e) = status.mark_ready() {
-        error!(error=%e, "failed to write status file");
-        return ExitCode::IoErr;
-    }
+    status.mark_ready()?;
 
     match mode {
-        RunMode::OneShot => ExitCode::Ok,
+        RunMode::OneShot => Ok(()),
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
             events::wait_for_signal(false).await;
 
             info!("shutdown complete");
-            ExitCode::Ok
+            Ok(())
         }
         RunMode::Watch => {
             let watcher = FsWatcher::new(debounce, manager);
-            match watcher.run().await {
-                Ok(_) => ExitCode::Ok,
-                Err(e) => {
-                    error!(error=%e, "watch errored");
-                    ExitCode::IoErr
-                }
-            }
+            watcher.run().await?;
+            Ok(())
         }
     }
 }
