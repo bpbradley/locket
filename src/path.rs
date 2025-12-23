@@ -49,7 +49,7 @@ impl CanonicalPath {
 }
 
 /// Extension trait for `Path` to provide robust normalization and security checks.
-pub trait PathExt {
+trait PathExt {
     /// Logically cleans the path by resolving `.` and `..` components.
     ///
     /// This is a lexical operation. It does not touch the filesystem,
@@ -210,6 +210,56 @@ impl FromStr for CanonicalPath {
     }
 }
 
+impl PartialEq<Path> for AbsolutePath {
+    fn eq(&self, other: &Path) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<PathBuf> for AbsolutePath {
+    fn eq(&self, other: &PathBuf) -> bool {
+        self.0 == *other
+    }
+}
+
+// Allow comparing "Path == AbsolutePath" (reverse order)
+impl PartialEq<AbsolutePath> for Path {
+    fn eq(&self, other: &AbsolutePath) -> bool {
+        self == other.0
+    }
+}
+
+impl PartialEq<AbsolutePath> for PathBuf {
+    fn eq(&self, other: &AbsolutePath) -> bool {
+        *self == other.0
+    }
+}
+
+// Do the same for CanonicalPath while we're at it
+impl PartialEq<Path> for CanonicalPath {
+    fn eq(&self, other: &Path) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<PathBuf> for CanonicalPath {
+    fn eq(&self, other: &PathBuf) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<CanonicalPath> for Path {
+    fn eq(&self, other: &CanonicalPath) -> bool {
+        self == other.0
+    }
+}
+
+impl PartialEq<CanonicalPath> for PathBuf {
+    fn eq(&self, other: &CanonicalPath) -> bool {
+        *self == other.0
+    }
+}
+
 pub fn parse_secret_path(s: &str) -> Result<crate::secrets::Secret, String> {
     crate::secrets::Secret::from_file(s).map_err(|e| e.to_string())
 }
@@ -261,7 +311,7 @@ mod tests {
     #[test]
     fn test_absolute_path_cleaning() {
         let p = AbsolutePath::new("a/b/../c");
-        let s = p.to_string(); 
+        let s = p.to_string();
         assert!(!s.contains(".."), "Path should be cleaned of '..'");
         assert!(s.ends_with("c"), "Path should end with 'c'");
     }
@@ -284,7 +334,7 @@ mod tests {
         let link_path = tmp.path().join("link");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&file_path, &link_path).unwrap();
-        
+
         #[cfg(unix)]
         {
             let canon = CanonicalPath::try_new(&link_path).unwrap();
@@ -308,7 +358,7 @@ mod tests {
 
         // Invalid format
         assert!(PathMapping::from_str("garbage").is_err());
-        
+
         // Missing source file
         let s_missing = format!("{}_missing:/dst", src_str);
         assert!(PathMapping::from_str(&s_missing).is_err());

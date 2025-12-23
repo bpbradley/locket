@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use locket::{
-    path::{PathMapping, AbsolutePath, CanonicalPath},
+    path::{AbsolutePath, CanonicalPath, PathMapping},
     provider::{ProviderError, SecretsProvider},
     secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretFileOpts},
 };
 use secrecy::SecretString;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 use tempfile::tempdir;
 use tracing::debug;
 

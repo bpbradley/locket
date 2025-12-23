@@ -68,9 +68,10 @@ impl SecretFile {
         })
     }
 
-    pub fn dest(&self) -> &Path {
+    pub fn dest(&self) -> &AbsolutePath {
         &self.dest
     }
+
     pub fn source(&self) -> &SecretSource {
         &self.source
     }

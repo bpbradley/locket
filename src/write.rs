@@ -4,6 +4,7 @@
 //! using temporary files and atomic renames to ensure that consumers never
 //! see partially written files. It also ensures that the destination directories
 //! exist with the correct permissions before writing.
+use crate::path::{AbsolutePath, CanonicalPath};
 use clap::Args;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -33,7 +34,7 @@ impl FileWriter {
     ///
     /// This ensures that consumers never see a partially written file.
     /// It also ensures the destination directory exists with the configured permissions.
-    pub fn atomic_write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    pub fn atomic_write(&self, path: &AbsolutePath, bytes: &[u8]) -> io::Result<()> {
         let parent = self.prepare(path)?;
 
         let mut tmp = tempfile::Builder::new()
@@ -54,7 +55,7 @@ impl FileWriter {
     }
 
     /// Streams data from source to destination using a temporary file for atomicity.
-    pub fn atomic_copy(&self, from: &Path, to: &Path) -> io::Result<()> {
+    pub fn atomic_copy(&self, from: &CanonicalPath, to: &AbsolutePath) -> io::Result<()> {
         let parent = self.prepare(to)?;
         let mut source = File::open(from)?;
 
@@ -76,7 +77,7 @@ impl FileWriter {
     /// Note: This cannot change file permissions easily without a race condition,
     /// so we assume the source file already has the desired permissions
     /// or we rely on the directory permissions to restrict access.
-    pub fn atomic_move(&self, from: &Path, to: &Path) -> io::Result<()> {
+    pub fn atomic_move(&self, from: &CanonicalPath, to: &AbsolutePath) -> io::Result<()> {
         let parent = self.prepare(to)?;
 
         fs::rename(from, to)?;
@@ -85,7 +86,7 @@ impl FileWriter {
         Ok(())
     }
 
-    pub fn create_temp_for(&self, dst: &Path) -> io::Result<tempfile::NamedTempFile> {
+    pub fn create_temp_for(&self, dst: &AbsolutePath) -> io::Result<tempfile::NamedTempFile> {
         let parent = self.prepare(dst)?;
         let temp = tempfile::Builder::new()
             .prefix(".tmp.")
@@ -186,7 +187,9 @@ mod tests {
 
         let writer = FileWriter::new(0o600, 0o700);
 
-        writer.atomic_write(&output, b"data").unwrap();
+        writer
+            .atomic_write(&AbsolutePath::new(&output), b"data")
+            .unwrap();
 
         let meta = fs::metadata(&output).unwrap();
         let mode = meta.permissions().mode();
@@ -198,10 +201,12 @@ mod tests {
     #[test]
     fn test_atomic_copy_streaming() {
         let tmp = tempfile::tempdir().unwrap();
-        let src = tmp.path().join("src");
-        let dst = tmp.path().join("dst");
+        let src = AbsolutePath::new(tmp.path().join("src"));
+        let dst = AbsolutePath::new(tmp.path().join("dst"));
 
         fs::write(&src, b"content").unwrap();
+
+        let src = src.canonicalize().expect("src must exist");
 
         let writer = FileWriter::default();
         writer.atomic_copy(&src, &dst).unwrap();

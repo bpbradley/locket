@@ -1,6 +1,6 @@
-use locket::path::{PathMapping, AbsolutePath, CanonicalPath};
-use std::path::Path;
+use locket::path::{AbsolutePath, CanonicalPath, PathMapping};
 use locket::secrets::{SecretError, SecretFileOpts};
+use std::path::Path;
 use tempfile::tempdir;
 
 #[test]

@@ -3,7 +3,7 @@
 //! This module defines the `SecretFileRegistry`, which maintains
 //! a mapping of secret source files to their intended output destinations
 //! based on configured path mappings and `SecretFile` definitions.
-use crate::path::{PathMapping, CanonicalPath, AbsolutePath};
+use crate::path::{AbsolutePath, CanonicalPath, PathMapping};
 use crate::secrets::{MemSize, SecretError, SecretSource, file::SecretFile};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -231,7 +231,7 @@ impl SecretFileRegistry {
 
             // Check for drift
             // i.e. the file's current destination doesn't match calculation
-            if entry.file.dest() != AbsolutePath::new(old_root_dst.join(rel)).into_inner() {
+            if entry.file.dest().as_ref() != AbsolutePath::new(old_root_dst.join(rel)).as_ref() {
                 return None;
             }
 
@@ -320,7 +320,7 @@ mod tests {
             .expect("io error")
             .expect("should be tracked");
         assert_eq!(
-            general.dest(),
+            general.dest().to_path_buf(),
             PathBuf::from("/secrets/general/common.yaml")
         );
 
@@ -329,7 +329,10 @@ mod tests {
             .upsert(&f_db)
             .expect("io error")
             .expect("should be tracked");
-        assert_eq!(specific.dest(), PathBuf::from("/secrets/specific/db.yaml"));
+        assert_eq!(
+            specific.dest().to_path_buf(),
+            PathBuf::from("/secrets/specific/db.yaml")
+        );
 
         // Specific nested
         let specific_nested = fs
@@ -337,7 +340,7 @@ mod tests {
             .expect("io error")
             .expect("should be tracked");
         assert_eq!(
-            specific_nested.dest(),
+            specific_nested.dest().to_path_buf(),
             PathBuf::from("/secrets/specific/nested/key")
         );
     }
@@ -508,7 +511,10 @@ mod tests {
         assert!(!fs.files.contains_key(&p_old));
 
         let new_entry = fs.files.get(&p_new).expect("new file should be tracked");
-        assert_eq!(new_entry.file.dest(), output.join("new_sub/file.txt"));
+        assert_eq!(
+            new_entry.file.dest().to_path_buf(),
+            output.join("new_sub/file.txt")
+        );
     }
 
     #[test]

@@ -52,7 +52,7 @@ pub struct SecretFileOpts {
     #[arg(
         long = "out",
         env = "DEFAULT_SECRET_DIR",
-        default_value = "/run/secrets/locket",
+        default_value = "/run/secrets/locket"
     )]
     pub secret_dir: AbsolutePath,
     #[arg(
@@ -267,7 +267,7 @@ impl SecretFileManager {
 
     pub async fn materialize(&self, file: &SecretFile, content: String) -> Result<(), SecretError> {
         let writer = self.opts.writer.clone();
-        let dest = file.dest().to_path_buf();
+        let dest = file.dest().clone();
         let bytes = content.into_bytes();
 
         tokio::task::spawn_blocking(move || writer.atomic_write(&dest, &bytes)).await??;
@@ -434,7 +434,11 @@ impl SecretFileManager {
         }
     }
 
-    async fn handle_move(&mut self, old: AbsolutePath, new: CanonicalPath) -> Result<(), SecretError> {
+    async fn handle_move(
+        &mut self,
+        old: AbsolutePath,
+        new: CanonicalPath,
+    ) -> Result<(), SecretError> {
         if let Some((from_dst, to_dst)) = self.registry.try_rebase(&old, &new) {
             debug!(?from_dst, ?to_dst, "attempting optimistic rename");
 
@@ -518,18 +522,16 @@ impl EventHandler for SecretFileManager {
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
         for event in events {
             let result = match event {
-                FsEvent::Write(src) => {
-                    match CanonicalPath::try_new(&src) {
-                        Ok(canon) => self.handle_write(canon).await,
-                        Err(e) => {
-                            debug!(?src, "write/create event for missing file; ignoring: {}", e);
-                            Ok(())
-                        }
+                FsEvent::Write(src) => match CanonicalPath::try_new(&src) {
+                    Ok(canon) => self.handle_write(canon).await,
+                    Err(e) => {
+                        debug!(?src, "write/create event for missing file; ignoring: {}", e);
+                        Ok(())
                     }
-                }
+                },
                 FsEvent::Remove(src) => {
-                     let abs = AbsolutePath::new(src);
-                     self.handle_remove(abs)
+                    let abs = AbsolutePath::new(src);
+                    self.handle_remove(abs)
                 }
 
                 FsEvent::Move { from, to } => {
@@ -538,7 +540,10 @@ impl EventHandler for SecretFileManager {
                         Ok(new_canon) => self.handle_move(old_abs, new_canon).await,
                         Err(e) => {
                             // Moved to path is missing. Treat as a delete of old file.
-                            debug!(?to, "move destination missing; downgrading to remove: {}", e);
+                            debug!(
+                                ?to,
+                                "move destination missing; downgrading to remove: {}", e
+                            );
                             self.handle_remove(old_abs)
                         }
                     }

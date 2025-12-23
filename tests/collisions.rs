@@ -1,9 +1,9 @@
-use locket::path::{PathMapping, AbsolutePath, CanonicalPath};
-use std::path::Path;
+use locket::path::{AbsolutePath, CanonicalPath, PathMapping};
 use locket::provider::{ProviderError, SecretsProvider};
 use locket::secrets::{Secret, SecretError, SecretFileManager, SecretFileOpts};
 use secrecy::SecretString;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 fn make_mapping(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> PathMapping {
