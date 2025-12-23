@@ -16,7 +16,7 @@ use std::str::FromStr;
 /// and is free of relative components like `.` or `..` (lexically cleaned).
 ///
 /// This type does not verify existence on disk. Use [`CanonicalPath`] for that.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AbsolutePath(PathBuf);
 
 impl AbsolutePath {
@@ -36,7 +36,7 @@ impl AbsolutePath {
 /// Constructing this type performs filesystem I/O to validate existence
 /// and resolve links. It therefore has a performance cost compared to [`AbsolutePath`].
 /// But this should be the preferred type for source paths which must exist.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CanonicalPath(PathBuf);
 
 impl CanonicalPath {

@@ -4,7 +4,7 @@
 //! managing secret files based on file-backed templates containing secret references.
 
 use crate::events::{EventHandler, FsEvent, HandlerError};
-use crate::path::{AbsolutePath, PathExt, PathMapping};
+use crate::path::{AbsolutePath, CanonicalPath, PathMapping};
 use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
 use crate::secrets::{MemSize, Secret, SecretError, SecretSource, file::SecretFile};
@@ -371,8 +371,8 @@ impl SecretFileManager {
         Ok(())
     }
 
-    fn handle_remove(&mut self, src: &Path) -> Result<(), SecretError> {
-        let removed = self.registry.remove(&src.clean());
+    fn handle_remove(&mut self, src: AbsolutePath) -> Result<(), SecretError> {
+        let removed = self.registry.remove(&src);
         if removed.is_empty() {
             debug!(
                 ?src,
@@ -390,7 +390,7 @@ impl SecretFileManager {
         }
 
         // Clean up empty parent directories
-        if let Some(ceiling) = self.registry.resolve(src) {
+        if let Some(ceiling) = self.registry.resolve(&src) {
             self.cleanup_parents(removed, &ceiling);
         }
 
@@ -434,11 +434,8 @@ impl SecretFileManager {
         }
     }
 
-    async fn handle_move(&mut self, old: &Path, new: &Path) -> Result<(), SecretError> {
-        let from_clean = old.clean();
-        let to_clean = new.canon().unwrap_or_else(|_| new.absolute());
-
-        if let Some((from_dst, to_dst)) = self.registry.try_rebase(&from_clean, &to_clean) {
+    async fn handle_move(&mut self, old: AbsolutePath, new: CanonicalPath) -> Result<(), SecretError> {
+        if let Some((from_dst, to_dst)) = self.registry.try_rebase(&old, &new) {
             debug!(?from_dst, ?to_dst, "attempting optimistic rename");
 
             if let Some(p) = to_dst.parent() {
@@ -450,7 +447,7 @@ impl SecretFileManager {
                     debug!(?old, ?new, "moved");
                     // Cleanup old parent dirs
                     if let Some(parent) = from_dst.parent()
-                        && let Some(ceiling) = self.registry.resolve(old)
+                        && let Some(ceiling) = self.registry.resolve(&old)
                         && let Some(ceil_parent) = ceiling.parent()
                     {
                         self.bubble_delete(parent.to_path_buf(), ceil_parent);
@@ -460,7 +457,7 @@ impl SecretFileManager {
                 Err(e) => {
                     warn!(error=?e, "move failed; falling back to reinjection");
                     // rollback registry state
-                    self.registry.remove(&to_clean);
+                    self.registry.remove(&new);
                     if from_dst.exists() {
                         let _ = tokio::fs::remove_file(&from_dst).await;
                     }
@@ -470,17 +467,16 @@ impl SecretFileManager {
 
         // Fallback
         debug!(?old, ?new, "fallback move via remove + write");
-        self.handle_remove(&from_clean)?;
-        self.handle_write(&to_clean).await?;
+        self.handle_remove(old)?;
+        self.handle_write(new).await?;
 
         Ok(())
     }
 
-    async fn handle_write(&mut self, src: &Path) -> Result<(), SecretError> {
-        let src = src.clean();
+    async fn handle_write(&mut self, src: CanonicalPath) -> Result<(), SecretError> {
         if src.is_dir() {
             debug!(?src, "directory write event; scanning for children");
-            let entries: Vec<PathBuf> = walkdir::WalkDir::new(src)
+            let entries: Vec<PathBuf> = walkdir::WalkDir::new(&src)
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
@@ -488,7 +484,10 @@ impl SecretFileManager {
                 .collect();
 
             for entry in entries {
-                Box::pin(self.handle_write(&entry)).await?;
+                if let Ok(canon_entry) = CanonicalPath::try_new(entry) {
+                    // Pinning is required for async recursion
+                    Box::pin(self.handle_write(canon_entry)).await?;
+                }
             }
             return Ok(());
         }
@@ -519,9 +518,31 @@ impl EventHandler for SecretFileManager {
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
         for event in events {
             let result = match event {
-                FsEvent::Write(src) => self.handle_write(&src).await,
-                FsEvent::Remove(src) => self.handle_remove(&src),
-                FsEvent::Move { from, to } => self.handle_move(&from, &to).await,
+                FsEvent::Write(src) => {
+                    match CanonicalPath::try_new(&src) {
+                        Ok(canon) => self.handle_write(canon).await,
+                        Err(e) => {
+                            debug!(?src, "write/create event for missing file; ignoring: {}", e);
+                            Ok(())
+                        }
+                    }
+                }
+                FsEvent::Remove(src) => {
+                     let abs = AbsolutePath::new(src);
+                     self.handle_remove(abs)
+                }
+
+                FsEvent::Move { from, to } => {
+                    let old_abs = AbsolutePath::new(from);
+                    match CanonicalPath::try_new(&to) {
+                        Ok(new_canon) => self.handle_move(old_abs, new_canon).await,
+                        Err(e) => {
+                            // Moved to path is missing. Treat as a delete of old file.
+                            debug!(?to, "move destination missing; downgrading to remove: {}", e);
+                            self.handle_remove(old_abs)
+                        }
+                    }
+                }
             };
 
             if let Err(e) = result {
