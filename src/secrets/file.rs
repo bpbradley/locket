@@ -1,14 +1,14 @@
 use super::{MemSize, Secret, SecretError, SecretSource};
-use crate::path::PathExt;
+use crate::path::AbsolutePath;
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Representation of a secret file, which contains secret references
 /// and is intended to be materialized to a specific destination path.
 #[derive(Debug, Clone)]
 pub struct SecretFile {
     source: SecretSource,
-    dest: PathBuf,
+    dest: AbsolutePath,
     max_size: MemSize,
 }
 
@@ -20,16 +20,16 @@ impl SecretFile {
     ) -> Result<Self, SecretError> {
         Ok(Self {
             source: SecretSource::file(src)?,
-            dest: dest.as_ref().absolute(),
+            dest: AbsolutePath::new(dest),
             max_size,
         })
     }
     pub fn from_template(label: String, template: String, root: &Path) -> Self {
         let safe_name = sanitize_filename::sanitize(&label);
-        let dest = root.absolute().join(safe_name);
+        let dest = root.join(safe_name);
         Self {
             source: SecretSource::literal(label, template),
-            dest,
+            dest: AbsolutePath::new(dest),
             max_size: MemSize::MAX,
         }
     }
@@ -59,11 +59,11 @@ impl SecretFile {
         };
 
         let safe_name = sanitize_filename::sanitize(&key);
-        let dest = root.absolute().join(safe_name);
+        let dest = root.join(safe_name);
 
         Ok(Self {
             source,
-            dest,
+            dest: AbsolutePath::new(dest),
             max_size,
         })
     }
