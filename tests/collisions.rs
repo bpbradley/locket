@@ -1,9 +1,18 @@
-use locket::path::PathMapping;
+use locket::path::{PathMapping, AbsolutePath, CanonicalPath};
+use std::path::Path;
 use locket::provider::{ProviderError, SecretsProvider};
 use locket::secrets::{Secret, SecretError, SecretFileManager, SecretFileOpts};
 use secrecy::SecretString;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+fn make_mapping(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> PathMapping {
+    PathMapping::try_new(
+        CanonicalPath::try_new(src).expect("test source must exist"),
+        AbsolutePath::new(dst),
+    )
+    .expect("mapping creation failed")
+}
 
 struct NoOpProvider;
 #[async_trait::async_trait]
@@ -40,8 +49,8 @@ fn collisions_structure_conflict() {
     std::fs::write(&blocked_src, "I am inside a dir").unwrap();
 
     let opts = SecretFileOpts::default().with_mapping(vec![
-        PathMapping::new(blocker_src.clone(), output.join("config")),
-        PathMapping::new(blocked_src.clone(), output.join("config/nested")),
+        make_mapping(blocker_src.clone(), output.join("config")),
+        make_mapping(blocked_src.clone(), output.join("config/nested")),
     ]);
 
     let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider)).unwrap();
@@ -71,8 +80,8 @@ fn collisions_on_output_dst() {
     let args: Vec<Secret> = Secret::try_from_map(values.clone()).unwrap();
 
     let opts = SecretFileOpts::default()
-        .with_secret_dir(out_dir.clone())
-        .with_mapping(vec![PathMapping::new(src_dir, out_dir.clone())])
+        .with_secret_dir(AbsolutePath::new(&out_dir))
+        .with_mapping(vec![make_mapping(&src_dir, &out_dir)])
         .with_secrets(args);
 
     let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider)).unwrap();

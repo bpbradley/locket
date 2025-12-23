@@ -1,33 +1,7 @@
-use locket::path::PathMapping;
+use locket::path::{PathMapping, AbsolutePath, CanonicalPath};
+use std::path::Path;
 use locket::secrets::{SecretError, SecretFileOpts};
 use tempfile::tempdir;
-
-#[test]
-fn validate_fails_source_missing() {
-    let tmp = tempdir().unwrap();
-    let missing_src = tmp.path().join("ghost");
-    let dst = tmp.path().join("out");
-
-    let mut opts =
-        SecretFileOpts::default().with_mapping(vec![PathMapping::new(&missing_src, &dst)]);
-    assert!(matches!(
-        opts.resolve(),
-        Err(SecretError::SourceMissing(p)) if p == missing_src
-    ));
-}
-
-#[test]
-fn validate_relative_paths_are_canonicalized() {
-    let tmp = tempdir().unwrap();
-    let src = tmp.path().join("templates");
-    std::fs::create_dir_all(&src).unwrap();
-    let relative = src.join("..").join("templates");
-
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(&relative, "out")]);
-    assert!(opts.resolve().is_ok());
-    // Verify it resolved to the absolute path
-    assert_eq!(opts.mapping[0].src(), src.as_path());
-}
 
 #[test]
 fn validate_fails_loop_dst_inside_src() {
@@ -37,7 +11,7 @@ fn validate_fails_loop_dst_inside_src() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
+    let mut opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
 
     assert!(matches!(
         opts.resolve(),
@@ -53,7 +27,7 @@ fn validate_fails_destructive() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
+    let mut opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
 
     assert!(matches!(
         opts.resolve(),
@@ -71,8 +45,8 @@ fn validate_fails_value_dir_loop() {
     let bad_value_dir = src.join("values");
 
     let mut opts = SecretFileOpts::default()
-        .with_mapping(vec![PathMapping::new(&src, &dst)])
-        .with_secret_dir(bad_value_dir.clone());
+        .with_mapping(vec![make_mapping(&src, &dst)])
+        .with_secret_dir(AbsolutePath::new(&bad_value_dir));
 
     assert!(matches!(
         opts.resolve(),
@@ -88,7 +62,15 @@ fn validate_succeeds_valid_config() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
+    let mut opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
 
     assert!(opts.resolve().is_ok());
+}
+
+fn make_mapping(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> PathMapping {
+    PathMapping::try_new(
+        CanonicalPath::try_new(src).expect("test source must exist"),
+        AbsolutePath::new(dst),
+    )
+    .expect("mapping creation failed")
 }

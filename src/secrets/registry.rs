@@ -3,7 +3,7 @@
 //! This module defines the `SecretFileRegistry`, which maintains
 //! a mapping of secret source files to their intended output destinations
 //! based on configured path mappings and `SecretFile` definitions.
-use crate::path::{PathExt, PathMapping};
+use crate::path::{PathMapping, CanonicalPath, AbsolutePath};
 use crate::secrets::{MemSize, SecretError, SecretSource, file::SecretFile};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -205,10 +205,14 @@ impl SecretFileRegistry {
         // Calculate roots to pivot
         // Determine the relative movement within the mapping to project the output paths.
         let rel_from = from.strip_prefix(mapping.src()).ok()?;
-        let old_root_dst = mapping.dst().join(rel_from).canon().ok()?;
+        // Use CanonicalPath to verify existence of the old root anchor on disk
+        let old_root_dst = CanonicalPath::try_new(mapping.dst().join(rel_from))
+            .ok()?
+            .into_inner();
 
         let rel_to = to.strip_prefix(mapping.src()).ok()?;
-        let new_root_dst = mapping.dst().join(rel_to).absolute();
+        // Use AbsolutePath to normalize the new root anchor (it may not exist yet)
+        let new_root_dst = AbsolutePath::new(mapping.dst().join(rel_to)).into_inner();
 
         // Verification pass
         // Ensure every file is eligible and consistent before mutating state.
@@ -227,13 +231,13 @@ impl SecretFileRegistry {
 
             // Check for drift
             // i.e. the file's current destination doesn't match calculation
-            if entry.file.dest() != old_root_dst.join(rel).clean() {
+            if entry.file.dest() != AbsolutePath::new(old_root_dst.join(rel)).into_inner() {
                 return None;
             }
 
             // Calculate new state
-            let new_k = to.join(rel).clean();
-            let new_d = new_root_dst.join(rel).clean();
+            let new_k = AbsolutePath::new(to.join(rel)).into_inner();
+            let new_d = AbsolutePath::new(new_root_dst.join(rel)).into_inner();
 
             updates.push((k.clone(), new_k, new_d));
         }
@@ -272,6 +276,14 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
+    fn make_mapping(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> PathMapping {
+        PathMapping::try_new(
+            CanonicalPath::try_new(src).expect("test source must exist"),
+            AbsolutePath::new(dst),
+        )
+        .expect("mapping creation failed")
+    }
+
     #[test]
     fn test_mapping_priority() {
         // Setup FS
@@ -296,8 +308,8 @@ mod tests {
         // Setup Logic
         let mut fs = SecretFileRegistry {
             mappings: vec![
-                PathMapping::new(&src_root, "/secrets/general"),
-                PathMapping::new(&src_secure, "/secrets/specific"),
+                make_mapping(&src_root, "/secrets/general"),
+                make_mapping(&src_secure, "/secrets/specific"),
             ],
             ..Default::default()
         };
@@ -349,7 +361,7 @@ mod tests {
         fs::write(&f_aa, "").unwrap();
 
         let mut fs = SecretFileRegistry::default();
-        fs.mappings.push(PathMapping::new(&src_root, "/out"));
+        fs.mappings.push(make_mapping(&src_root, "/out"));
 
         fs.upsert(&f_a).unwrap();
         fs.upsert(&f_aa).unwrap();
@@ -391,7 +403,7 @@ mod tests {
         }
 
         let mut fs = SecretFileRegistry::default();
-        fs.mappings.push(PathMapping::new(&src, "/out"));
+        fs.mappings.push(make_mapping(&src, "/out"));
 
         fs.upsert(&f_a).unwrap();
         fs.upsert(&f_b).unwrap();
@@ -420,7 +432,7 @@ mod tests {
         fs::create_dir_all(&src).unwrap();
 
         let mut fs = SecretFileRegistry::default();
-        fs.mappings.push(PathMapping::new(&src, "/secrets"));
+        fs.mappings.push(make_mapping(&src, "/secrets"));
 
         // File totally outside
         let outside = root.join("passwd");
@@ -447,7 +459,7 @@ mod tests {
         fs::create_dir_all(&src).unwrap();
 
         let mut fs = SecretFileRegistry::default();
-        fs.mappings.push(PathMapping::new(&src, "/s"));
+        fs.mappings.push(make_mapping(&src, "/s"));
 
         let input = src.join("subdir/file");
         // We don't need to create the file to test resolve() because resolve()
@@ -472,7 +484,7 @@ mod tests {
         fs::create_dir_all(output.join("old_sub")).unwrap();
 
         let mut fs = SecretFileRegistry::default();
-        fs.mappings.push(PathMapping::new(&data, &output));
+        fs.mappings.push(make_mapping(&data, &output));
 
         let p_old = old_sub.join("file.txt");
         fs::write(&p_old, "content").unwrap();
@@ -516,8 +528,8 @@ mod tests {
         fs::create_dir_all(&folder_b).unwrap();
 
         let mut fs = SecretFileRegistry::default();
-        fs.mappings.push(PathMapping::new(&src_a, &out_a));
-        fs.mappings.push(PathMapping::new(&src_b, &out_b));
+        fs.mappings.push(make_mapping(&src_a, &out_a));
+        fs.mappings.push(make_mapping(&src_b, &out_b));
 
         let f_old = folder_a.join("config.yaml");
         fs::write(&f_old, "").unwrap();
@@ -546,8 +558,8 @@ mod tests {
         fs::create_dir_all(&tpl_new).unwrap();
 
         let mut fs = SecretFileRegistry::default();
-        fs.mappings.push(PathMapping::new(&tpl, "/secrets"));
-        fs.mappings.push(PathMapping::new(&tpl_secure, "/vault"));
+        fs.mappings.push(make_mapping(&tpl, "/secrets"));
+        fs.mappings.push(make_mapping(&tpl_secure, "/vault"));
 
         let f1 = tpl.join("common.yaml");
         let f2 = tpl_secure.join("db_pass");

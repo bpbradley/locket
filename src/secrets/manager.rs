@@ -4,7 +4,7 @@
 //! managing secret files based on file-backed templates containing secret references.
 
 use crate::events::{EventHandler, FsEvent, HandlerError};
-use crate::path::{PathExt, PathMapping, parse_absolute};
+use crate::path::{AbsolutePath, PathExt, PathMapping};
 use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
 use crate::secrets::{MemSize, Secret, SecretError, SecretSource, file::SecretFile};
@@ -53,9 +53,8 @@ pub struct SecretFileOpts {
         long = "out",
         env = "DEFAULT_SECRET_DIR",
         default_value = "/run/secrets/locket",
-        value_parser = parse_absolute,
     )]
-    pub secret_dir: PathBuf,
+    pub secret_dir: AbsolutePath,
     #[arg(
         long = "inject-policy",
         env = "INJECT_POLICY",
@@ -93,8 +92,8 @@ impl SecretFileOpts {
         self.mapping = mapping;
         self
     }
-    pub fn with_secret_dir(mut self, dir: impl AsRef<Path>) -> Self {
-        self.secret_dir = dir.as_ref().absolute();
+    pub fn with_secret_dir(mut self, dir: AbsolutePath) -> Self {
+        self.secret_dir = dir;
         self
     }
     pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
@@ -113,16 +112,10 @@ impl SecretFileOpts {
         let mut sources = Vec::new();
         let mut destinations = Vec::new();
 
-        for m in &mut self.mapping {
-            // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
-            // This should already be enforced on the user input, but we double check just in case.
-            // This will force the path to be canonicalized in a way that resolves symlinks and
-            // requires that the path exists.
-            m.resolve()?;
+        for m in &self.mapping {
             sources.push(m.src());
             destinations.push(m.dst());
         }
-        self.secret_dir = self.secret_dir.absolute();
         destinations.push(&self.secret_dir);
 
         // Check for feedback loops and self-destruct scenarios
@@ -150,8 +143,8 @@ impl SecretFileOpts {
 impl Default for SecretFileOpts {
     fn default() -> Self {
         Self {
-            mapping: vec![PathMapping::default()],
-            secret_dir: PathBuf::from("/run/secrets/locket"),
+            mapping: Vec::new(),
+            secret_dir: AbsolutePath::new("./secrets"),
             secrets: Vec::new(),
             policy: InjectFailurePolicy::CopyUnmodified,
             max_file_size: MemSize::default(),

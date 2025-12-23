@@ -1,12 +1,13 @@
 use async_trait::async_trait;
 use locket::{
-    path::PathMapping,
+    path::{PathMapping, AbsolutePath, CanonicalPath},
     provider::{ProviderError, SecretsProvider},
     secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretFileOpts},
 };
 use secrecy::SecretString;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::path::Path;
 use tempfile::tempdir;
 use tracing::debug;
 
@@ -61,8 +62,8 @@ fn setup(
     std::fs::write(tpl_dir.join(tpl_name), tpl_content).unwrap();
 
     let opts = SecretFileOpts::default()
-        .with_mapping(vec![PathMapping::new(&tpl_dir, &out_dir)])
-        .with_secret_dir(out_dir.clone());
+        .with_mapping(vec![make_mapping(&tpl_dir, &out_dir)])
+        .with_secret_dir(AbsolutePath::new(&out_dir));
 
     (tmp, out_dir, opts)
 }
@@ -159,4 +160,12 @@ async fn test_ignore_unknown_providers() {
     // "mock://" should be rendered
     debug!("Result: {}", result);
     assert_eq!(result, "A: {{ op://vault/item }}\nB: value");
+}
+
+fn make_mapping(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> PathMapping {
+    PathMapping::try_new(
+        CanonicalPath::try_new(src).expect("test source must exist"),
+        AbsolutePath::new(dst),
+    )
+    .expect("mapping creation failed")
 }
