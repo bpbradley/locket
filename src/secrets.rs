@@ -6,7 +6,7 @@
 //! It also handles the low-level "reading" mechanics via `SecretSource` and `SourceReader`,
 //! ensuring that file reads are memory-limited.
 
-use crate::path::PathExt;
+use crate::path::CanonicalPath;
 use crate::provider::ProviderError;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -153,7 +153,7 @@ impl FromStr for Secret {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretSource {
     /// Template loaded from a file path on disk.
-    File(PathBuf),
+    File(CanonicalPath),
     /// Template provided as a raw string literal.
     Literal {
         label: Option<String>,
@@ -167,8 +167,7 @@ impl SecretSource {
     /// # Errors
     /// Returns error if the path cannot be canonicalized (does not exist).
     pub fn file(path: impl AsRef<Path>) -> Result<Self, SecretError> {
-        let canon = path.as_ref().canon()?;
-        Ok(Self::File(canon))
+        Ok(Self::File(CanonicalPath::try_new(path)?))
     }
 
     /// Create a source from a string literal.
@@ -231,7 +230,7 @@ impl<'a> SourceReader<'a> {
                 Ok(meta) => {
                     if meta.len() > self.max_size.bytes {
                         return Err(SecretError::SourceTooLarge {
-                            path: path.clone(),
+                            path: path.to_path_buf(),
                             size: meta.len(),
                             limit: self.max_size.bytes,
                         });

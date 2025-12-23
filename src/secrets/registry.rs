@@ -50,7 +50,7 @@ impl SecretFileRegistry {
 
         for s in secrets {
             if let SecretSource::File(p) = s.source() {
-                pinned.insert(p.clone(), s);
+                pinned.insert(p.to_path_buf(), s);
             }
         }
         let mut registry = Self {
@@ -376,7 +376,7 @@ mod tests {
         // Check that the removed file is indeed f_a
         // We check the source because SecretFile stores canonical paths
         if let crate::secrets::SecretSource::File(p) = removed[0].source() {
-            assert_eq!(p, &f_a.canonicalize().unwrap());
+            assert_eq!(p.as_ref(), f_a.canonicalize().unwrap().as_path());
         }
 
         // Verify DIRAA is still there
