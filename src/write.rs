@@ -315,6 +315,32 @@ mod tests {
     }
 
     #[test]
+    fn test_symbolic_parsing() {
+        // rw------- -> 600
+        let mode: FsMode = "rw-------".parse().unwrap();
+        assert_eq!(u32::from(mode), 0o600);
+
+        // rwxr-xr-x -> 755
+        let mode: FsMode = "rwxr-xr-x".parse().unwrap();
+        assert_eq!(u32::from(mode), 0o755);
+        // --x--x--x -> 111
+        let mode: FsMode = "--x--x--x".parse().unwrap();
+        assert_eq!(u32::from(mode), 0o111);
+    }
+
+    #[test]
+    fn test_symbolic_parsing_errors() {
+        assert!(matches!(
+            "rwx".parse::<FsMode>(),
+            Err(FsModeError::InvalidSymbolicLen(_))
+        ));
+        assert!(matches!(
+            "rw-r--r-X".parse::<FsMode>(),
+            Err(FsModeError::InvalidSymbolicChar { char: 'X', .. })
+        ));
+    }
+
+    #[test]
     fn test_permissions_are_applied() {
         let tmp = tempfile::tempdir().unwrap();
         let output = tmp.path().join("secure_file");
