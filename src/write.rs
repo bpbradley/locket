@@ -15,15 +15,15 @@ use std::path::Path;
 #[derive(Clone, Args)]
 pub struct FileWriter {
     /// File permission mode
-    #[clap(long, env = "LOCKET_FILE_MODE", default_value = "600", value_parser = parse_permissions)]
-    file_mode: u32,
+    #[clap(long, env = "LOCKET_FILE_MODE", default_value = "600")]
+    file_mode: FsMode,
     /// Directory permission mode
-    #[clap(long, env = "LOCKET_DIR_MODE", default_value = "700", value_parser = parse_permissions)]
-    dir_mode: u32,
+    #[clap(long, env = "LOCKET_DIR_MODE", default_value = "700")]
+    dir_mode: FsMode,
 }
 
 impl FileWriter {
-    pub fn new(file_mode: u32, dir_mode: u32) -> Self {
+    pub fn new(file_mode: FsMode, dir_mode: FsMode) -> Self {
         Self {
             file_mode,
             dir_mode,
@@ -39,7 +39,7 @@ impl FileWriter {
 
         let mut tmp = tempfile::Builder::new()
             .prefix(".tmp.")
-            .permissions(fs::Permissions::from_mode(self.file_mode))
+            .permissions(fs::Permissions::from_mode(self.file_mode.into()))
             .tempfile_in(parent)?;
 
         tmp.write_all(bytes)?;
@@ -61,7 +61,7 @@ impl FileWriter {
 
         let mut tmp = tempfile::Builder::new()
             .prefix(".tmp.")
-            .permissions(fs::Permissions::from_mode(self.file_mode))
+            .permissions(fs::Permissions::from_mode(self.file_mode.into()))
             .tempfile_in(parent)?;
 
         io::copy(&mut source, &mut tmp)?;
@@ -90,7 +90,7 @@ impl FileWriter {
         let parent = self.prepare(dst)?;
         let temp = tempfile::Builder::new()
             .prefix(".tmp.")
-            .permissions(fs::Permissions::from_mode(self.file_mode))
+            .permissions(fs::Permissions::from_mode(self.file_mode.into()))
             .tempfile_in(parent)?;
 
         Ok(temp)
@@ -105,7 +105,7 @@ impl FileWriter {
         if !parent.exists() {
             fs::create_dir_all(parent)?;
 
-            let perm = fs::Permissions::from_mode(self.dir_mode);
+            let perm = fs::Permissions::from_mode(self.dir_mode.into());
             fs::set_permissions(parent, perm)?;
         }
         Ok(parent)
@@ -121,8 +121,8 @@ impl FileWriter {
 impl Default for FileWriter {
     fn default() -> Self {
         Self {
-            file_mode: 0o600,
-            dir_mode: 0o700,
+            file_mode: FsMode::new(0o600),
+            dir_mode: FsMode::new(0o700),
         }
     }
 }
@@ -130,23 +130,71 @@ impl Default for FileWriter {
 impl std::fmt::Debug for FileWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileWriter")
-            .field("file_mode", &format_args!("0o{:o}", self.file_mode))
-            .field("dir_mode", &format_args!("0o{:o}", self.dir_mode))
+            .field("file_mode", &format_args!("0o{:?}", self.file_mode))
+            .field("dir_mode", &format_args!("0o{:?}", self.dir_mode))
             .finish()
     }
 }
 
-fn parse_permissions(perms: &str) -> Result<u32, String> {
-    let norm = perms.strip_prefix("0o").unwrap_or(perms);
+/// Wrapper for filesystem permission bits (e.g., 0o600).
+///
+/// This ensures that permission values are validated (must be <= 0o7777)
+/// and correctly interpreted as octal.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FsMode(u32);
 
-    let mode = u32::from_str_radix(norm, 8)
-        .map_err(|e| format!("Invalid octal permission format '{}': {}", perms, e))?;
-
-    if mode > 0o7777 {
-        return Err(format!("Permission mode '{:o}' is too large", mode));
+impl FsMode {
+    /// Creates a new `FsMode` from a `u32` bitmask.
+    ///
+    /// # Panics
+    /// Panics if `mode` > 0o7777 (invalid permission bits).
+    /// This check happens at compile-time if used in a `const` or `static`.
+    pub const fn new(mode: u32) -> Self {
+        if mode > 0o7777 {
+            // Static string panic is supported in const fn
+            panic!("FsMode: value exceeds 0o7777");
+        }
+        Self(mode)
     }
 
-    Ok(mode)
+    /// Tries to create a new `FsMode`, returning an error if invalid.
+    pub fn try_new(mode: u32) -> Result<Self, String> {
+        if mode > 0o7777 {
+            return Err(format!("Permission mode '0o{:o}' is too large", mode));
+        }
+        Ok(Self(mode))
+    }
+}
+
+impl std::str::FromStr for FsMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let norm = s.strip_prefix("0o").unwrap_or(s);
+
+        let mode = u32::from_str_radix(norm, 8)
+            .map_err(|e| format!("Invalid octal permission format '{}': {}", s, e))?;
+
+        Self::try_new(mode)
+    }
+}
+
+impl std::fmt::Debug for FsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0o{:o}", self.0)
+    }
+}
+
+impl std::fmt::Display for FsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0o{:o}", self.0)
+    }
+}
+
+impl From<FsMode> for u32 {
+    fn from(mode: FsMode) -> u32 {
+        mode.0
+    }
 }
 
 #[cfg(test)]
@@ -156,21 +204,33 @@ mod tests {
 
     #[derive(Debug, Parser)]
     struct TestParser {
-        #[arg(long, value_parser = parse_permissions)]
-        mode: u32,
+        #[arg(long)]
+        mode: FsMode,
+    }
+
+    #[test]
+    fn test_mode_const_validation() {
+        const VALID: FsMode = FsMode::new(0o755);
+        assert_eq!(Into::<u32>::into(VALID), 0o755);
+    }
+
+    #[test]
+    #[should_panic(expected = "FsMode: value exceeds 0o7777")]
+    fn test_mode_runtime_panic() {
+        let invalid = 0o10000;
+        let _ = FsMode::new(invalid);
     }
 
     #[test]
     fn test_permission_parsing() {
         let opts = TestParser::try_parse_from(["test", "--mode", "600"]).unwrap();
-        assert_eq!(opts.mode, 0o600); // 0o600 octal
-        assert_ne!(opts.mode, 600); // NOT 600 decimal
+        assert_eq!(u32::from(opts.mode), 0o600); // 0o600 octal
 
         let opts = TestParser::try_parse_from(["test", "--mode", "0755"]).unwrap();
-        assert_eq!(opts.mode, 0o755);
+        assert_eq!(u32::from(opts.mode), 0o755);
 
         let opts = TestParser::try_parse_from(["test", "--mode", "0o644"]).unwrap();
-        assert_eq!(opts.mode, 0o644);
+        assert_eq!(u32::from(opts.mode), 0o644);
     }
 
     #[test]
@@ -185,7 +245,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let output = tmp.path().join("secure_file");
 
-        let writer = FileWriter::new(0o600, 0o700);
+        let writer = FileWriter::default();
 
         writer
             .atomic_write(&AbsolutePath::new(&output), b"data")
