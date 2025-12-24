@@ -94,14 +94,14 @@ impl SecretFileRegistry {
         }
     }
 
-    pub fn resolve(&self, src: &Path) -> Option<PathBuf> {
+    pub fn resolve(&self, src: &Path) -> Option<AbsolutePath> {
         let mapping = self
             .mappings
             .iter()
             .filter(|m| src.starts_with(m.src()))
             .max_by_key(|m| m.src().as_os_str().len())?;
         let rel = src.strip_prefix(mapping.src()).ok()?;
-        Some(mapping.dst().join(rel))
+        Some(AbsolutePath::new(mapping.dst().join(rel)))
     }
 
     pub fn upsert(&mut self, src: &Path) -> Result<Option<SecretFile>, SecretError> {
