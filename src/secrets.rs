@@ -61,6 +61,9 @@ pub enum SecretError {
 
     #[error("parse error: {0}")]
     Parse(String),
+
+    #[error("file write error: {0}")]
+    Write(#[from] crate::write::WriterError),
 }
 
 /// The primitive definition of a secret, which is ultimately responsible for holding

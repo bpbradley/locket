@@ -10,6 +10,36 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum WriterError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error(transparent)]
+    Mode(#[from] FsModeError),
+}
+
+/// Specific errors related to FsMode parsing and validation.
+#[derive(Debug, Error)]
+pub enum FsModeError {
+    #[error("invalid octal format '{input}': {source}")]
+    InvalidOctal {
+        input: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+
+    #[error("symbolic permission must be 9 chars (e.g. 'rwxr-xr-x'), got '{0}'")]
+    InvalidSymbolicLen(String),
+
+    #[error("invalid symbolic character '{char}' at position {pos}")]
+    InvalidSymbolicChar { char: char, pos: usize },
+
+    #[error("permission mode 0o{0:o} exceeds limit 0o7777")]
+    ValueTooLarge(u32),
+}
 
 /// Utilities for writing files atomically with explicit permissions.
 #[derive(Clone, Args)]
@@ -34,7 +64,7 @@ impl FileWriter {
     ///
     /// This ensures that consumers never see a partially written file.
     /// It also ensures the destination directory exists with the configured permissions.
-    pub fn atomic_write(&self, path: &AbsolutePath, bytes: &[u8]) -> io::Result<()> {
+    pub fn atomic_write(&self, path: &AbsolutePath, bytes: &[u8]) -> Result<(), WriterError> {
         let parent = self.prepare(path)?;
 
         let mut tmp = tempfile::Builder::new()
@@ -55,7 +85,7 @@ impl FileWriter {
     }
 
     /// Streams data from source to destination using a temporary file for atomicity.
-    pub fn atomic_copy(&self, from: &CanonicalPath, to: &AbsolutePath) -> io::Result<()> {
+    pub fn atomic_copy(&self, from: &CanonicalPath, to: &AbsolutePath) -> Result<(), WriterError> {
         let parent = self.prepare(to)?;
         let mut source = File::open(from)?;
 
@@ -77,7 +107,7 @@ impl FileWriter {
     /// Note: This cannot change file permissions easily without a race condition,
     /// so we assume the source file already has the desired permissions
     /// or we rely on the directory permissions to restrict access.
-    pub fn atomic_move(&self, from: &CanonicalPath, to: &AbsolutePath) -> io::Result<()> {
+    pub fn atomic_move(&self, from: &CanonicalPath, to: &AbsolutePath) -> Result<(), WriterError> {
         let parent = self.prepare(to)?;
 
         fs::rename(from, to)?;
@@ -86,7 +116,10 @@ impl FileWriter {
         Ok(())
     }
 
-    pub fn create_temp_for(&self, dst: &AbsolutePath) -> io::Result<tempfile::NamedTempFile> {
+    pub fn create_temp_for(
+        &self,
+        dst: &AbsolutePath,
+    ) -> Result<tempfile::NamedTempFile, WriterError> {
         let parent = self.prepare(dst)?;
         let temp = tempfile::Builder::new()
             .prefix(".tmp.")
@@ -97,7 +130,7 @@ impl FileWriter {
     }
 
     /// Ensures parent directory exists and applies configured directory permissions.
-    fn prepare<'a>(&self, path: &'a Path) -> io::Result<&'a Path> {
+    fn prepare<'a>(&self, path: &'a Path) -> Result<&'a Path, WriterError> {
         let parent = path
             .parent()
             .ok_or_else(|| io::Error::other("path has no parent"))?;
@@ -111,7 +144,7 @@ impl FileWriter {
         Ok(parent)
     }
 
-    fn sync_dir(&self, dir: &Path) -> io::Result<()> {
+    fn sync_dir(&self, dir: &Path) -> Result<(), WriterError> {
         let file = File::open(dir)?;
         file.sync_all()?;
         Ok(())
@@ -158,22 +191,63 @@ impl FsMode {
     }
 
     /// Tries to create a new `FsMode`, returning an error if invalid.
-    pub fn try_new(mode: u32) -> Result<Self, String> {
+    pub fn try_new(mode: u32) -> Result<Self, FsModeError> {
         if mode > 0o7777 {
-            return Err(format!("Permission mode '0o{:o}' is too large", mode));
+            return Err(FsModeError::ValueTooLarge(mode));
         }
+        Ok(Self(mode))
+    }
+
+    fn from_symbolic(s: &str) -> Result<Self, FsModeError> {
+        if s.len() != 9 {
+            return Err(FsModeError::InvalidSymbolicLen(s.to_string()));
+        }
+
+        let mut mode = 0u32;
+        let chars: Vec<char> = s.chars().collect();
+
+        // Iterate over user (0), group (1), other (2)
+        for (i, chunk) in chars.chunks(3).enumerate() {
+            let mut bits = 0;
+
+            let check =
+                |c: char, target: char, val: u32, offset: usize| -> Result<u32, FsModeError> {
+                    match c {
+                        x if x == target => Ok(val),
+                        '-' => Ok(0),
+                        x => Err(FsModeError::InvalidSymbolicChar {
+                            char: x,
+                            pos: offset,
+                        }),
+                    }
+                };
+
+            bits |= check(chunk[0], 'r', 4, i * 3)?;
+            bits |= check(chunk[1], 'w', 2, i * 3 + 1)?;
+            bits |= check(chunk[2], 'x', 1, i * 3 + 2)?;
+
+            // Shift: User(6), Group(3), Other(0)
+            mode |= bits << ((2 - i) * 3);
+        }
+
         Ok(Self(mode))
     }
 }
 
 impl std::str::FromStr for FsMode {
-    type Err = String;
+    type Err = FsModeError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, FsModeError> {
+        // symbolic if it contains letters or dash
+        if s.chars().any(|c| matches!(c, 'r' | 'w' | 'x' | '-')) {
+            return Self::from_symbolic(s);
+        }
+
         let norm = s.strip_prefix("0o").unwrap_or(s);
-
-        let mode = u32::from_str_radix(norm, 8)
-            .map_err(|e| format!("Invalid octal permission format '{}': {}", s, e))?;
+        let mode = u32::from_str_radix(norm, 8).map_err(|e| FsModeError::InvalidOctal {
+            input: s.to_string(),
+            source: e,
+        })?;
 
         Self::try_new(mode)
     }

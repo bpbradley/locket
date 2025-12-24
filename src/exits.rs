@@ -32,6 +32,7 @@ impl LocketExitCode {
                 SecretError::Destructive { .. } => sysexits::ExitCode::Usage.into(),
                 SecretError::NoParent(_) => sysexits::ExitCode::IoErr.into(),
                 SecretError::Parse(_) => sysexits::ExitCode::DataErr.into(),
+                SecretError::Write(_) => sysexits::ExitCode::IoErr.into(),
             },
             LocketError::Provider(e) => match e {
                 ProviderError::Network(_) => sysexits::ExitCode::Unavailable.into(),
