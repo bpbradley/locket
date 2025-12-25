@@ -54,7 +54,7 @@ impl SecretFileRegistry {
                 // TODO: SecretSource should ideally carry the logical AbsolutePath
                 // to support pinning symlinks correctly. For now, we use the
                 // canonical path as the key.
-                pinned.insert(AbsolutePath::new(p.clone()), s);
+                pinned.insert(AbsolutePath::from(p.clone()), s);
             }
         }
         let mut registry = Self {

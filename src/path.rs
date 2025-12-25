@@ -48,6 +48,12 @@ impl CanonicalPath {
     }
 }
 
+impl From<CanonicalPath> for AbsolutePath {
+    fn from(canon: CanonicalPath) -> Self {
+        Self(canon.0)
+    }
+}
+
 /// Extension trait for `Path` to provide robust normalization and security checks.
 trait PathExt {
     /// Logically cleans the path by resolving `.` and `..` components.
