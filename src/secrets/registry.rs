@@ -36,8 +36,8 @@ struct RegistryEntry {
 #[derive(Debug, Default)]
 pub struct SecretFileRegistry {
     mappings: Vec<PathMapping>,
-    pinned: HashMap<CanonicalPath, SecretFile>,
-    files: BTreeMap<CanonicalPath, RegistryEntry>,
+    pinned: HashMap<AbsolutePath, SecretFile>,
+    files: BTreeMap<AbsolutePath, RegistryEntry>,
     max_file_size: MemSize,
 }
 
@@ -51,7 +51,10 @@ impl SecretFileRegistry {
 
         for s in secrets {
             if let SecretSource::File(p) = s.source() {
-                pinned.insert(p.clone(), s);
+                // TODO: SecretSource should ideally carry the logical AbsolutePath
+                // to support pinning symlinks correctly. For now, we use the
+                // canonical path as the key.
+                pinned.insert(AbsolutePath::new(p.clone()), s);
             }
         }
         let mut registry = Self {
@@ -85,10 +88,10 @@ impl SecretFileRegistry {
             }
         }
 
-        let pinned: Vec<CanonicalPath> = self.pinned.keys().cloned().collect();
+        let pinned: Vec<AbsolutePath> = self.pinned.keys().cloned().collect();
         for path in pinned {
-            if path.exists()
-                && let Err(e) = self.upsert(&path)
+            if path.as_ref().exists()
+                && let Err(e) = self.upsert(path.as_ref())
             {
                 warn!("Failed to scan pinned file {:?}: {}", path, e);
             }
@@ -156,7 +159,7 @@ impl SecretFileRegistry {
                 file: file.clone(),
                 kind: RegistryKind::Mapped { mapping_idx: idx },
             };
-            self.files.insert(src_canon, entry);
+            self.files.insert(AbsolutePath::new(src), entry);
             debug!("Tracked mapped file: {:?}", src);
             return Ok(Some(file));
         }
@@ -166,7 +169,7 @@ impl SecretFileRegistry {
 
     /// Remove struct entry for this src and return the SecretFile if there was one.
     pub fn remove(&mut self, src: &Path) -> Vec<SecretFile> {
-        let removed_keys: Vec<CanonicalPath> = self
+        let removed_keys: Vec<AbsolutePath> = self
             .files
             .range::<Path, _>((Bound::Included(src), Bound::Unbounded))
             .take_while(|(k, _)| k.starts_with(src))
@@ -188,7 +191,7 @@ impl SecretFileRegistry {
     /// Returns None if the move involves pinned files, crosses mappings, or implies state drift.
     pub fn try_rebase(&mut self, from: &Path, to: &Path) -> Option<(PathBuf, PathBuf)> {
         // Identify all affected files in the registry
-        let keys: Vec<CanonicalPath> = self
+        let keys: Vec<AbsolutePath> = self
             .files
             .range::<Path, _>((Bound::Included(from), Bound::Unbounded))
             .take_while(|(k, _)| k.starts_with(from))
@@ -272,7 +275,7 @@ impl SecretFileRegistry {
                 ) {
                     Ok(new_file) => {
                         entry.file = new_file;
-                        self.files.insert(src_canon, entry);
+                        self.files.insert(AbsolutePath::new(new_k), entry);
                     }
                     Err(e) => {
                         warn!("Failed to rebase file entry {:?}: {}", new_k, e);
