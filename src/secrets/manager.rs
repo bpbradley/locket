@@ -390,7 +390,7 @@ impl SecretFileManager {
         }
 
         // Clean up empty parent directories
-        if let Some(ceiling) = self.registry.resolve(&src) {
+        if let Some(ceiling) = self.registry.resolve(src.clone()) {
             self.cleanup_parents(removed, &ceiling);
         }
 
@@ -451,7 +451,7 @@ impl SecretFileManager {
                     debug!(?old, ?new, "moved");
                     // Cleanup old parent dirs
                     if let Some(parent) = from_dst.parent()
-                        && let Some(ceiling) = self.registry.resolve(&old)
+                        && let Some(ceiling) = self.registry.resolve(old.clone())
                         && let Some(ceil_parent) = ceiling.parent()
                     {
                         self.bubble_delete(parent.to_path_buf(), ceil_parent);
@@ -567,18 +567,18 @@ mod tests {
 
     #[test]
     fn secret_value_sanitization() {
-        let root = Path::new("/");
+        let root = AbsolutePath::new("/");
 
-        let v = SecretFile::from_template("Db_Password".to_string(), "".to_string(), root);
+        let v = SecretFile::from_template("Db_Password".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/Db_Password")); // absolute() call in from_template might affect this depending on platform, but logic holds
 
-        let v = SecretFile::from_template("A/B/C".to_string(), "".to_string(), root);
+        let v = SecretFile::from_template("A/B/C".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/ABC"));
 
-        let v = SecretFile::from_template("weird name".to_string(), "".to_string(), root);
+        let v = SecretFile::from_template("weird name".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/weird name"));
 
-        let v = SecretFile::from_template("..//--__".to_string(), "".to_string(), root);
+        let v = SecretFile::from_template("..//--__".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/..--__"));
     }
 

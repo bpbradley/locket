@@ -222,7 +222,6 @@ impl PartialEq<PathBuf> for AbsolutePath {
     }
 }
 
-// Allow comparing "Path == AbsolutePath" (reverse order)
 impl PartialEq<AbsolutePath> for Path {
     fn eq(&self, other: &AbsolutePath) -> bool {
         self == other.0
@@ -235,7 +234,6 @@ impl PartialEq<AbsolutePath> for PathBuf {
     }
 }
 
-// Do the same for CanonicalPath while we're at it
 impl PartialEq<Path> for CanonicalPath {
     fn eq(&self, other: &Path) -> bool {
         self.0 == other
@@ -257,6 +255,18 @@ impl PartialEq<CanonicalPath> for Path {
 impl PartialEq<CanonicalPath> for PathBuf {
     fn eq(&self, other: &CanonicalPath) -> bool {
         *self == other.0
+    }
+}
+
+impl std::borrow::Borrow<Path> for AbsolutePath {
+    fn borrow(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<Path> for CanonicalPath {
+    fn borrow(&self) -> &Path {
+        &self.0
     }
 }
 

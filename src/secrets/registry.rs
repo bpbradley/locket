@@ -6,6 +6,7 @@
 use crate::path::{AbsolutePath, CanonicalPath, PathMapping};
 use crate::secrets::{MemSize, SecretError, SecretSource, file::SecretFile};
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
@@ -35,8 +36,8 @@ struct RegistryEntry {
 #[derive(Debug, Default)]
 pub struct SecretFileRegistry {
     mappings: Vec<PathMapping>,
-    pinned: HashMap<PathBuf, SecretFile>,
-    files: BTreeMap<PathBuf, RegistryEntry>,
+    pinned: HashMap<CanonicalPath, SecretFile>,
+    files: BTreeMap<CanonicalPath, RegistryEntry>,
     max_file_size: MemSize,
 }
 
@@ -50,7 +51,7 @@ impl SecretFileRegistry {
 
         for s in secrets {
             if let SecretSource::File(p) = s.source() {
-                pinned.insert(p.to_path_buf(), s);
+                pinned.insert(p.clone(), s);
             }
         }
         let mut registry = Self {
@@ -84,7 +85,7 @@ impl SecretFileRegistry {
             }
         }
 
-        let pinned: Vec<PathBuf> = self.pinned.keys().cloned().collect();
+        let pinned: Vec<CanonicalPath> = self.pinned.keys().cloned().collect();
         for path in pinned {
             if path.exists()
                 && let Err(e) = self.upsert(&path)
@@ -94,7 +95,7 @@ impl SecretFileRegistry {
         }
     }
 
-    pub fn resolve(&self, src: &Path) -> Option<AbsolutePath> {
+    pub fn resolve(&self, src: AbsolutePath) -> Option<AbsolutePath> {
         let mapping = self
             .mappings
             .iter()
@@ -107,12 +108,12 @@ impl SecretFileRegistry {
     pub fn upsert(&mut self, src: &Path) -> Result<Option<SecretFile>, SecretError> {
         // Check Pinned Config first
         // If the file matches a pinned configuration, enforce that config.
-        if let Some(pinned) = self.pinned.get(src) {
+        if let Some((key, pinned)) = self.pinned.get_key_value(src) {
             let entry = RegistryEntry {
                 file: pinned.clone(),
                 kind: RegistryKind::Pinned,
             };
-            self.files.insert(src.to_path_buf(), entry);
+            self.files.insert(key.clone(), entry);
             debug!("Tracked pinned file: {:?}", src);
             return Ok(Some(pinned.clone()));
         }
@@ -136,22 +137,28 @@ impl SecretFileRegistry {
                 .map_err(|_| SecretError::Parse("path strip failed".into()))?;
             let dest = mapping.dst().join(rel);
 
-            match SecretFile::from_file(src, dest, self.max_file_size) {
-                Ok(file) => {
-                    let entry = RegistryEntry {
-                        file: file.clone(),
-                        kind: RegistryKind::Mapped { mapping_idx: idx },
-                    };
-                    self.files.insert(src.to_path_buf(), entry);
-                    debug!("Tracked mapped file: {:?}", src);
-                    return Ok(Some(file));
-                }
+            let src_canon = match CanonicalPath::try_new(src) {
+                Ok(p) => p,
                 Err(SecretError::SourceMissing(_)) => {
                     debug!("File Missing: {:?}. Ignoring.", src);
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
-            }
+            };
+
+            let file = SecretFile::from_file(
+                src_canon.clone(),
+                AbsolutePath::new(dest),
+                self.max_file_size,
+            )?;
+
+            let entry = RegistryEntry {
+                file: file.clone(),
+                kind: RegistryKind::Mapped { mapping_idx: idx },
+            };
+            self.files.insert(src_canon, entry);
+            debug!("Tracked mapped file: {:?}", src);
+            return Ok(Some(file));
         }
 
         Ok(None)
@@ -159,9 +166,9 @@ impl SecretFileRegistry {
 
     /// Remove struct entry for this src and return the SecretFile if there was one.
     pub fn remove(&mut self, src: &Path) -> Vec<SecretFile> {
-        let removed_keys: Vec<PathBuf> = self
+        let removed_keys: Vec<CanonicalPath> = self
             .files
-            .range(src.to_path_buf()..)
+            .range::<Path, _>((Bound::Included(src), Bound::Unbounded))
             .take_while(|(k, _)| k.starts_with(src))
             .map(|(k, _)| k.clone())
             .collect();
@@ -181,9 +188,9 @@ impl SecretFileRegistry {
     /// Returns None if the move involves pinned files, crosses mappings, or implies state drift.
     pub fn try_rebase(&mut self, from: &Path, to: &Path) -> Option<(PathBuf, PathBuf)> {
         // Identify all affected files in the registry
-        let keys: Vec<PathBuf> = self
+        let keys: Vec<CanonicalPath> = self
             .files
-            .range(from.to_path_buf()..)
+            .range::<Path, _>((Bound::Included(from), Bound::Unbounded))
             .take_while(|(k, _)| k.starts_with(from))
             .map(|(k, _)| k.clone())
             .collect();
@@ -247,10 +254,25 @@ impl SecretFileRegistry {
         for (old_k, new_k, new_d) in updates {
             if let Some(mut entry) = self.files.remove(&old_k) {
                 // Re-create SecretFile to ensure internal consistency (validating new paths)
-                match SecretFile::from_file(&new_k, new_d, self.max_file_size) {
+                let src_canon = match CanonicalPath::try_new(&new_k) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!(
+                            "Failed to rebase file {:?} -> {:?}: source missing/invalid: {}",
+                            old_k, new_k, e
+                        );
+                        continue;
+                    }
+                };
+
+                match SecretFile::from_file(
+                    src_canon.clone(),
+                    AbsolutePath::new(new_d),
+                    self.max_file_size,
+                ) {
                     Ok(new_file) => {
                         entry.file = new_file;
-                        self.files.insert(new_k, entry);
+                        self.files.insert(src_canon, entry);
                     }
                     Err(e) => {
                         warn!("Failed to rebase file entry {:?}: {}", new_k, e);
@@ -383,7 +405,7 @@ mod tests {
         }
 
         // Verify DIRAA is still there
-        assert!(fs.files.contains_key(&f_aa));
+        assert!(fs.files.contains_key(f_aa.as_path()));
     }
 
     #[test]
@@ -420,10 +442,10 @@ mod tests {
         assert_eq!(removed.len(), 2);
 
         // Verify state
-        assert!(fs.files.contains_key(&f_a));
-        assert!(fs.files.contains_key(&f_z));
-        assert!(!fs.files.contains_key(&f_b));
-        assert!(!fs.files.contains_key(&f_c));
+        assert!(fs.files.contains_key(f_a.as_path()));
+        assert!(fs.files.contains_key(f_z.as_path()));
+        assert!(!fs.files.contains_key(f_b.as_path()));
+        assert!(!fs.files.contains_key(f_c.as_path()));
     }
 
     #[test]
@@ -467,7 +489,7 @@ mod tests {
         let input = src.join("subdir/file");
         // We don't need to create the file to test resolve() because resolve()
         // purely calculates the destination path string.
-        let dst = fs.resolve(&input).unwrap();
+        let dst = fs.resolve(AbsolutePath::new(&input)).unwrap();
 
         assert_eq!(dst, PathBuf::from("/s/subdir/file"));
     }
@@ -508,9 +530,9 @@ mod tests {
         assert_eq!(new_dst, output.join("new_sub"));
 
         // Verify internal state
-        assert!(!fs.files.contains_key(&p_old));
+        assert!(!fs.files.contains_key(p_old.as_path()));
 
-        let new_entry = fs.files.get(&p_new).expect("new file should be tracked");
+        let new_entry = fs.files.get(p_new.as_path()).expect("new file should be tracked");
         assert_eq!(
             new_entry.file.dest().to_path_buf(),
             output.join("new_sub/file.txt")
@@ -547,8 +569,8 @@ mod tests {
 
         let res = fs.try_rebase(&folder_a, &folder_b);
         assert!(res.is_none());
-        assert!(fs.files.contains_key(&f_old));
-        assert!(!fs.files.contains_key(&f_new));
+        assert!(fs.files.contains_key(f_old.as_path()));
+        assert!(!fs.files.contains_key(f_new.as_path()));
     }
 
     #[test]
@@ -584,7 +606,7 @@ mod tests {
         assert!(res.is_none());
 
         // State remains untouched
-        assert!(fs.files.contains_key(&f1));
-        assert!(fs.files.contains_key(&f2));
+        assert!(fs.files.contains_key(f1.as_path()));
+        assert!(fs.files.contains_key(f2.as_path()));
     }
 }

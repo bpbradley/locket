@@ -1,5 +1,5 @@
 use super::{MemSize, Secret, SecretError, SecretSource};
-use crate::path::AbsolutePath;
+use crate::path::{AbsolutePath, CanonicalPath};
 use std::borrow::Cow;
 use std::path::Path;
 
@@ -14,17 +14,17 @@ pub struct SecretFile {
 
 impl SecretFile {
     pub fn from_file(
-        src: impl AsRef<Path>,
-        dest: impl AsRef<Path>,
+        src: CanonicalPath,
+        dest: AbsolutePath,
         max_size: MemSize,
     ) -> Result<Self, SecretError> {
         Ok(Self {
-            source: SecretSource::file(src)?,
-            dest: AbsolutePath::new(dest),
+            source: SecretSource::File(src),
+            dest,
             max_size,
         })
     }
-    pub fn from_template(label: String, template: String, root: &Path) -> Self {
+    pub fn from_template(label: String, template: String, root: &AbsolutePath) -> Self {
         let safe_name = sanitize_filename::sanitize(&label);
         let dest = root.join(safe_name);
         Self {
@@ -35,7 +35,7 @@ impl SecretFile {
     }
     pub fn from_secret(
         secret: Secret,
-        root: &Path,
+        root: &AbsolutePath,
         max_size: MemSize,
     ) -> Result<Self, SecretError> {
         let (key, source) = match secret {
