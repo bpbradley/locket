@@ -185,6 +185,25 @@ impl FsEventRegistry {
     /// Update the registry with a new event for a given path, applying coalescing logic
     /// to avoid redundant or conflicting events.
     fn update(&mut self, path: PathBuf, new_event: FsEvent) {
+        // Often when a file is moved, the source is redundantly removed as well.
+        // Ignore such Remove events if the file has already been moved.
+        if let FsEvent::Remove(_) = &new_event
+            && !self.map.contains_key(&path)
+        {
+            let is_move_source = self
+                .map
+                .values()
+                .any(|e| matches!(e, FsEvent::Move { from, .. } if from == &path));
+
+            if is_move_source {
+                debug!(
+                    ?path,
+                    "FsEventRegistry: ignoring redundant Remove event for moved source"
+                );
+                return;
+            }
+        }
+
         match (self.map.get(&path), &new_event) {
             //  Write -> Remove === Ignore
             (Some(FsEvent::Write(_)), FsEvent::Remove(_)) => {
