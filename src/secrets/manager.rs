@@ -439,7 +439,7 @@ impl SecretFileManager {
         old: AbsolutePath,
         new: CanonicalPath,
     ) -> Result<(), SecretError> {
-        if let Some((from_dst, to_dst)) = self.registry.try_rebase(&old, &new) {
+        if let Some((from_dst, to_dst)) = self.registry.try_rebase(&old, &new.clone().into()) {
             debug!(?from_dst, ?to_dst, "attempting optimistic rename");
 
             if let Some(p) = to_dst.parent() {
@@ -461,7 +461,7 @@ impl SecretFileManager {
                 Err(e) => {
                     warn!(error=?e, "move failed; falling back to reinjection");
                     // rollback registry state
-                    self.registry.remove(&new);
+                    self.registry.remove(&new.clone().into());
                     if from_dst.exists() {
                         let _ = tokio::fs::remove_file(&from_dst).await;
                     }
@@ -496,7 +496,7 @@ impl SecretFileManager {
             return Ok(());
         }
 
-        match self.registry.upsert(&src)? {
+        match self.registry.upsert(src.into())? {
             Some(file) => {
                 self.process(&file).await?;
             }
