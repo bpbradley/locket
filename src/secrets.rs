@@ -200,7 +200,7 @@ impl SecretSource {
     }
 
     /// If the source is a file, returns its path.
-    pub fn path(&self) -> Option<&Path> {
+    pub fn path(&self) -> Option<&CanonicalPath> {
         match self {
             SecretSource::File(p) => Some(p),
             SecretSource::Literal { .. } => None,

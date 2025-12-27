@@ -82,7 +82,11 @@ impl SecretFile {
             .limit(self.max_size)
             .fetch()?
             .ok_or_else(|| {
-                let path = self.source.path().unwrap_or_else(|| Path::new("<unknown>"));
+                let path = self
+                    .source
+                    .path()
+                    .map(|p| p.as_ref())
+                    .unwrap_or_else(|| Path::new("<unknown>"));
                 SecretError::SourceMissing(path.to_path_buf())
             })
     }

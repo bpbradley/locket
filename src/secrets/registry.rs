@@ -90,7 +90,7 @@ impl SecretFileRegistry {
 
         let pinned: Vec<AbsolutePath> = self.pinned.keys().cloned().collect();
         for path in pinned {
-            if path.as_ref().exists()
+            if path.exists()
                 && let Err(e) = self.upsert(path.clone())
             {
                 warn!("Failed to scan pinned file {:?}: {}", path, e);
@@ -131,12 +131,11 @@ impl SecretFileRegistry {
             .mappings
             .iter()
             .enumerate()
-            .filter(|(_, m)| src.as_ref().starts_with(m.src()))
+            .filter(|(_, m)| src.starts_with(m.src()))
             .max_by_key(|(_, m)| m.src().as_os_str().len());
 
         if let Some((idx, mapping)) = map {
             let rel = src
-                .as_ref()
                 .strip_prefix(mapping.src())
                 .map_err(|_| SecretError::Parse("path strip failed".into()))?;
             let dest = mapping.dst().join(rel);
@@ -173,7 +172,7 @@ impl SecretFileRegistry {
         let removed_keys: Vec<AbsolutePath> = self
             .files
             .range::<AbsolutePath, _>((Bound::Included(src), Bound::Unbounded))
-            .take_while(|(k, _)| k.as_ref().starts_with(src.as_ref()))
+            .take_while(|(k, _)| k.starts_with(src))
             .map(|(k, _)| k.clone())
             .collect();
 
@@ -199,7 +198,7 @@ impl SecretFileRegistry {
         let keys: Vec<AbsolutePath> = self
             .files
             .range::<AbsolutePath, _>((Bound::Included(from), Bound::Unbounded))
-            .take_while(|(k, _)| k.as_ref().starts_with(from.as_ref()))
+            .take_while(|(k, _)| k.starts_with(from))
             .map(|(k, _)| k.clone())
             .collect();
 
@@ -219,13 +218,13 @@ impl SecretFileRegistry {
 
         // Calculate roots to pivot
         // Determine the relative movement within the mapping to project the output paths.
-        let rel_from = from.as_ref().strip_prefix(mapping.src()).ok()?;
+        let rel_from = from.strip_prefix(mapping.src()).ok()?;
         // Use CanonicalPath to verify existence of the old root anchor on disk
         let old_root_dst = CanonicalPath::try_new(mapping.dst().join(rel_from))
             .ok()?
             .into_inner();
 
-        let rel_to = to.as_ref().strip_prefix(mapping.src()).ok()?;
+        let rel_to = to.strip_prefix(mapping.src()).ok()?;
         // Use AbsolutePath to normalize the new root anchor (it may not exist yet)
         let new_root_dst = AbsolutePath::new(mapping.dst().join(rel_to)).into_inner();
 
@@ -242,16 +241,16 @@ impl SecretFileRegistry {
                 _ => return None,
             }
 
-            let rel = k.as_ref().strip_prefix(from.as_ref()).ok()?;
+            let rel = k.strip_prefix(from).ok()?;
 
             // Check for drift
             // i.e. the file's current destination doesn't match calculation
-            if entry.file.dest().as_ref() != AbsolutePath::new(old_root_dst.join(rel)).as_ref() {
+            if entry.file.dest() != &AbsolutePath::new(old_root_dst.join(rel)) {
                 return None;
             }
 
             // Calculate new state
-            let new_k = AbsolutePath::new(to.as_ref().join(rel));
+            let new_k = AbsolutePath::new(to.join(rel));
             let new_d = AbsolutePath::new(new_root_dst.join(rel)).into_inner();
 
             updates.push((k.clone(), new_k, new_d));

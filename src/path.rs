@@ -202,6 +202,18 @@ impl AsRef<Path> for CanonicalPath {
     }
 }
 
+impl AsRef<std::ffi::OsStr> for CanonicalPath {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for AbsolutePath {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+       self.0.as_os_str()
+    }
+}
+
 impl std::fmt::Display for CanonicalPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.display().fmt(f)
