@@ -216,16 +216,6 @@ impl SecretFileManager {
         pinned.chain(mapped).collect()
     }
 
-    pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
-        let v = SecretFile::from_template(
-            label.to_string(),
-            template.as_ref().to_string(),
-            &self.opts.secret_dir,
-        );
-        self.literals.push(v);
-        self
-    }
-
     async fn resolve(&self, file: &SecretFile) -> Result<String, SecretError> {
         let f = file.clone();
         let content =
