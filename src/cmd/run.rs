@@ -78,7 +78,6 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
 
     let manager = SecretFileManager::new(manager, provider)?;
 
-    manager.collisions()?;
     manager.inject_all().await?;
 
     debug!("injection complete; creating status file");

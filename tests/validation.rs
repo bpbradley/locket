@@ -46,14 +46,12 @@ fn collisions_structure_conflict() {
         make_mapping(blocked_src.clone(), output.join("config/nested")),
     ]);
 
-    let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider)).unwrap();
+    let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider));
 
-    let result = secrets.collisions();
-
-    assert!(result.is_err(), "Should detect structure conflict");
+    assert!(secrets.is_err(), "Should detect structure conflict");
     assert!(matches!(
-        result.unwrap_err(),
-        SecretError::StructureConflict { .. }
+        secrets,
+        Err(SecretError::StructureConflict { .. })
     ));
 }
 
@@ -77,13 +75,11 @@ fn collisions_on_output_dst() {
         .with_mapping(vec![make_mapping(&src_dir, &out_dir)])
         .with_secrets(args);
 
-    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider)).unwrap();
+    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
 
-    let result = manager.collisions();
+    assert!(manager.is_err());
 
-    assert!(result.is_err());
-
-    assert!(matches!(result.unwrap_err(), SecretError::Collision { .. }));
+    assert!(matches!(manager, Err(SecretError::Collision { .. })));
 }
 
 #[test]

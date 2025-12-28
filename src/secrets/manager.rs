@@ -192,6 +192,8 @@ impl SecretFileManager {
             provider,
         };
 
+        manager.collisions()?;
+
         Ok(manager)
     }
 
@@ -336,7 +338,7 @@ impl SecretFileManager {
         Ok(())
     }
 
-    pub fn collisions(&self) -> Result<(), SecretError> {
+    fn collisions(&self) -> Result<(), SecretError> {
         // Collect all secret destinations and label their sources
         let mut entries: Vec<(&Path, String)> = Vec::new();
 
