@@ -60,7 +60,7 @@ impl EnvManager {
     pub fn files(&self) -> Vec<PathBuf> {
         self.secrets
             .iter()
-            .filter_map(|s| s.source().path().map(PathBuf::from))
+            .filter_map(|s| s.source().path().map(|p| p.to_path_buf()))
             .collect()
     }
 

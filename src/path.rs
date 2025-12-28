@@ -29,6 +29,9 @@ impl AbsolutePath {
     pub fn canonicalize(self) -> Result<CanonicalPath, SecretError> {
         CanonicalPath::try_new(&self.0)
     }
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
 }
 
 /// A path that is guaranteed to be canonical, absolute, and existing on disk.
@@ -45,6 +48,9 @@ impl CanonicalPath {
     }
     pub fn try_new(path: impl AsRef<Path>) -> Result<Self, SecretError> {
         Ok(Self(path.as_ref().canon()?))
+    }
+    pub fn as_path(&self) -> &Path {
+        &self.0
     }
 }
 
@@ -199,18 +205,6 @@ impl Deref for CanonicalPath {
 impl AsRef<Path> for CanonicalPath {
     fn as_ref(&self) -> &Path {
         &self.0
-    }
-}
-
-impl AsRef<std::ffi::OsStr> for CanonicalPath {
-    fn as_ref(&self) -> &std::ffi::OsStr {
-        self.0.as_os_str()
-    }
-}
-
-impl AsRef<std::ffi::OsStr> for AbsolutePath {
-    fn as_ref(&self) -> &std::ffi::OsStr {
-       self.0.as_os_str()
     }
 }
 

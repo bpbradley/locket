@@ -570,7 +570,7 @@ mod tests {
         let root = AbsolutePath::new("/");
 
         let v = SecretFile::from_template("Db_Password".to_string(), "".to_string(), &root);
-        assert_eq!(v.dest(), Path::new("/Db_Password")); // absolute() call in from_template might affect this depending on platform, but logic holds
+        assert_eq!(v.dest(), Path::new("/Db_Password"));
 
         let v = SecretFile::from_template("A/B/C".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/ABC"));
