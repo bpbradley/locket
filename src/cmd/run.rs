@@ -60,30 +60,21 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
     );
     debug!("effective config: {:#?}", args);
 
-    let RunArgs {
-        manager,
-        status_file,
-        provider,
-        debounce,
-        mode,
-        ..
-    } = args;
-
-    let status: &StatusFile = &status_file;
+    let status: &StatusFile = &args.status_file;
     status.clear().unwrap_or_else(|e| {
         error!(error=%e, "failed to clear status file on startup");
     });
 
-    let provider = provider.build().await?;
+    let provider = args.provider.build().await?;
 
-    let manager = SecretFileManager::new(manager, provider)?;
+    let manager = SecretFileManager::new(args.manager, provider)?;
 
     manager.inject_all().await?;
 
     debug!("injection complete; creating status file");
     status.mark_ready()?;
 
-    match mode {
+    match args.mode {
         RunMode::OneShot => Ok(()),
         RunMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
@@ -93,7 +84,7 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
             Ok(())
         }
         RunMode::Watch => {
-            let watcher = FsWatcher::new(debounce, manager);
+            let watcher = FsWatcher::new(args.debounce, manager);
             watcher.run().await?;
             Ok(())
         }
