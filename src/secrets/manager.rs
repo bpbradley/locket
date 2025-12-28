@@ -108,7 +108,7 @@ impl SecretFileOpts {
         self.writer = writer;
         self
     }
-    pub fn resolve(&mut self) -> Result<(), SecretError> {
+    fn resolve(&mut self) -> Result<(), SecretError> {
         let mut sources = Vec::new();
         let mut destinations = Vec::new();
 
@@ -167,11 +167,13 @@ pub struct SecretFileManager {
 
 impl SecretFileManager {
     pub fn new(
-        opts: SecretFileOpts,
+        mut opts: SecretFileOpts,
         provider: Arc<dyn SecretsProvider>,
     ) -> Result<Self, SecretError> {
         let mut pinned = Vec::new();
         let mut literals = Vec::new();
+
+        opts.resolve()?;
 
         for s in &opts.secrets {
             let f = SecretFile::from_secret(s.clone(), &opts.secret_dir, opts.max_file_size)?;
@@ -222,7 +224,7 @@ impl SecretFileManager {
         self
     }
 
-    pub async fn resolve(&self, file: &SecretFile) -> Result<String, SecretError> {
+    async fn resolve(&self, file: &SecretFile) -> Result<String, SecretError> {
         let f = file.clone();
         let content =
             tokio::task::spawn_blocking(move || f.content().map(|c| c.into_owned())).await??;

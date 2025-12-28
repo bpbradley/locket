@@ -61,7 +61,7 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
     debug!("effective config: {:#?}", args);
 
     let RunArgs {
-        mut manager,
+        manager,
         status_file,
         provider,
         debounce,
@@ -75,8 +75,6 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
     });
 
     let provider = provider.build().await?;
-
-    manager.resolve()?;
 
     let manager = SecretFileManager::new(manager, provider)?;
 
