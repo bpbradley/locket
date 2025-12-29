@@ -11,19 +11,19 @@
 //! The provider uses the reqwest HTTP client
 //! and handles authentication via bearer tokens.
 
+use super::references::{OpReference, ReferenceParser, SecretReference};
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
-use percent_encoding::percent_decode_str;
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing::debug;
 use url::Url;
 
 define_auth_token!(
@@ -105,6 +105,15 @@ pub struct OpConnectProvider {
     max_concurrent: usize,
 }
 
+#[cfg(any(feature = "op", feature = "connect"))]
+impl ReferenceParser for OpConnectProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        OpReference::from_str(raw)
+            .ok()
+            .map(SecretReference::OnePassword)
+    }
+}
+
 impl OpConnectProvider {
     pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.token.try_into()?;
@@ -162,29 +171,17 @@ impl OpConnectProvider {
     }
 
     /// Pre-resolves all Vault and Item names found in the reference list.
-    async fn prewarm_cache(&self, references: &[&str]) -> Result<(), ProviderError> {
+    async fn prewarm_cache(&self, references: &[&OpReference]) -> Result<(), ProviderError> {
         let mut vaults = HashSet::new();
         let mut items = HashSet::new();
 
-        for path in references {
-            // Basic heuristic parse to find names/UUIDs.
-            // We strip op:// and use '/' as a rough separator.
-            // Strict parsing happens later in fetch_single.
-            let parts: Vec<&str> = path.trim_start_matches("op://").split('/').collect();
-
-            // We need at least Vault/Item
-            if parts.len() < 2 {
-                continue;
+        for reference in references {
+            if !is_uuid(&reference.vault) {
+                vaults.insert(reference.vault.clone());
             }
 
-            let (vault_ref, item_ref) = (parts[0], parts[1]);
-
-            // If it's NOT a UUID, we queue it for resolution
-            if !is_uuid(vault_ref) {
-                vaults.insert(vault_ref.to_string());
-            }
-            if !is_uuid(item_ref) {
-                items.insert((vault_ref.to_string(), item_ref.to_string()));
+            if !is_uuid(&reference.item) {
+                items.insert((reference.vault.clone(), reference.item.clone()));
             }
         }
 
@@ -314,43 +311,9 @@ impl OpConnectProvider {
         Ok(item.id.clone())
     }
 
-    async fn fetch_single(&self, raw_path: &str) -> Result<SecretString, ProviderError> {
-        let url = Url::parse(raw_path)
-            .map_err(|e| ProviderError::InvalidConfig(format!("bad reference URL: {}", e)))?;
-
-        let vault_ref = url.host_str().ok_or_else(|| {
-            ProviderError::InvalidConfig(format!("missing vault name: {}", raw_path))
-        })?;
-
-        let segments: Vec<&str> = url
-            .path_segments()
-            .ok_or_else(|| ProviderError::InvalidConfig("empty path".into()))?
-            .collect();
-
-        // Parse Item/Section/Field structure
-        let (item_ref, _section, raw_field) = match segments.len() {
-            2 => (segments[0], None, segments[1]),
-            3 => (segments[0], Some(segments[1]), segments[2]),
-            _ => {
-                return Err(ProviderError::InvalidConfig(format!(
-                    "invalid path segments: {}",
-                    raw_path
-                )));
-            }
-        };
-
-        debug!(
-            "Fetching secret: item: {}, section: {:?}, field: {}",
-            item_ref, _section, raw_field
-        );
-
-        let field_cow = percent_decode_str(raw_field)
-            .decode_utf8()
-            .map_err(|e| ProviderError::InvalidConfig(format!("utf8 decode error: {}", e)))?;
-        let field = field_cow.as_ref();
-
-        let vault_id = self.resolve_vault_id(vault_ref).await?;
-        let item_id = self.resolve_item_id(&vault_id, item_ref).await?;
+    async fn fetch_single(&self, op_ref: &OpReference) -> Result<SecretString, ProviderError> {
+        let vault_id = self.resolve_vault_id(&op_ref.vault).await?;
+        let item_id = self.resolve_item_id(&vault_id, &op_ref.item).await?;
 
         let mut api_url = self.host.clone();
         api_url.set_path(&format!("/v1/vaults/{}/items/{}", vault_id, item_id));
@@ -365,7 +328,9 @@ impl OpConnectProvider {
 
         match resp.status() {
             StatusCode::OK => {}
-            StatusCode::NOT_FOUND => return Err(ProviderError::NotFound(raw_path.to_string())),
+            StatusCode::NOT_FOUND => {
+                return Err(ProviderError::NotFound(op_ref.to_string()));
+            }
             StatusCode::UNAUTHORIZED => {
                 return Err(ProviderError::Unauthorized("invalid token".into()));
             }
@@ -381,22 +346,13 @@ impl OpConnectProvider {
 
         let target_field = fields
             .iter()
-            .find(|f| {
-                if f.id == field {
-                    return true;
-                }
-                if let Some(label) = &f.label
-                    && label == field
-                {
-                    return true;
-                }
-
-                false
-            })
-            .ok_or_else(|| ProviderError::NotFound(format!("field '{}' not found", field)))?;
+            .find(|f| f.id == op_ref.field || f.label.as_ref() == Some(&op_ref.field))
+            .ok_or_else(|| {
+                ProviderError::NotFound(format!("field '{}' not found", op_ref.field))
+            })?;
 
         let secret_value = target_field.value.as_ref().ok_or_else(|| {
-            ProviderError::NotFound(format!("field '{}' exists but has no value", field))
+            ProviderError::NotFound(format!("field '{}' exists but has no value", op_ref.field))
         })?;
 
         Ok(secret_value.clone())
@@ -405,28 +361,34 @@ impl OpConnectProvider {
 
 #[async_trait]
 impl SecretsProvider for OpConnectProvider {
-    fn accepts_key(&self, key: &str) -> bool {
-        key.starts_with("op://")
-    }
-
     async fn fetch_map(
         &self,
-        references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
+        let op_refs: Vec<&OpReference> = references
+            .iter()
+            .filter_map(|r| match r {
+                SecretReference::OnePassword(op) => Some(op),
+                _ => None,
+            })
+            .collect();
+
+        if op_refs.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         // We must first resolve any vault or item names to UUIDs.
         // So we first collect all unique names, and pre-resolve them
         // into cache so that we don't need to resolve these again in the future
-        if let Err(e) = self.prewarm_cache(references).await {
+        if let Err(e) = self.prewarm_cache(&op_refs).await {
             tracing::warn!("cache pre-warm failed: {}", e);
         }
 
-        let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
-
-        let results: Vec<Result<Option<(String, SecretString)>, ProviderError>> =
-            stream::iter(refs)
-                .map(|key| async move {
-                    match self.fetch_single(&key).await {
-                        Ok(val) => Ok(Some((key, val))),
+        let results: Vec<Result<Option<(SecretReference, SecretString)>, ProviderError>> =
+            stream::iter(op_refs.into_iter().cloned())
+                .map(|op_ref| async move {
+                    match self.fetch_single(&op_ref).await {
+                        Ok(val) => Ok(Some((SecretReference::OnePassword(op_ref), val))),
                         Err(e) => Err(e),
                     }
                 })

@@ -26,7 +26,7 @@ cmd = "cargo run -- exec --watch --interactive -- python3"
 
 [test]
 description = "cargo test"
-cmd = "cargo test"
+cmd = "cargo test --features testing"
 
 [fmt]
 description = "cargo fmt --all"

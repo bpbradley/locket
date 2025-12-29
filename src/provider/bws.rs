@@ -4,6 +4,7 @@
 //!
 //! It uses the official Bitwarden SDK
 
+use super::references::{ReferenceParser, SecretReference};
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use bitwarden::{
@@ -82,6 +83,12 @@ pub struct BwsProvider {
     max_concurrent: usize,
 }
 
+impl ReferenceParser for BwsProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        uuid::Uuid::parse_str(raw).ok().map(SecretReference::Bws)
+    }
+}
+
 impl BwsProvider {
     pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.token.try_into()?;
@@ -114,37 +121,39 @@ impl BwsProvider {
 
 #[async_trait]
 impl SecretsProvider for BwsProvider {
-    fn accepts_key(&self, key: &str) -> bool {
-        // BWS native reference is just a UUID.
-        // TODO: Maybe we can support a bws:// scheme as well to allow access by name?
-        Uuid::parse_str(key).is_ok()
-    }
-
     async fn fetch_map(
         &self,
-        references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let client = &self.client;
 
-        let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
-
-        let results: Vec<Result<(String, SecretString), ProviderError>> = stream::iter(refs)
-            .map(|key| async move {
-                let id = Uuid::parse_str(&key)
-                    .map_err(|_| ProviderError::InvalidConfig(format!("invalid uuid: {}", key)))?;
-
-                let req = SecretGetRequest { id };
-                let resp = client
-                    .secrets()
-                    .get(&req)
-                    .await
-                    .map_err(|e| ProviderError::NotFound(format!("{} ({})", key, e)))?;
-
-                Ok((key, SecretString::new(resp.value.into())))
+        let refs: Vec<(SecretReference, Uuid)> = references
+            .iter()
+            .filter_map(|r| match r {
+                SecretReference::Bws(uuid) => Some((r.clone(), *uuid)),
+                _ => None,
             })
-            .buffer_unordered(self.max_concurrent)
-            .collect()
-            .await;
+            .collect();
+
+        if refs.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let results: Vec<Result<(SecretReference, SecretString), ProviderError>> =
+            stream::iter(refs)
+                .map(|(original_ref, id)| async move {
+                    let req = SecretGetRequest { id };
+                    let resp = client
+                        .secrets()
+                        .get(&req)
+                        .await
+                        .map_err(|e| ProviderError::NotFound(format!("{} ({})", id, e)))?;
+
+                    Ok((original_ref, SecretString::new(resp.value.into())))
+                })
+                .buffer_unordered(self.max_concurrent)
+                .collect()
+                .await;
 
         let mut map = HashMap::new();
         for res in results {

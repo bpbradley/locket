@@ -22,6 +22,7 @@ connect = ["dep:reqwest", "dep:url", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
+testing = []
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }

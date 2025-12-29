@@ -1,7 +1,12 @@
+#![cfg(feature = "testing")]
+
 use async_trait::async_trait;
 use locket::{
     path::{AbsolutePath, CanonicalPath, PathMapping},
-    provider::{ProviderError, SecretsProvider},
+    provider::{
+        ProviderError, SecretsProvider,
+        references::{ReferenceParser, SecretReference},
+    },
     secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretFileOpts},
 };
 use secrecy::SecretString;
@@ -9,7 +14,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::tempdir;
-use tracing::debug;
 
 // Holds a static map of "Remote" secrets to serve.
 #[derive(Debug, Clone, Default)]
@@ -27,23 +31,37 @@ impl MockProvider {
     }
 }
 
+// Pure Logic: Only accepts "test:" prefix.
+// Generates SecretReference::Mock, avoiding OpReference entirely.
+impl ReferenceParser for MockProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        if raw.starts_with("test:") {
+            Some(SecretReference::Mock(raw.to_string()))
+        } else {
+            None
+        }
+    }
+}
+
 #[async_trait]
 impl SecretsProvider for MockProvider {
-    fn accepts_key(&self, key: &str) -> bool {
-        key.starts_with("mock://")
-    }
-
     async fn fetch_map(
         &self,
-        references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let mut result = HashMap::new();
-        for &key in references {
-            if let Some(val) = self.data.get(key) {
-                result.insert(key.to_string(), val.clone());
-            } else {
-                return Err(ProviderError::NotFound(key.to_string()));
+
+        for ref_obj in references {
+            // Pattern match to extract the inner string from the Mock variant
+            if let SecretReference::Mock(key) = ref_obj {
+                if let Some(val) = self.data.get(key) {
+                    result.insert(ref_obj.clone(), val.clone());
+                } else {
+                    return Err(ProviderError::NotFound(key.clone()));
+                }
             }
+            // If we somehow got a BWS/Op variant here, we ignore it
+            // (or error, but ignoring is standard provider behavior)
         }
         Ok(result)
     }
@@ -70,16 +88,14 @@ fn setup(
 
 #[tokio::test]
 async fn test_happy_path_template_rendering() {
-    // A file with two secrets
     let (_tmp, out_dir, opts) = setup(
         "config.yaml",
-        "user: {{ mock://user }}\npass: {{ mock://pass }}",
+        "user: {{ test:user }}\npass: {{ test:pass }}",
     );
 
-    // Provider has both secrets
     let provider = Arc::new(MockProvider::new(vec![
-        ("mock://user", "admin"),
-        ("mock://pass", "secret123"),
+        ("test:user", "admin"),
+        ("test:pass", "secret123"),
     ]));
 
     let manager = SecretFileManager::new(opts, provider).unwrap();
@@ -92,26 +108,26 @@ async fn test_happy_path_template_rendering() {
 
 #[tokio::test]
 async fn test_whole_file_replacement() {
-    let (_tmp, out_dir, opts) = setup("id_rsa", "mock://ssh/key");
+    let (_tmp, out_dir, opts) = setup("id_rsa", "test:ssh/key");
 
     let key_content = "-----BEGIN RSA PRIVATE KEY-----...";
-    let provider = Arc::new(MockProvider::new(vec![("mock://ssh/key", key_content)]));
+    let provider = Arc::new(MockProvider::new(vec![("test:ssh/key", key_content)]));
     let manager = SecretFileManager::new(opts, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("id_rsa")).unwrap();
-    assert_eq!(result, key_content); // Should be replaced entirely
+    assert_eq!(result, key_content);
 }
 
 #[tokio::test]
 async fn test_policy_error_aborts() {
-    // Template requests a missing secret
-    let (_tmp, _out, mut opts) = setup("config.yaml", "Key: {{ mock://missing }}");
+    // "test:missing" parses as valid, but is not in the provider's data map.
+    let (_tmp, _out, mut opts) = setup("config.yaml", "Key: {{ test:missing }}");
 
     opts.policy = InjectFailurePolicy::Error;
 
-    let provider = Arc::new(MockProvider::new(vec![])); // Empty provider
+    let provider = Arc::new(MockProvider::new(vec![]));
     let manager = SecretFileManager::new(opts, provider).unwrap();
 
     let result = manager.inject_all().await;
@@ -119,47 +135,44 @@ async fn test_policy_error_aborts() {
     assert!(result.is_err());
 
     match result.unwrap_err() {
-        SecretError::Provider(ProviderError::NotFound(k)) => assert_eq!(k, "mock://missing"),
+        SecretError::Provider(ProviderError::NotFound(k)) => {
+            assert_eq!(k, "test:missing")
+        }
         e => panic!("Unexpected error type: {:?}", e),
     }
 }
 
 #[tokio::test]
 async fn test_policy_copy_unmodified() {
-    // Template requests missing secret
-    let (_tmp, out_dir, mut opts) = setup("config.yaml", "Key: {{ mock://missing }}");
+    let (_tmp, out_dir, mut opts) = setup("config.yaml", "Key: {{ test:missing }}");
 
     opts.policy = InjectFailurePolicy::CopyUnmodified;
 
     let provider = Arc::new(MockProvider::new(vec![]));
     let manager = SecretFileManager::new(opts, provider).unwrap();
 
-    // Should succeed (return Ok) despite missing secret
     manager.inject_all().await.unwrap();
 
-    // Should contain original template text
     let result = std::fs::read_to_string(out_dir.join("config.yaml")).unwrap();
-    assert_eq!(result, "Key: {{ mock://missing }}");
+    assert_eq!(result, "Key: {{ test:missing }}");
 }
 
 #[tokio::test]
 async fn test_ignore_unknown_providers() {
-    // File contains keys for a different provider (e.g. op://)
-    // Our mock only accepts mock://
-    let content = "A: {{ op://vault/item }}\nB: {{ mock://valid }}";
+    // "test:valid" -> Parsed (starts with test:) -> Fetched
+    // "op://real/secret" -> Not Parsed (MockProvider returns None) -> Ignored (Literal)
+    let content = "A: {{ op://real/secret }}\nB: {{ test:valid }}";
     let (_tmp, out_dir, opts) = setup("mixed.yaml", content);
 
-    let provider = Arc::new(MockProvider::new(vec![("mock://valid", "value")]));
+    let provider = Arc::new(MockProvider::new(vec![("test:valid", "value")]));
     let manager = SecretFileManager::new(opts, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 
     let result = std::fs::read_to_string(out_dir.join("mixed.yaml")).unwrap();
 
-    // "op://" should be ignored (passed through) because accepts_key returned false
-    // "mock://" should be rendered
-    debug!("Result: {}", result);
-    assert_eq!(result, "A: {{ op://vault/item }}\nB: value");
+    // The op:// tag should be preserved exactly as is because the provider didn't recognize it
+    assert_eq!(result, "A: {{ op://real/secret }}\nB: value");
 }
 
 fn make_mapping(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> PathMapping {

@@ -13,7 +13,6 @@ use crate::write::FileWriter;
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use secrecy::ExposeSecret;
-use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -221,42 +220,39 @@ impl SecretFileManager {
         let content =
             tokio::task::spawn_blocking(move || f.content().map(|c| c.into_owned())).await??;
 
-        let tpl = Template::new(&content);
-        let keys = tpl.keys();
-        let has_keys = !keys.is_empty();
+        let tpl = Template::parse(&content, &*self.provider);
 
-        let candidates: Vec<&str> = if has_keys {
-            keys.into_iter().collect()
+        if tpl.has_secrets() {
+            let references_to_fetch = tpl.references();
+
+            info!(dst=?file.dest(), count=references_to_fetch.len(), "fetching secrets from template");
+            let secrets_map = self.provider.fetch_map(&references_to_fetch).await?;
+
+            let output = tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()));
+            Ok(output.into_owned())
         } else {
-            vec![content.trim()]
-        };
+            // Try to parse the entire trimmed content as a single reference.
+            if let Some(reference) = self.provider.parse(content.trim()) {
+                info!(dst=?file.dest(), "fetching bare secret");
 
-        let references: Vec<&str> = candidates
-            .into_iter()
-            .filter(|k| self.provider.accepts_key(k))
-            .collect();
+                let secrets_map = self
+                    .provider
+                    .fetch_map(std::slice::from_ref(&reference))
+                    .await?;
 
-        if references.is_empty() {
-            debug!(dst=?file.dest(), "no resolveable secrets found; passing through");
-            return Ok(content);
-        }
-
-        info!(dst=?file.dest(), count=references.len(), "fetching secrets");
-        let secrets_map = self.provider.fetch_map(&references).await?;
-
-        let output = if has_keys {
-            tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()))
-        } else {
-            match secrets_map.get(content.trim()) {
-                Some(val) => Cow::Borrowed(val.expose_secret()),
-                None => {
-                    warn!(dst=?file.dest(), "provider returned success but secret value was missing");
-                    Cow::Borrowed(content.as_str())
+                match secrets_map.get(&reference) {
+                    Some(val) => Ok(val.expose_secret().to_string()),
+                    None => {
+                        warn!(dst=?file.dest(), "provider returned success but secret value was missing");
+                        Ok(content) // Fallback to original content
+                    }
                 }
+            } else {
+                // Not a template and not a bare secret, so just return the original content.
+                debug!(dst=?file.dest(), "no resolvable secrets found; passing through");
+                Ok(content)
             }
-        };
-
-        Ok(output.into_owned())
+        }
     }
 
     pub async fn materialize(&self, file: &SecretFile, content: String) -> Result<(), SecretError> {

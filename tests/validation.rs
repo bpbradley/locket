@@ -1,5 +1,8 @@
 use locket::path::{AbsolutePath, CanonicalPath, PathMapping};
-use locket::provider::{ProviderError, SecretsProvider};
+use locket::provider::{
+    ProviderError, SecretsProvider,
+    references::{ReferenceParser, SecretReference},
+};
 use locket::secrets::{Secret, SecretError, SecretFileManager, SecretFileOpts};
 use secrecy::SecretString;
 use std::collections::HashMap;
@@ -8,15 +11,19 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 struct NoOpProvider;
+
+impl ReferenceParser for NoOpProvider {
+    fn parse(&self, _raw: &str) -> Option<SecretReference> {
+        None
+    }
+}
+
 #[async_trait::async_trait]
 impl SecretsProvider for NoOpProvider {
-    fn accepts_key(&self, _key: &str) -> bool {
-        true
-    }
     async fn fetch_map(
         &self,
-        _references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        _references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         Ok(HashMap::new())
     }
 }

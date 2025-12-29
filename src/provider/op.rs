@@ -8,6 +8,7 @@
 //! The provider supports authentication via service account tokens
 //! and can be configured with an optional config directory.
 
+use super::references::{OpReference, ReferenceParser, SecretReference};
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use clap::Args;
@@ -17,6 +18,7 @@ use secrecy::SecretString;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::str::FromStr;
 use tokio::process::Command;
 
 define_auth_token!(
@@ -80,26 +82,42 @@ impl OpProvider {
     }
 }
 
+#[cfg(any(feature = "op", feature = "connect"))]
+impl ReferenceParser for OpProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        OpReference::from_str(raw)
+            .ok()
+            .map(SecretReference::OnePassword)
+    }
+}
+
 #[async_trait]
 impl SecretsProvider for OpProvider {
-    fn accepts_key(&self, key: &str) -> bool {
-        key.starts_with("op://")
-    }
-
     async fn fetch_map(
         &self,
-        references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         const MAX_CONCURRENT_OPS: usize = 10;
-        let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
+        let op_refs: Vec<OpReference> = references
+            .iter()
+            .filter_map(|r| match r {
+                SecretReference::OnePassword(op) => Some(op.clone()),
+                _ => None,
+            })
+            .collect();
 
-        let results: Vec<Result<Option<(String, SecretString)>, ProviderError>> =
-            stream::iter(refs)
-                .map(|key| async move {
+        if op_refs.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let results: Vec<Result<Option<(SecretReference, SecretString)>, ProviderError>> =
+            stream::iter(op_refs)
+                .map(|op_ref| async move {
+                    let key = op_ref.as_str();
                     let mut cmd = Command::new("op");
                     cmd.arg("read")
                         .arg("--no-newline")
-                        .arg(&key)
+                        .arg(key)
                         .env_clear()
                         .env("PATH", std::env::var("PATH").unwrap_or_default())
                         .env("HOME", std::env::var("HOME").unwrap_or_default())
@@ -122,7 +140,11 @@ impl SecretsProvider for OpProvider {
                         let secret = String::from_utf8(output.stdout).map_err(|e| {
                             ProviderError::InvalidConfig(format!("utf8 error: {}", e))
                         })?;
-                        Ok(Some((key, SecretString::new(secret.into()))))
+
+                        Ok(Some((
+                            SecretReference::OnePassword(op_ref),
+                            SecretString::new(secret.into()),
+                        )))
                     } else {
                         let stderr = String::from_utf8_lossy(&output.stderr);
                         Err(ProviderError::Other(format!(

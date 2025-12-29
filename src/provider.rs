@@ -29,6 +29,9 @@ mod connect;
 mod macros;
 #[cfg(feature = "op")]
 mod op;
+pub mod references;
+
+use references::{ReferenceParser, SecretReference};
 
 // Re-export alias that is more expressive while internally remaining descriptive
 pub use ProviderSelection as Provider;
@@ -74,7 +77,7 @@ pub enum ProviderError {
 
 /// Abstraction for a backend service that resolves secret references.
 #[async_trait]
-pub trait SecretsProvider: Send + Sync {
+pub trait SecretsProvider: ReferenceParser + Send + Sync {
     /// Batch resolve a list of secret references.
     ///
     /// The input is a slice of unique keys found in the templates (e.g., `["op://vault/item/field", ...]`).
@@ -84,13 +87,8 @@ pub trait SecretsProvider: Send + Sync {
     /// rather than returning an error, allowing the template renderer to leave the tag unresolved.
     async fn fetch_map(
         &self,
-        references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError>;
-
-    /// Returns `true` if the key string matches the syntax this provider supports.
-    ///
-    /// This is used to filter keys before attempting to fetch them.
-    fn accepts_key(&self, key: &str) -> bool;
+        references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError>;
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]

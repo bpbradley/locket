@@ -5,14 +5,14 @@
 //! fetches them, and constructs a `HashMap` translating references to boxed SecretStrings,
 //! which can be exposed by the caller for process injection.
 
-use crate::provider::SecretsProvider;
+use crate::provider::{SecretsProvider, references::SecretReference};
 use crate::secrets::{Secret, SecretError};
 use crate::template::Template;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnvError {
@@ -75,7 +75,7 @@ impl EnvManager {
     /// This is done in two passes on the secret sources:
     /// 1. Reads all sources to build a map of raw values.
     /// 2. Scans raw values for templates, batches distinct secret keys,
-    ///    and resolves them via the provider.
+    ///    and fetches them via the provider.
     ///
     /// The resolved content is returned as a map of `{ key -> SecretString }`.
     ///
@@ -85,10 +85,8 @@ impl EnvManager {
         let secrets = self.secrets.clone();
         let map = tokio::task::spawn_blocking(move || {
             let mut inner = HashMap::new();
-
             for secret in secrets {
                 let content = secret.source().read().fetch()?;
-
                 let content = match content {
                     Some(c) => c,
                     None => continue,
@@ -110,20 +108,16 @@ impl EnvManager {
             Ok::<HashMap<String, String>, EnvError>(inner)
         })
         .await??;
-        let mut references = Vec::new();
+        let mut references = HashSet::new();
 
         for v in map.values() {
-            let tpl = Template::new(v);
-            let keys = tpl.keys();
-
-            if !keys.is_empty() {
-                for key in keys {
-                    if self.provider.accepts_key(key) {
-                        references.push(key.to_string());
-                    }
+            let tpl = Template::parse(v, &*self.provider);
+            if tpl.has_secrets() {
+                for r in tpl.references() {
+                    references.insert(r);
                 }
-            } else if self.provider.accepts_key(v.trim()) {
-                references.push(v.trim().to_string());
+            } else if let Some(r) = self.provider.parse(v.trim()) {
+                references.insert(r);
             }
         }
 
@@ -131,34 +125,25 @@ impl EnvManager {
             return Ok(wrap_all(map));
         }
 
-        // Deduplicate to save provider calls
-        references.sort();
-        references.dedup();
-        let ref_strs: Vec<&str> = references.iter().map(|s| s.as_str()).collect();
-
-        info!(count = references.len(), "batch fetching secrets");
-        let secrets_map = self.provider.fetch_map(&ref_strs).await?;
+        let ref_vec: Vec<SecretReference> = references.into_iter().collect();
+        let secrets_map = self.provider.fetch_map(&ref_vec).await?;
 
         let mut result = HashMap::with_capacity(map.len());
 
         for (k, v) in map {
-            let tpl = Template::new(&v);
+            let tpl = Template::parse(&v, &*self.provider);
 
-            if tpl.has_tags() {
-                // Render string with multiple replacements
-                let rendered =
-                    tpl.render_with(|key| secrets_map.get(key).map(|s| s.expose_secret()));
+            if tpl.has_secrets() {
+                let rendered = tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()));
                 result.insert(k, SecretString::new(rendered.into_owned().into()));
-            } else if self.provider.accepts_key(v.trim()) {
-                // Direct replacement
-                if let Some(secret_val) = secrets_map.get(v.trim()) {
-                    result.insert(k, secret_val.clone());
-                } else {
-                    // Provider didn't find it, keep original
-                    result.insert(k, SecretString::new(v.into()));
-                }
             } else {
-                // No secret reference found
+                let trimmed = v.trim();
+                if let Some(r) = self.provider.parse(trimmed)
+                    && let Some(val) = secrets_map.get(&r)
+                {
+                    result.insert(k, val.clone());
+                    continue;
+                }
                 result.insert(k, SecretString::new(v.into()));
             }
         }
