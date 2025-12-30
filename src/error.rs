@@ -1,6 +1,10 @@
 use crate::{
-    events::HandlerError, health::HealthError, logging::LoggingError, provider::{ProviderError, references::ReferenceParseError},
-    secrets::SecretError, watch::WatchError,
+    events::HandlerError,
+    health::HealthError,
+    logging::LoggingError,
+    provider::{ProviderError, ReferenceParseError},
+    secrets::SecretError,
+    watch::WatchError,
 };
 use thiserror::Error;
 

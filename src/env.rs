@@ -5,7 +5,7 @@
 //! fetches them, and constructs a `HashMap` translating references to boxed SecretStrings,
 //! which can be exposed by the caller for process injection.
 
-use crate::provider::{SecretsProvider, references::SecretReference};
+use crate::provider::{SecretReference, SecretsProvider};
 use crate::secrets::{Secret, SecretError};
 use crate::template::Template;
 use secrecy::{ExposeSecret, SecretString};

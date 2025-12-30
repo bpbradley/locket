@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 #[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
-compile_error!("At least one provider feature must be enabled (e.g. --features op,connect)");
+compile_error!("At least one provider feature must be enabled (e.g. --features op,connect,bws)");
 
 #[cfg(feature = "bws")]
 mod bws;
@@ -29,9 +29,9 @@ mod connect;
 mod macros;
 #[cfg(feature = "op")]
 mod op;
-pub mod references;
+mod references;
 
-use references::{ReferenceParser, SecretReference};
+pub use references::{ReferenceParseError, ReferenceParser, SecretReference};
 
 // Re-export alias that is more expressive while internally remaining descriptive
 pub use ProviderSelection as Provider;

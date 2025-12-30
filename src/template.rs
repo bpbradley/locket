@@ -4,7 +4,7 @@
 //! containing `{{ ... }}` tags representing secret references.
 //! It can extract the keys used in the template and render the
 //! template by replacing tags with actual secret values, provided by the caller.
-use crate::provider::references::{ReferenceParser, SecretReference};
+use crate::provider::{ReferenceParser, SecretReference};
 use std::borrow::Cow;
 
 /// A segment of a parsed template.
@@ -164,21 +164,21 @@ impl<'a> Template<'a> {
     ///
     /// ```rust
     /// use locket::template::Template;
-    /// use locket::provider::references::{SecretReference, ReferenceParser, OpReference};
+    /// use locket::provider::{SecretReference, ReferenceParser};
     /// use std::collections::HashMap;
     /// use std::str::FromStr;
     ///
-    /// struct MyOpParser;
-    /// impl ReferenceParser for MyOpParser {
+    /// struct BwsParser;
+    /// impl ReferenceParser for BwsParser {
     ///     fn parse(&self, raw: &str) -> Option<SecretReference> {
-    ///         OpReference::from_str(raw).ok().map(SecretReference::OnePassword)
+    ///         uuid::Uuid::parse_str(raw).ok().map(SecretReference::Bws)
     ///     }
     /// }
     ///
-    /// let parser = MyOpParser;
-    /// let tpl = Template::parse("User: {{ op://vault/item/user }}", &parser);
+    /// let parser = BwsParser;
+    /// let tpl = Template::parse("User: {{ 7d173e0c-61cf-45dc-9fc5-e2745182ede1 }}", &parser);
     ///
-    /// let ref_key = SecretReference::from_str("op://vault/item/user").unwrap();
+    /// let ref_key = SecretReference::from_str("7d173e0c-61cf-45dc-9fc5-e2745182ede1").unwrap();
     /// let mut map = HashMap::new();
     /// map.insert(ref_key, "admin");
     ///
@@ -260,7 +260,7 @@ fn sanitize_key(raw: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::references::{ReferenceParser, SecretReference};
+    use crate::provider::{ReferenceParser, SecretReference};
     use std::collections::HashMap;
 
     // A parser that uses the Mock reference type and doesn't allow whitespace.

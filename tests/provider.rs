@@ -3,10 +3,7 @@
 use async_trait::async_trait;
 use locket::{
     path::{AbsolutePath, CanonicalPath, PathMapping},
-    provider::{
-        ProviderError, SecretsProvider,
-        references::{ReferenceParser, SecretReference},
-    },
+    provider::{ProviderError, ReferenceParser, SecretReference, SecretsProvider},
     secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretFileOpts},
 };
 use secrecy::SecretString;

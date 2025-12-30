@@ -1,8 +1,5 @@
 use locket::path::{AbsolutePath, CanonicalPath, PathMapping};
-use locket::provider::{
-    ProviderError, SecretsProvider,
-    references::{ReferenceParser, SecretReference},
-};
+use locket::provider::{ProviderError, ReferenceParser, SecretReference, SecretsProvider};
 use locket::secrets::{Secret, SecretError, SecretFileManager, SecretFileOpts};
 use secrecy::SecretString;
 use std::collections::HashMap;

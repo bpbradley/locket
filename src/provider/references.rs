@@ -49,10 +49,10 @@ impl std::fmt::Display for SecretReference {
         match self {
             #[cfg(any(feature = "op", feature = "connect"))]
             Self::OnePassword(reference) => write!(f, "{}", reference),
-            
+
             #[cfg(feature = "bws")]
             Self::Bws(uuid) => write!(f, "{}", uuid),
-            
+
             #[cfg(any(test, doctest, feature = "testing"))]
             Self::Mock(inner) => write!(f, "{}", inner),
         }
