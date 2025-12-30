@@ -44,16 +44,17 @@ pub trait ReferenceParser: Send + Sync {
     fn parse(&self, raw: &str) -> Option<SecretReference>;
 }
 
-impl SecretReference {
-    /// Returns the raw string representation of the reference.
-    pub fn reference(&self) -> String {
+impl std::fmt::Display for SecretReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             #[cfg(any(feature = "op", feature = "connect"))]
-            Self::OnePassword(r) => r.raw.clone(),
+            Self::OnePassword(reference) => write!(f, "{}", reference),
+            
             #[cfg(feature = "bws")]
-            Self::Bws(u) => u.to_string(),
+            Self::Bws(uuid) => write!(f, "{}", uuid),
+            
             #[cfg(any(test, doctest, feature = "testing"))]
-            Self::Mock(s) => s.clone(),
+            Self::Mock(inner) => write!(f, "{}", inner),
         }
     }
 }
