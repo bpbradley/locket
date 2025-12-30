@@ -16,6 +16,7 @@ use connect::{OpConnectConfig, OpConnectProvider};
 use op::{OpConfig, OpProvider};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -206,5 +207,43 @@ impl AuthToken {
 impl ExposeSecret<str> for AuthToken {
     fn expose_secret(&self) -> &str {
         self.token.expose_secret()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConcurrencyLimit(NonZeroUsize);
+
+impl ConcurrencyLimit {
+    pub const fn new(limit: usize) -> Self {
+        if limit == 0 {
+            // Static string panic is supported in const fn
+            panic!("ConcurrencyLimit: value must be greater than 0");
+        }
+        Self(NonZeroUsize::new(limit).unwrap())
+    }
+    pub fn into_inner(self) -> usize {
+        self.0.get()
+    }
+}
+
+impl Default for ConcurrencyLimit {
+    fn default() -> Self {
+        Self::new(20)
+    }
+}
+
+impl std::str::FromStr for ConcurrencyLimit {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let val: usize = s.parse().map_err(|_| "not a number")?;
+        NonZeroUsize::new(val)
+            .map(Self)
+            .ok_or_else(|| "Concurrency must be > 0".to_string())
+    }
+}
+
+impl std::fmt::Display for ConcurrencyLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

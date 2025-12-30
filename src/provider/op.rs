@@ -9,7 +9,9 @@
 //! and can be configured with an optional config directory.
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
-use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
+use crate::provider::{
+    AuthToken, ConcurrencyLimit, ProviderError, SecretsProvider, macros::define_auth_token,
+};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
@@ -97,7 +99,7 @@ impl SecretsProvider for OpProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        const MAX_CONCURRENT_OPS: usize = 10;
+        const MAX_CONCURRENT_OPS: ConcurrencyLimit = ConcurrencyLimit::new(10);
         let op_refs: Vec<OpReference> = references
             .iter()
             .filter_map(|r| match r {
@@ -154,7 +156,7 @@ impl SecretsProvider for OpProvider {
                         )))
                     }
                 })
-                .buffer_unordered(MAX_CONCURRENT_OPS)
+                .buffer_unordered(MAX_CONCURRENT_OPS.into_inner())
                 .collect()
                 .await;
 

@@ -4,6 +4,7 @@
 //!
 //! It uses the official Bitwarden SDK
 
+use super::ConcurrencyLimit;
 use super::references::{ReferenceParser, SecretReference};
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
@@ -51,9 +52,9 @@ pub struct BwsConfig {
     #[arg(
         long = "bws.max-concurrent",
         env = "BWS_MAX_CONCURRENT",
-        default_value_t = 20
+        default_value_t = ConcurrencyLimit::new(20)
     )]
-    bws_max_concurrent: usize,
+    bws_max_concurrent: ConcurrencyLimit,
 
     /// BWS User Agent
     #[arg(
@@ -72,7 +73,7 @@ impl Default for BwsConfig {
         Self {
             api_url: BwsUrl::from(Url::parse("https://api.bitwarden.com").unwrap()),
             identity_url: BwsUrl::from(Url::parse("https://identity.bitwarden.com").unwrap()),
-            bws_max_concurrent: 20,
+            bws_max_concurrent: ConcurrencyLimit::new(20),
             bws_user_agent: "locket".to_string(),
             token: BwsToken::default(),
         }
@@ -112,7 +113,7 @@ impl From<Url> for BwsUrl {
 
 pub struct BwsProvider {
     client: Client,
-    max_concurrent: usize,
+    max_concurrent: ConcurrencyLimit,
 }
 
 impl ReferenceParser for BwsProvider {
@@ -183,7 +184,7 @@ impl SecretsProvider for BwsProvider {
 
                     Ok((original_ref, SecretString::new(resp.value.into())))
                 })
-                .buffer_unordered(self.max_concurrent)
+                .buffer_unordered(self.max_concurrent.into_inner())
                 .collect()
                 .await;
 

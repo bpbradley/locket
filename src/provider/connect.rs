@@ -12,6 +12,7 @@
 //! and handles authentication via bearer tokens.
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
+use crate::provider::ConcurrencyLimit;
 use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
 use async_trait::async_trait;
 use clap::Args;
@@ -49,9 +50,9 @@ pub struct OpConnectConfig {
     #[arg(
         long = "connect.max-concurrent",
         env = "OP_CONNECT_MAX_CONCURRENT",
-        default_value_t = 20
+        default_value_t = ConcurrencyLimit::new(20)
     )]
-    connect_max_concurrent: usize,
+    connect_max_concurrent: ConcurrencyLimit,
 }
 
 impl Default for OpConnectConfig {
@@ -59,7 +60,7 @@ impl Default for OpConnectConfig {
         Self {
             host: None,
             token: OpConnectToken::default(),
-            connect_max_concurrent: 20,
+            connect_max_concurrent: ConcurrencyLimit::new(20),
         }
     }
 }
@@ -186,7 +187,7 @@ pub struct OpConnectProvider {
     host: Url,
     token: AuthToken,
     cache: Arc<Mutex<ResolutionCache>>,
-    max_concurrent: usize,
+    max_concurrent: ConcurrencyLimit,
 }
 
 #[cfg(any(feature = "op", feature = "connect"))]
@@ -271,7 +272,7 @@ impl OpConnectProvider {
             .map(|vault| async move {
                 let _ = self.resolve_vault_id(&vault).await;
             })
-            .buffer_unordered(self.max_concurrent)
+            .buffer_unordered(self.max_concurrent.into_inner())
             .collect::<Vec<_>>()
             .await;
 
@@ -283,7 +284,7 @@ impl OpConnectProvider {
                 };
                 let _ = self.resolve_item_id(&vault_uuid, &item).await;
             })
-            .buffer_unordered(self.max_concurrent)
+            .buffer_unordered(self.max_concurrent.into_inner())
             .collect::<Vec<_>>()
             .await;
 
@@ -474,7 +475,7 @@ impl SecretsProvider for OpConnectProvider {
                         Err(e) => Err(e),
                     }
                 })
-                .buffer_unordered(self.max_concurrent)
+                .buffer_unordered(self.max_concurrent.into_inner())
                 .collect::<Vec<_>>()
                 .await;
 
