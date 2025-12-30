@@ -18,6 +18,7 @@ use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use std::collections::HashMap;
+use url::Url;
 use uuid::Uuid;
 
 define_auth_token!(
@@ -36,7 +37,7 @@ pub struct BwsConfig {
         env = "BWS_API_URL",
         default_value = "https://api.bitwarden.com"
     )]
-    pub api_url: String,
+    api_url: BwsUrl,
 
     /// Bitwarden Identity URL
     #[arg(
@@ -44,7 +45,7 @@ pub struct BwsConfig {
         env = "BWS_IDENTITY_URL",
         default_value = "https://identity.bitwarden.com"
     )]
-    pub identity_url: String,
+    identity_url: BwsUrl,
 
     /// Maximum number of concurrent requests to Bitwarden Secrets Manager
     #[arg(
@@ -52,7 +53,7 @@ pub struct BwsConfig {
         env = "BWS_MAX_CONCURRENT",
         default_value_t = 20
     )]
-    pub bws_max_concurrent: usize,
+    bws_max_concurrent: usize,
 
     /// BWS User Agent
     #[arg(
@@ -60,21 +61,52 @@ pub struct BwsConfig {
         env = "BWS_USER_AGENT",
         default_value = "locket"
     )]
-    pub bws_user_agent: String,
+    bws_user_agent: String,
 
     #[command(flatten)]
-    pub token: BwsToken,
+    token: BwsToken,
 }
 
 impl Default for BwsConfig {
     fn default() -> Self {
         Self {
-            api_url: "https://api.bitwarden.com".to_string(),
-            identity_url: "https://identity.bitwarden.com".to_string(),
+            api_url: BwsUrl::from(Url::parse("https://api.bitwarden.com").unwrap()),
+            identity_url: BwsUrl::from(Url::parse("https://identity.bitwarden.com").unwrap()),
             bws_max_concurrent: 20,
             bws_user_agent: "locket".to_string(),
             token: BwsToken::default(),
         }
+    }
+}
+
+/// BWS SDK URL wrapper
+/// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
+/// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
+#[derive(Debug, Clone)]
+struct BwsUrl(Url);
+
+impl std::str::FromStr for BwsUrl {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(BwsUrl(Url::parse(s)?))
+    }
+}
+
+impl std::fmt::Display for BwsUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = self.0.as_str();
+        if let Some(stripped) = s.strip_suffix('/') {
+            write!(f, "{}", stripped)
+        } else {
+            write!(f, "{}", s)
+        }
+    }
+}
+
+impl From<Url> for BwsUrl {
+    fn from(url: Url) -> Self {
+        BwsUrl(url)
     }
 }
 
@@ -93,8 +125,8 @@ impl BwsProvider {
     pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.token.try_into()?;
         let settings = ClientSettings {
-            identity_url: cfg.identity_url,
-            api_url: cfg.api_url,
+            identity_url: cfg.identity_url.to_string(),
+            api_url: cfg.api_url.to_string(),
             user_agent: cfg.bws_user_agent,
             device_type: DeviceType::SDK,
         };

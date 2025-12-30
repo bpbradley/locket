@@ -73,6 +73,10 @@ pub enum ProviderError {
         status: Option<i32>,
         stderr: String,
     },
+
+    /// URL parse error
+    #[error("url error: {0}")]
+    Url(#[from] url::ParseError),
 }
 
 /// Abstraction for a backend service that resolves secret references.
