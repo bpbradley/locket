@@ -39,7 +39,7 @@ define_auth_token!(
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
-    pub host: Option<Url>,
+    host: Option<Url>,
 
     /// 1Password Connect Token
     #[command(flatten)]
@@ -51,7 +51,7 @@ pub struct OpConnectConfig {
         env = "OP_CONNECT_MAX_CONCURRENT",
         default_value_t = 20
     )]
-    pub connect_max_concurrent: usize,
+    connect_max_concurrent: usize,
 }
 
 impl Default for OpConnectConfig {
