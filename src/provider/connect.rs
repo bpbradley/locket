@@ -93,15 +93,15 @@ struct ErrorResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 #[serde(transparent)]
-struct VaultId(String);
+struct OpUuid(String);
 
-impl fmt::Display for VaultId {
+impl fmt::Display for OpUuid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl FromStr for VaultId {
+impl FromStr for OpUuid {
     type Err = ProviderError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -111,15 +111,12 @@ impl FromStr for VaultId {
         {
             Ok(Self(s.to_string()))
         } else {
-            Err(ProviderError::InvalidId(format!(
-                "invalid vault id '{}'",
-                s
-            )))
+            Err(ProviderError::InvalidId(format!("invalid id '{}'", s)))
         }
     }
 }
 
-impl AsRef<str> for VaultId {
+impl AsRef<str> for OpUuid {
     fn as_ref(&self) -> &str {
         &self.0
     }
@@ -127,11 +124,37 @@ impl AsRef<str> for VaultId {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 #[serde(transparent)]
-struct ItemId(String);
+struct VaultId(OpUuid);
+
+impl fmt::Display for VaultId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for VaultId {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        OpUuid::from_str(s)
+            .map(Self)
+            .map_err(|_| ProviderError::InvalidId(format!("invalid vault id '{}'", s)))
+    }
+}
+
+impl AsRef<str> for VaultId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct ItemId(OpUuid);
 
 impl fmt::Display for ItemId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        self.0.fmt(f)
     }
 }
 
@@ -139,20 +162,15 @@ impl FromStr for ItemId {
     type Err = ProviderError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() == 26
-            && s.chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        {
-            Ok(Self(s.to_string()))
-        } else {
-            Err(ProviderError::InvalidId(format!("invalid item id '{}'", s)))
-        }
+        OpUuid::from_str(s)
+            .map(Self)
+            .map_err(|_| ProviderError::InvalidId(format!("invalid item id '{}'", s)))
     }
 }
 
 impl AsRef<str> for ItemId {
     fn as_ref(&self) -> &str {
-        &self.0
+        self.0.as_ref()
     }
 }
 
