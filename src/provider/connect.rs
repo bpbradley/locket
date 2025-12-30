@@ -38,7 +38,7 @@ define_auth_token!(
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
-    pub host: Option<String>,
+    pub host: Option<Url>,
 
     /// 1Password Connect Token
     #[command(flatten)]
@@ -117,12 +117,10 @@ impl ReferenceParser for OpConnectProvider {
 impl OpConnectProvider {
     pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
         let token: AuthToken = cfg.token.try_into()?;
-        let host_str = cfg
+
+        let host = cfg
             .host
             .ok_or_else(|| ProviderError::InvalidConfig("missing OP_CONNECT_HOST".into()))?;
-
-        let host = Url::parse(&host_str)
-            .map_err(|e| ProviderError::InvalidConfig(format!("bad host url: {}", e)))?;
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
