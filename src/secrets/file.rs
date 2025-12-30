@@ -54,7 +54,7 @@ impl SecretFile {
                     ))
                 })?;
 
-                (filename.to_string(), source)
+                (filename.to_string().try_into()?, source)
             }
         };
 

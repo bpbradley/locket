@@ -6,7 +6,7 @@
 //! which can be exposed by the caller for process injection.
 
 use crate::provider::{SecretReference, SecretsProvider};
-use crate::secrets::{Secret, SecretError};
+use crate::secrets::{Secret, SecretError, SecretKey};
 use crate::template::Template;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
@@ -84,7 +84,7 @@ impl EnvManager {
     pub async fn resolve(&self) -> Result<HashMap<String, SecretString>, EnvError> {
         let secrets = self.secrets.clone();
         let map = tokio::task::spawn_blocking(move || {
-            let mut inner = HashMap::new();
+            let mut inner: HashMap<SecretKey, String> = HashMap::new();
             for secret in secrets {
                 let content = secret.source().read().fetch()?;
                 let content = match content {
@@ -97,7 +97,7 @@ impl EnvManager {
                         let cursor = std::io::Cursor::new(content.as_bytes());
                         for item in dotenvy::from_read_iter(cursor) {
                             let (k, v) = item.map_err(|e| EnvError::Parse(e.to_string()))?;
-                            inner.insert(k, v);
+                            inner.insert(k.try_into()?, v);
                         }
                     }
                     Secret::Named { key, .. } => {
@@ -105,7 +105,7 @@ impl EnvManager {
                     }
                 }
             }
-            Ok::<HashMap<String, String>, EnvError>(inner)
+            Ok::<HashMap<SecretKey, String>, EnvError>(inner)
         })
         .await??;
         let mut references = HashSet::new();
@@ -128,31 +128,31 @@ impl EnvManager {
         let ref_vec: Vec<SecretReference> = references.into_iter().collect();
         let secrets_map = self.provider.fetch_map(&ref_vec).await?;
 
-        let mut result = HashMap::with_capacity(map.len());
+        let mut result: HashMap<String, SecretString> = HashMap::with_capacity(map.len());
 
         for (k, v) in map {
             let tpl = Template::parse(&v, &*self.provider);
 
             if tpl.has_secrets() {
                 let rendered = tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()));
-                result.insert(k, SecretString::new(rendered.into_owned().into()));
+                result.insert(k.into(), SecretString::new(rendered.into_owned().into()));
             } else {
                 let trimmed = v.trim();
                 if let Some(r) = self.provider.parse(trimmed)
                     && let Some(val) = secrets_map.get(&r)
                 {
-                    result.insert(k, val.clone());
+                    result.insert(k.into(), val.clone());
                     continue;
                 }
-                result.insert(k, SecretString::new(v.into()));
+                result.insert(k.into(), SecretString::new(v.into()));
             }
         }
         Ok(result)
     }
 }
 
-fn wrap_all(map: HashMap<String, String>) -> HashMap<String, SecretString> {
+fn wrap_all(map: HashMap<SecretKey, String>) -> HashMap<String, SecretString> {
     map.into_iter()
-        .map(|(k, v)| (k, SecretString::new(v.into())))
+        .map(|(k, v)| (k.into(), SecretString::new(v.into())))
         .collect()
 }
