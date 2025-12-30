@@ -20,6 +20,7 @@ use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -65,12 +66,12 @@ impl Default for OpConnectConfig {
 
 #[derive(Debug, Deserialize)]
 struct VaultResponse {
-    id: String,
+    id: VaultId,
 }
 
 #[derive(Debug, Deserialize)]
 struct ItemResponse {
-    id: String,
+    id: ItemId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,11 +91,76 @@ struct ErrorResponse {
     message: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct VaultId(String);
+
+impl fmt::Display for VaultId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for VaultId {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() == 26
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            Ok(Self(s.to_string()))
+        } else {
+            Err(ProviderError::InvalidId(format!(
+                "invalid vault id '{}'",
+                s
+            )))
+        }
+    }
+}
+
+impl AsRef<str> for VaultId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct ItemId(String);
+
+impl fmt::Display for ItemId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for ItemId {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() == 26
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            Ok(Self(s.to_string()))
+        } else {
+            Err(ProviderError::InvalidId(format!("invalid item id '{}'", s)))
+        }
+    }
+}
+
+impl AsRef<str> for ItemId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Cache for Name -> UUID resolution to minimize API calls
 #[derive(Default, Debug)]
 struct ResolutionCache {
-    vaults: HashMap<String, String>,          // Vault Name -> Vault UUID
-    items: HashMap<(String, String), String>, // (Vault UUID, Item Name) -> Item UUID
+    vaults: HashMap<String, VaultId>,
+    items: HashMap<(VaultId, String), ItemId>,
 }
 
 pub struct OpConnectProvider {
@@ -174,11 +240,11 @@ impl OpConnectProvider {
         let mut items = HashSet::new();
 
         for reference in references {
-            if !is_uuid(&reference.vault) {
+            if reference.vault.parse::<VaultId>().is_err() {
                 vaults.insert(reference.vault.clone());
             }
 
-            if !is_uuid(&reference.item) {
+            if reference.item.parse::<ItemId>().is_err() {
                 items.insert((reference.vault.clone(), reference.item.clone()));
             }
         }
@@ -206,9 +272,9 @@ impl OpConnectProvider {
         Ok(())
     }
 
-    async fn resolve_vault_id(&self, name_or_id: &str) -> Result<String, ProviderError> {
-        if is_uuid(name_or_id) {
-            return Ok(name_or_id.to_string());
+    async fn resolve_vault_id(&self, name_or_id: &str) -> Result<VaultId, ProviderError> {
+        if let Ok(id) = name_or_id.parse::<VaultId>() {
+            return Ok(id);
         }
 
         {
@@ -261,13 +327,13 @@ impl OpConnectProvider {
 
     async fn resolve_item_id(
         &self,
-        vault_uuid: &str,
+        vault_uuid: &VaultId,
         item_name_or_id: &str,
-    ) -> Result<String, ProviderError> {
-        if is_uuid(item_name_or_id) {
-            return Ok(item_name_or_id.to_string());
+    ) -> Result<ItemId, ProviderError> {
+        if let Ok(id) = item_name_or_id.parse::<ItemId>() {
+            return Ok(id);
         }
-        let key = (vault_uuid.to_string(), item_name_or_id.to_string());
+        let key = (vault_uuid.clone(), item_name_or_id.to_string());
         {
             let cache = self.cache.lock().await;
             if let Some(uuid) = cache.items.get(&key) {
@@ -408,10 +474,4 @@ impl SecretsProvider for OpConnectProvider {
 
         Ok(map)
     }
-}
-
-fn is_uuid(s: &str) -> bool {
-    s.len() == 26
-        && s.chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }

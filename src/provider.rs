@@ -62,6 +62,10 @@ pub enum ProviderError {
     #[error("invalid config: {0}")]
     InvalidConfig(String),
 
+    /// Invalid ID format
+    #[error("invalid id: {0}")]
+    InvalidId(String),
+
     /// Fs/Io errors
     #[error("io: {0}")]
     Io(#[from] std::io::Error),

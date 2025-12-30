@@ -44,6 +44,7 @@ impl LocketExitCode {
                 ProviderError::Io(_) => sysexits::ExitCode::IoErr.into(),
                 ProviderError::Exec { .. } => sysexits::ExitCode::Unavailable.into(),
                 ProviderError::Url(_) => sysexits::ExitCode::DataErr.into(),
+                ProviderError::InvalidId(_) => sysexits::ExitCode::DataErr.into(),
             },
             LocketError::ReferenceParse(_) => sysexits::ExitCode::DataErr.into(),
             LocketError::Watch(e) => match e {
