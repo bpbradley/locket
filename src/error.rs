@@ -1,5 +1,5 @@
 use crate::{
-    events::HandlerError, health::HealthError, logging::LoggingError, provider::ProviderError,
+    events::HandlerError, health::HealthError, logging::LoggingError, provider::{ProviderError, references::ReferenceParseError},
     secrets::SecretError, watch::WatchError,
 };
 use thiserror::Error;
@@ -11,6 +11,9 @@ pub enum LocketError {
 
     #[error(transparent)]
     Provider(#[from] ProviderError),
+
+    #[error(transparent)]
+    ReferenceParse(#[from] ReferenceParseError),
 
     #[error(transparent)]
     Watch(#[from] WatchError),
