@@ -3,7 +3,7 @@ use crate::{
     error::LocketError,
     events::EventHandler,
     logging::Logger,
-    process::{ProcessManager, ProcessTimeout},
+    process::{ProcessManager, ProcessTimeout, ShellCommand},
     provider::Provider,
     secrets::Secret,
     watch::{DebounceDuration, FsWatcher},
@@ -105,7 +105,8 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
 
     // Initialize ProcessManager
     let interactive = args.interactive.unwrap_or(!args.watch);
-    let mut handler = ProcessManager::new(env_manager, args.cmd.clone(), interactive, args.timeout);
+    let command = ShellCommand::try_from(args.cmd)?;
+    let mut handler = ProcessManager::new(env_manager, command, interactive, args.timeout);
 
     // Initial Start
     // We must start the process at least once regardless of mode.

@@ -45,6 +45,9 @@ pub enum ProcessError {
 
     #[error("child process terminated by signal")]
     Signaled,
+
+    #[error("invalid command: {0}")]
+    InvalidCommand(String),
 }
 
 impl ProcessError {
@@ -54,6 +57,52 @@ impl ProcessError {
         } else {
             Err(Self::Exited(status))
         }
+    }
+}
+
+/// Represents a shell command to be executed, including the program and its arguments.
+/// The arguments may be empty, but at least a program must be specified.
+#[derive(Debug, Clone)]
+pub struct ShellCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+impl ShellCommand {
+    pub fn new(program: String, args: Vec<String>) -> Self {
+        Self { program, args }
+    }
+
+    pub fn try_from_vec(mut raw: Vec<String>) -> Result<Self, ProcessError> {
+        if raw.is_empty() {
+            return Err(ProcessError::InvalidCommand(
+                "No program specified".to_string(),
+            ));
+        }
+        let program = raw.remove(0);
+        Ok(Self { program, args: raw })
+    }
+}
+
+impl TryFrom<Vec<String>> for ShellCommand {
+    type Error = ProcessError;
+
+    fn try_from(value: Vec<String>) -> Result<Self, Self::Error> {
+        Self::try_from_vec(value)
+    }
+}
+
+impl From<ShellCommand> for Vec<String> {
+    fn from(cmd: ShellCommand) -> Self {
+        let mut v = vec![cmd.program];
+        v.extend(cmd.args);
+        v
+    }
+}
+
+impl std::fmt::Display for ShellCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.program, self.args.join(" "))
     }
 }
 
@@ -105,7 +154,7 @@ impl Default for ProcessTimeout {
 /// rather than the process group.
 pub struct ProcessManager {
     env: EnvManager,
-    cmd: Vec<String>,
+    cmd: ShellCommand,
     env_hash: u64,
     /// The OS PID of the currently running child process.
     target: Option<Pid>,
@@ -124,7 +173,7 @@ pub struct ProcessManager {
 impl ProcessManager {
     pub fn new(
         env: EnvManager,
-        cmd: Vec<String>,
+        cmd: ShellCommand,
         interactive: bool,
         timeout: impl Into<Duration>,
     ) -> Self {
@@ -219,12 +268,8 @@ impl ProcessManager {
     ) -> Result<(), ProcessError> {
         self.stop().await;
 
-        if self.cmd.is_empty() {
-            return Ok(());
-        }
-
-        let mut command = Command::new(&self.cmd[0]);
-        command.args(&self.cmd[1..]);
+        let mut command = Command::new(&self.cmd.program);
+        command.args(&self.cmd.args);
         command.envs(env_map.iter().map(|(k, v)| (k, v.expose_secret())));
         if self.interactive {
             command.stdin(std::process::Stdio::inherit());

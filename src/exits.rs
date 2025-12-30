@@ -131,6 +131,7 @@ impl LocketExitCode {
                 }
             }
             locket::process::ProcessError::Signaled => 128 + 15,
+            locket::process::ProcessError::InvalidCommand(_) => sysexits::ExitCode::Usage.into(),
         }
     }
 }
