@@ -20,6 +20,7 @@ macro_rules! define_auth_token {
                     env = $env,
                     hide_env_values = true,
                     group = $group_id,
+                    help = $doc_string
                 )]
                 pub [< $prefix _val >]: Option<secrecy::SecretString>,
 
@@ -27,6 +28,7 @@ macro_rules! define_auth_token {
                     long = concat!($prefix, ".token-file"),
                     env = concat!($env, "_FILE"),
                     group = $group_id,
+                    help = concat!("Path to file containing ", $doc_string)
                 )]
                 pub [< $prefix _file >]: Option<crate::path::CanonicalPath>,
             }
