@@ -81,7 +81,7 @@ impl EnvManager {
     ///
     /// # Errors
     /// Returns `EnvError` if file reading fails, parsing fails, or the provider encounters an error.
-    pub async fn resolve(&self) -> Result<HashMap<String, SecretString>, EnvError> {
+    pub async fn resolve(&self) -> Result<HashMap<SecretKey, SecretString>, EnvError> {
         let secrets = self.secrets.clone();
         let map = tokio::task::spawn_blocking(move || {
             let mut inner: HashMap<SecretKey, String> = HashMap::new();
@@ -128,31 +128,31 @@ impl EnvManager {
         let ref_vec: Vec<SecretReference> = references.into_iter().collect();
         let secrets_map = self.provider.fetch_map(&ref_vec).await?;
 
-        let mut result: HashMap<String, SecretString> = HashMap::with_capacity(map.len());
+        let mut result: HashMap<SecretKey, SecretString> = HashMap::with_capacity(map.len());
 
         for (k, v) in map {
             let tpl = Template::parse(&v, &*self.provider);
 
             if tpl.has_secrets() {
                 let rendered = tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()));
-                result.insert(k.into(), SecretString::new(rendered.into_owned().into()));
+                result.insert(k, SecretString::new(rendered.into_owned().into()));
             } else {
                 let trimmed = v.trim();
                 if let Some(r) = self.provider.parse(trimmed)
                     && let Some(val) = secrets_map.get(&r)
                 {
-                    result.insert(k.into(), val.clone());
+                    result.insert(k, val.clone());
                     continue;
                 }
-                result.insert(k.into(), SecretString::new(v.into()));
+                result.insert(k, SecretString::new(v.into()));
             }
         }
         Ok(result)
     }
 }
 
-fn wrap_all(map: HashMap<SecretKey, String>) -> HashMap<String, SecretString> {
+fn wrap_all(map: HashMap<SecretKey, String>) -> HashMap<SecretKey, SecretString> {
     map.into_iter()
-        .map(|(k, v)| (k.into(), SecretString::new(v.into())))
+        .map(|(k, v)| (k, SecretString::new(v.into())))
         .collect()
 }

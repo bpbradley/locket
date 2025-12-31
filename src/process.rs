@@ -8,6 +8,7 @@
 use crate::{
     env::{EnvError, EnvManager},
     events::{EventHandler, FsEvent, HandlerError, wait_for_signal},
+    secrets::SecretKey,
 };
 use async_trait::async_trait;
 use futures::future::BoxFuture;
@@ -197,7 +198,7 @@ impl ProcessManager {
         }
     }
 
-    fn hash_env(map: &HashMap<String, secrecy::SecretString>) -> u64 {
+    fn hash_env(map: &HashMap<SecretKey, secrecy::SecretString>) -> u64 {
         let mut hasher = DefaultHasher::new();
         let mut keys: Vec<_> = map.keys().collect();
         keys.sort();
@@ -264,13 +265,13 @@ impl ProcessManager {
 
     async fn restart(
         &mut self,
-        env_map: &HashMap<String, secrecy::SecretString>,
+        env_map: &HashMap<SecretKey, secrecy::SecretString>,
     ) -> Result<(), ProcessError> {
         self.stop().await;
 
         let mut command = Command::new(&self.cmd.program);
         command.args(&self.cmd.args);
-        command.envs(env_map.iter().map(|(k, v)| (k, v.expose_secret())));
+        command.envs(env_map.iter().map(|(k, v)| (k.as_ref(), v.expose_secret())));
         if self.interactive {
             command.stdin(std::process::Stdio::inherit());
             command.stdout(std::process::Stdio::inherit());

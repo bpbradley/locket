@@ -66,7 +66,7 @@ pub enum SecretError {
     Write(#[from] crate::write::WriterError),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct SecretKey(String);
 
 impl TryFrom<String> for SecretKey {
