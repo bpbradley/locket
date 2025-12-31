@@ -15,7 +15,7 @@ jobs:
     name: Build / Push Docker Images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Calculate Version and Pre-release State
         id: meta
