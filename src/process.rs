@@ -23,7 +23,8 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::process::Command;
@@ -142,6 +143,22 @@ impl Default for ProcessTimeout {
     }
 }
 
+enum ProcessState {
+    Idle,
+    Running {
+        /// The OS PID of the currently running child process.
+        pid: Pid,
+        /// Indicates whether the child process is still alive.
+        alive: Arc<AtomicBool>,
+        /// Background task that forwards OS signals to the child.
+        forwarder: JoinHandle<()>,
+        /// Background task that waits for the child to exit.
+        monitor: JoinHandle<()>,
+        /// Channel to notify the main loop when the child exits.
+        exit_rx: watch::Receiver<Option<ExitStatus>>,
+    },
+}
+
 /// Manages a child process, restarting it when the environment changes.
 ///
 /// It spawns the child process with the resolved environment
@@ -157,14 +174,7 @@ pub struct ProcessManager {
     env: EnvManager,
     cmd: ShellCommand,
     env_hash: u64,
-    /// The OS PID of the currently running child process.
-    target: Option<Pid>,
-    /// Background task that forwards OS signals to the child.
-    forwarder: Option<JoinHandle<()>>,
-    /// Background task that waits for the child to exit.
-    monitor: Option<JoinHandle<()>>,
-    /// Channel to notify the main loop when the child exits.
-    exit_rx: watch::Receiver<Option<ExitStatus>>,
+    state: ProcessState,
     /// Saved terminal state (for restoring TTY after child exit).
     termios: Option<Mutex<Termios>>,
     interactive: bool,
@@ -178,7 +188,6 @@ impl ProcessManager {
         interactive: bool,
         timeout: impl Into<Duration>,
     ) -> Self {
-        let (_, exit_rx) = watch::channel(None);
         let termios = if interactive {
             tcgetattr(std::io::stdin()).ok().map(Mutex::new)
         } else {
@@ -188,10 +197,7 @@ impl ProcessManager {
             env,
             cmd,
             env_hash: 0,
-            target: None,
-            forwarder: None,
-            monitor: None,
-            exit_rx,
+            state: ProcessState::Idle,
             termios,
             interactive,
             timeout: timeout.into(),
@@ -286,31 +292,46 @@ impl ProcessManager {
 
         info!(cmd = ?self.cmd, "Spawning child process");
         let mut child = command.spawn()?;
+        let child_id = child.id();
 
-        if let Some(id) = child.id() {
+        let (tx, rx) = watch::channel(None);
+        let alive = Arc::new(AtomicBool::new(true));
+        let alive_clone = alive.clone();
+
+        let monitor = tokio::spawn(async move {
+            match child.wait().await {
+                Ok(status) => {
+                    alive_clone.store(false, Ordering::SeqCst);
+                    info!("Child process exited: {}", status);
+                    let _ = tx.send(Some(status));
+                }
+                Err(e) => {
+                    alive_clone.store(false, Ordering::SeqCst);
+                    error!("Monitor failed to wait on child: {}", e);
+                }
+            }
+        });
+
+        if let Some(id) = child_id {
             let pid = if self.interactive {
                 Pid::from_raw(id as i32)
             } else {
                 Pid::from_raw(-(id as i32))
             };
-            self.target = Some(pid);
-            self.forwarder = Some(Self::spawn_forwarder(pid, self.interactive));
+            let forwarder = Self::spawn_forwarder(pid, self.interactive);
+
+            self.state = ProcessState::Running {
+                pid,
+                alive,
+                forwarder,
+                monitor,
+                exit_rx: rx,
+            };
+        } else {
+            return Err(ProcessError::InvalidCommand(
+                "Failed to get child pid (process exited immediately?)".into(),
+            ));
         }
-
-        let (tx, rx) = watch::channel(None);
-        self.exit_rx = rx;
-
-        self.monitor = Some(tokio::spawn(async move {
-            match child.wait().await {
-                Ok(status) => {
-                    info!("Child process exited: {}", status);
-                    let _ = tx.send(Some(status));
-                }
-                Err(e) => {
-                    error!("Monitor failed to wait on child: {}", e);
-                }
-            }
-        }));
 
         Ok(())
     }
@@ -323,21 +344,25 @@ impl ProcessManager {
     }
 
     pub async fn stop(&mut self) {
-        if let Some(handle) = self.forwarder.take() {
-            handle.abort();
-        }
+        let old_state = std::mem::replace(&mut self.state, ProcessState::Idle);
 
-        let target = self.target.take();
-        let mut monitor = self.monitor.take();
+        if let ProcessState::Running {
+            pid,
+            alive,
+            forwarder,
+            mut monitor,
+            ..
+        } = old_state
+        {
+            forwarder.abort();
 
-        if let Some(p) = target {
-            debug!("Stopping process {:?}", p);
+            if alive.load(Ordering::SeqCst) {
+                debug!("Stopping process {:?}", pid);
 
-            if let Err(e) = signal::kill(p, Signal::SIGTERM) {
-                debug!("Failed to send SIGTERM: {}", e);
-            }
+                if let Err(e) = signal::kill(pid, Signal::SIGTERM) {
+                    debug!("Failed to send SIGTERM: {}", e);
+                }
 
-            if let Some(monitor_handle) = &mut monitor {
                 let sleep = tokio::time::sleep(self.timeout);
                 tokio::pin!(sleep);
 
@@ -348,7 +373,7 @@ impl ProcessManager {
                 let mut finished = false;
 
                 tokio::select! {
-                    res = &mut *monitor_handle => {
+                    res = &mut monitor => {
                         match res {
                             Ok(_) => debug!("Child exited gracefully"),
                             Err(e) => error!("Monitor task failed: {}", e),
@@ -357,44 +382,53 @@ impl ProcessManager {
                     }
                     _ = &mut sleep => {
                         warn!("Child timed out after {:?}, sending SIGKILL", self.timeout);
-                        let _ = signal::kill(p, Signal::SIGKILL);
+                        let _ = signal::kill(pid, Signal::SIGKILL);
                     }
                     _ = interrupt.recv() => {
                         warn!("Received Ctrl+C during shutdown, sending SIGKILL");
-                        let _ = signal::kill(p, Signal::SIGKILL);
+                        let _ = signal::kill(pid, Signal::SIGKILL);
                     }
                 }
 
                 // MUST await it to ensure the zombie is reaped.
                 // Since we just sent SIGKILL, this await should return immediately.
-                if !finished && let Err(e) = monitor_handle.await {
+                if !finished && let Err(e) = monitor.await {
                     error!("Failed to join monitor task after kill: {}", e);
                 }
-
-                self.reset_tty();
+            } else {
+                debug!("Process {:?} already exited, don't need to terminate.", pid);
+                if let Err(e) = monitor.await {
+                    debug!("Monitor task join error: {:?}", e);
+                }
             }
+
+            self.reset_tty();
         }
     }
 }
 
 impl Drop for ProcessManager {
     fn drop(&mut self) {
-        if let Some(handle) = self.forwarder.take() {
-            handle.abort();
-        }
+        if let ProcessState::Running {
+            pid,
+            alive,
+            forwarder,
+            monitor,
+            ..
+        } = &mut self.state
+        {
+            forwarder.abort();
+            monitor.abort();
 
-        if let Some(handle) = self.monitor.take() {
-            handle.abort();
+            // Last Resort Kill
+            // Since using kill_on_drop(false), aborting the monitor drops the Child
+            // but DOES NOT kill the process. We must do it manually.
+            if alive.load(Ordering::SeqCst) {
+                debug!("ProcessManager dropped, force killing PID {:?}", pid);
+                let _ = signal::kill(*pid, Signal::SIGKILL);
+            }
+            self.reset_tty();
         }
-
-        // Last Resort Kill
-        // Since using kill_on_drop(false), aborting the monitor drops the Child
-        // but DOES NOT kill the process. We must do it manually.
-        if let Some(pid) = self.target {
-            debug!("ProcessManager dropped, force killing PID {:?}", pid);
-            let _ = signal::kill(pid, Signal::SIGKILL);
-        }
-        self.reset_tty();
     }
 }
 
@@ -434,24 +468,32 @@ impl EventHandler for ProcessManager {
     }
 
     fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
-        let mut rx = self.exit_rx.clone();
         let os_signal = wait_for_signal(self.interactive);
 
-        let child_exit = async move {
-            let _ = rx.wait_for(|val| val.is_some()).await;
-            *rx.borrow()
-        };
+        match &self.state {
+            ProcessState::Running { exit_rx, .. } => {
+                let mut rx = exit_rx.clone();
+                let child_exit = async move {
+                    let _ = rx.wait_for(|val| val.is_some()).await;
+                    *rx.borrow()
+                };
 
-        Box::pin(async move {
-            tokio::select! {
-                Some(status) = child_exit => {
-                    HandlerError::from_status(status)
-                }
-                _ = os_signal => {
-                    Ok(())
-                }
+                Box::pin(async move {
+                    tokio::select! {
+                        Some(status) = child_exit => {
+                            HandlerError::from_status(status)
+                        }
+                        _ = os_signal => {
+                            Ok(())
+                        }
+                    }
+                })
             }
-        })
+            ProcessState::Idle => Box::pin(async move {
+                os_signal.await;
+                Ok(())
+            }),
+        }
     }
 
     async fn cleanup(&mut self) {

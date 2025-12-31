@@ -116,8 +116,10 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
     // Execution Mode Branch
     if args.watch {
         let watcher = FsWatcher::new(args.debounce, handler);
-
-        watcher.run().await?;
+        // Watcher gives ownership of the handler back when it exits
+        // so we can clean up properly.
+        handler = watcher.run().await?;
+        handler.cleanup().await;
         info!("watch loop terminated gracefully");
         Ok(())
     } else {
