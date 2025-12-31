@@ -34,9 +34,6 @@ mod references;
 
 pub use references::{ReferenceParseError, ReferenceParser, SecretReference};
 
-// Re-export alias that is more expressive while internally remaining descriptive
-pub use ProviderSelection as Provider;
-
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     /// Network or API errors
@@ -100,6 +97,55 @@ pub trait SecretsProvider: ReferenceParser + Send + Sync {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError>;
 }
 
+/// Provider backend configuration
+pub enum Provider {
+    #[cfg(feature = "op")]
+    Op(OpConfig),
+    #[cfg(feature = "connect")]
+    Connect(OpConnectConfig),
+    #[cfg(feature = "bws")]
+    Bws(BwsConfig),
+}
+
+impl Provider {
+    pub async fn build(self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
+        match self {
+            #[cfg(feature = "op")]
+            Self::Op(c) => Ok(Arc::new(OpProvider::new(c).await?)),
+            #[cfg(feature = "connect")]
+            Self::Connect(c) => Ok(Arc::new(OpConnectProvider::new(c).await?)),
+            #[cfg(feature = "bws")]
+            Self::Bws(c) => Ok(Arc::new(BwsProvider::new(c).await?)),
+        }
+    }
+}
+
+impl From<ProviderArgs> for Provider {
+    fn from(args: ProviderArgs) -> Self {
+        match args.kind {
+            #[cfg(feature = "op")]
+            ProviderKind::Op => Self::Op(args.config.op),
+
+            #[cfg(feature = "connect")]
+            ProviderKind::OpConnect => Self::Connect(args.config.connect),
+
+            #[cfg(feature = "bws")]
+            ProviderKind::Bws => Self::Bws(args.config.bws),
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ProviderArgs {
+    /// Secrets provider backend to use.
+    #[arg(long = "provider", env = "SECRETS_PROVIDER", value_enum)]
+    kind: ProviderKind,
+
+    /// Provider-specific configuration
+    #[command(flatten, next_help_heading = "Provider Configuration")]
+    config: ProviderConfigs,
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum ProviderKind {
     /// 1Password Service Account
@@ -113,35 +159,8 @@ pub enum ProviderKind {
     Bws,
 }
 
-#[derive(Args, Debug, Clone)]
-pub struct ProviderSelection {
-    /// Secrets provider backend to use.
-    #[arg(long = "provider", env = "SECRETS_PROVIDER", value_enum)]
-    pub kind: ProviderKind,
-
-    /// Provider-specific configuration
-    #[command(flatten, next_help_heading = "Provider Configuration")]
-    pub cfg: ProviderConfig,
-}
-
-impl ProviderSelection {
-    /// Build a runtime provider from configuration
-    pub async fn build(&self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
-        match self.kind {
-            #[cfg(feature = "op")]
-            ProviderKind::Op => Ok(Arc::new(OpProvider::new(self.cfg.op.clone()).await?)),
-            #[cfg(feature = "connect")]
-            ProviderKind::OpConnect => Ok(Arc::new(
-                OpConnectProvider::new(self.cfg.connect.clone()).await?,
-            )),
-            #[cfg(feature = "bws")]
-            ProviderKind::Bws => Ok(Arc::new(BwsProvider::new(self.cfg.bws.clone()).await?)),
-        }
-    }
-}
-
 #[derive(Args, Debug, Clone, Default)]
-pub struct ProviderConfig {
+pub struct ProviderConfigs {
     #[cfg(feature = "op")]
     #[command(flatten, next_help_heading = "1Password (op)")]
     pub op: OpConfig,

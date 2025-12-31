@@ -3,7 +3,7 @@ use crate::{
     events,
     health::StatusFile,
     logging::Logger,
-    provider::Provider,
+    provider::{Provider, ProviderArgs},
     secrets::{SecretFileManager, SecretFileOpts},
     watch::{DebounceDuration, FsWatcher},
 };
@@ -49,7 +49,7 @@ pub struct RunArgs {
 
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
-    provider: Provider,
+    provider: ProviderArgs,
 }
 
 pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
@@ -65,7 +65,7 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
         error!(error=%e, "failed to clear status file on startup");
     });
 
-    let provider = args.provider.build().await?;
+    let provider = Provider::from(args.provider).build().await?;
 
     let manager = SecretFileManager::new(args.manager, provider)?;
 
