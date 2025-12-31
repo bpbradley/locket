@@ -13,33 +13,46 @@ macro_rules! define_auth_token {
     ) => {
         paste::paste! {
             #[derive(clap::Args, Debug, Clone, Default)]
-            #[group(id = $group_id, multiple = false, required = false)]
+            #[group(id = $group_id, required = false, multiple = false)]
             pub struct $struct_name {
                 #[arg(
                     long = concat!($prefix, ".token"),
                     env = $env,
                     hide_env_values = true,
-                    help = $doc_string
+                    group = $group_id,
                 )]
-                [< $prefix _val >]: Option<secrecy::SecretString>,
+                pub [< $prefix _val >]: Option<secrecy::SecretString>,
 
                 #[arg(
                     long = concat!($prefix, ".token-file"),
                     env = concat!($env, "_FILE"),
-                    help = concat!("Path to file containing ", $doc_string)
+                    group = $group_id,
                 )]
-                [< $prefix _file >]: Option<std::path::PathBuf>,
+                pub [< $prefix _file >]: Option<crate::path::CanonicalPath>,
+            }
+
+            impl TryFrom<$struct_name> for crate::provider::TokenSource  {
+                type Error = crate::provider::ProviderError;
+
+                fn try_from(value: $struct_name) -> Result<Self, Self::Error> {
+                    if let Some(val) = value.[< $prefix _val >] {
+                        Ok(crate::provider::TokenSource::Literal(val))
+                    } else if let Some(canon_path) = value.[< $prefix _file >] {
+                        Ok(crate::provider::TokenSource::File(canon_path))
+                    } else {
+                        Err(crate::provider::ProviderError::InvalidConfig(
+                            format!("{}: either {}.token or {}.token-file must be provided", $doc_string, $prefix, $prefix)
+                        ))
+                    }
+                }
             }
 
             impl TryFrom<$struct_name> for crate::provider::AuthToken {
                 type Error = crate::provider::ProviderError;
 
                 fn try_from(value: $struct_name) -> Result<Self, Self::Error> {
-                    crate::provider::AuthToken::try_new(
-                        value.[< $prefix _val >],
-                        value.[< $prefix _file >],
-                        $doc_string,
-                    )
+                    let source: crate::provider::TokenSource = value.try_into()?;
+                    crate::provider::AuthToken::try_from_source(source, $doc_string)
                 }
             }
         }

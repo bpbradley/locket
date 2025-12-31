@@ -6,6 +6,7 @@
 //!
 //! It also provides implementations for specific providers
 //! and a selection mechanism to choose the provider at runtime
+use crate::path::CanonicalPath;
 use async_trait::async_trait;
 #[cfg(feature = "bws")]
 use bws::{BwsConfig, BwsProvider};
@@ -17,7 +18,6 @@ use op::{OpConfig, OpProvider};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 #[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
@@ -153,6 +153,11 @@ pub struct ProviderConfig {
     pub bws: BwsConfig,
 }
 
+pub enum TokenSource {
+    Literal(SecretString),
+    File(CanonicalPath),
+}
+
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
 ///
 /// It can be trivially constructed by passing a secret string, or it will attempt to resolve the token from the file if provided.
@@ -168,18 +173,22 @@ impl AuthToken {
     }
     /// Attempt to create an AuthToken from either a direct token or a file path. If a token is directly passed, it takes precedence.
     /// Context must be provided for error messages.
-    pub fn try_new(
-        token: Option<SecretString>,
-        file: Option<PathBuf>,
-        context: &str,
-    ) -> Result<Self, ProviderError> {
-        match (&token, &file) {
-            (Some(tok), _) => Ok(Self { token: tok.clone() }),
-            (None, Some(path)) => {
-                let content = std::fs::read_to_string(path).map_err(|e| {
+    pub fn try_from_source(source: TokenSource, context: &str) -> Result<Self, ProviderError> {
+        match source {
+            TokenSource::Literal(secret) => {
+                if secret.expose_secret().trim().is_empty() {
+                    return Err(ProviderError::InvalidConfig(format!(
+                        "{} token literal is empty",
+                        context
+                    )));
+                }
+                Ok(Self { token: secret })
+            }
+            TokenSource::File(canon_path) => {
+                let content = std::fs::read_to_string(canon_path.as_path()).map_err(|e| {
                     ProviderError::InvalidConfig(format!(
                         "failed to read {} token file {:?}: {}",
-                        context, path, e
+                        context, canon_path, e
                     ))
                 })?;
 
@@ -187,7 +196,7 @@ impl AuthToken {
                 if trimmed.is_empty() {
                     return Err(ProviderError::InvalidConfig(format!(
                         "{} token file {:?} is empty",
-                        context, path
+                        context, canon_path
                     )));
                 }
 
@@ -195,10 +204,6 @@ impl AuthToken {
                     token: SecretString::new(trimmed.to_owned().into()),
                 })
             }
-            _ => Err(ProviderError::InvalidConfig(format!(
-                "Missing: {}",
-                context
-            ))),
         }
     }
 }
