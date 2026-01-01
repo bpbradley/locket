@@ -109,14 +109,16 @@ pub enum Provider {
 
 impl Provider {
     pub async fn build(self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
-        match self {
+        let provider: Arc<dyn SecretsProvider> = match self {
             #[cfg(feature = "op")]
-            Self::Op(c) => Ok(Arc::new(OpProvider::new(c).await?)),
+            Self::Op(c) => Arc::new(OpProvider::new(c).await?),
             #[cfg(feature = "connect")]
-            Self::Connect(c) => Ok(Arc::new(OpConnectProvider::new(c).await?)),
+            Self::Connect(c) => Arc::new(OpConnectProvider::new(c).await?),
             #[cfg(feature = "bws")]
-            Self::Bws(c) => Ok(Arc::new(BwsProvider::new(c).await?)),
-        }
+            Self::Bws(c) => Arc::new(BwsProvider::new(c).await?),
+        };
+
+        Ok(provider)
     }
 }
 
