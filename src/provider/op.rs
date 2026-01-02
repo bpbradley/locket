@@ -9,6 +9,7 @@
 //! and can be configured with an optional config directory.
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
+use crate::provider::ProviderKind;
 use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use clap::Args;
@@ -28,7 +29,8 @@ pub struct OpConfig {
     #[arg(
         long = "op.token",
         env = "OP_SERVICE_ACCOUNT_TOKEN",
-        hide_env_values = true
+        hide_env_values = true,
+        required_if_eq("provider", ProviderKind::Op)
     )]
     tok: Option<AuthToken>,
 

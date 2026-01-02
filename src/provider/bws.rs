@@ -7,7 +7,7 @@
 use super::ConcurrencyLimit;
 use super::references::{ReferenceParser, SecretReference};
 use crate::provider::references::BwsReference;
-use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{AuthToken, ProviderError, ProviderKind, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
     Client,
@@ -54,13 +54,18 @@ pub struct BwsConfig {
     #[arg(
         long = "bws.user-agent",
         env = "BWS_USER_AGENT",
-        default_value = "locket"
+        default_value = env!("CARGO_PKG_NAME"),
     )]
     bws_user_agent: String,
 
     /// Bitwarden Machine Token
     /// Either provide the token directly or via a file with `file:` prefix
-    #[arg(long = "bws.token", env = "BWS_MACHINE_TOKEN", hide_env_values = true)]
+    #[arg(
+        long = "bws.token",
+        env = "BWS_MACHINE_TOKEN",
+        hide_env_values = true,
+        required_if_eq("provider", ProviderKind::Bws)
+    )]
     bws_token: Option<AuthToken>,
 }
 

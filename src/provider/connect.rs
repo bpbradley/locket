@@ -12,8 +12,8 @@
 //! and handles authentication via bearer tokens.
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
-use crate::provider::ConcurrencyLimit;
 use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{ConcurrencyLimit, ProviderKind};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
@@ -31,7 +31,11 @@ use url::Url;
 #[derive(Args, Debug, Clone)]
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
-    #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
+    #[arg(
+        long = "connect.host",
+        env = "OP_CONNECT_HOST",
+        required_if_eq("provider", ProviderKind::OpConnect)
+    )]
     host: Option<Url>,
 
     /// 1Password Connect Token
@@ -39,7 +43,8 @@ pub struct OpConnectConfig {
     #[arg(
         long = "connect.token",
         env = "OP_SERVICE_ACCOUNT_TOKEN",
-        hide_env_values = true
+        hide_env_values = true,
+        required_if_eq("provider", ProviderKind::OpConnect)
     )]
     connect_token: Option<AuthToken>,
 

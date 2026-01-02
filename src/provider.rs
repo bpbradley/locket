@@ -139,7 +139,12 @@ impl From<ProviderArgs> for Provider {
 #[derive(Args, Debug, Clone)]
 pub struct ProviderArgs {
     /// Secrets provider backend to use.
-    #[arg(long = "provider", env = "SECRETS_PROVIDER", value_enum)]
+    #[arg(
+        long = "provider",
+        env = "SECRETS_PROVIDER",
+        value_enum,
+        id = "provider"
+    )]
     kind: ProviderKind,
 
     /// Provider-specific configuration
@@ -158,6 +163,19 @@ pub enum ProviderKind {
     /// Bitwarden Secrets Provider
     #[cfg(feature = "bws")]
     Bws,
+}
+
+impl From<ProviderKind> for clap::builder::OsStr {
+    fn from(kind: ProviderKind) -> Self {
+        match kind {
+            #[cfg(feature = "op")]
+            ProviderKind::Op => "op".into(),
+            #[cfg(feature = "connect")]
+            ProviderKind::OpConnect => "op-connect".into(),
+            #[cfg(feature = "bws")]
+            ProviderKind::Bws => "bws".into(),
+        }
+    }
 }
 
 #[derive(Args, Debug, Clone)]
