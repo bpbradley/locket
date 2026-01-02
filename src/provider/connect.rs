@@ -439,13 +439,7 @@ impl SecretsProvider for OpConnectProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        let op_refs: Vec<&OpReference> = references
-            .iter()
-            .filter_map(|r| match r {
-                SecretReference::OnePassword(op) => Some(op),
-                _ => None,
-            })
-            .collect();
+        let op_refs: Vec<&OpReference> = references.iter().filter_map(|r| r.as_op()).collect();
 
         if op_refs.is_empty() {
             return Ok(HashMap::new());

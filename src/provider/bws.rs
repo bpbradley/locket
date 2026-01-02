@@ -142,41 +142,36 @@ impl SecretsProvider for BwsProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        let client = &self.client;
-
         let refs: Vec<(SecretReference, Uuid)> = references
             .iter()
-            .filter_map(|r| match r {
-                SecretReference::Bws(uuid) => Some((r.clone(), *uuid)),
-                _ => None,
-            })
+            .filter_map(|r| r.as_bws().map(|id| (r.clone(), *id)))
             .collect();
 
         if refs.is_empty() {
             return Ok(HashMap::new());
         }
 
-        let results: Vec<Result<(SecretReference, SecretString), ProviderError>> =
-            stream::iter(refs)
-                .map(|(original_ref, id)| async move {
-                    let req = SecretGetRequest { id };
-                    let resp = client
-                        .secrets()
-                        .get(&req)
-                        .await
-                        .map_err(|e| ProviderError::NotFound(format!("{} ({})", id, e)))?;
+        let mut map = HashMap::with_capacity(refs.len());
+        let client = &self.client;
 
-                    Ok((original_ref, SecretString::new(resp.value.into())))
-                })
-                .buffer_unordered(self.max_concurrent.into_inner())
-                .collect()
-                .await;
+        let mut stream = stream::iter(refs)
+            .map(|(key, id)| async move {
+                let req = SecretGetRequest { id };
 
-        let mut map = HashMap::new();
-        for res in results {
-            match res {
-                Ok((k, v)) => {
-                    map.insert(k, v);
+                let resp = client
+                    .secrets()
+                    .get(&req)
+                    .await
+                    .map_err(|e| ProviderError::NotFound(format!("{} ({})", id, e)))?;
+
+                Ok((key, SecretString::new(resp.value.into())))
+            })
+            .buffer_unordered(self.max_concurrent.into_inner());
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok((key, value)) => {
+                    map.insert(key, value);
                 }
                 Err(e) => return Err(e),
             }

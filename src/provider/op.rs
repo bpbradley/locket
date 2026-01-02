@@ -100,10 +100,7 @@ impl SecretsProvider for OpProvider {
         const MAX_CONCURRENT_OPS: ConcurrencyLimit = ConcurrencyLimit::new(10);
         let op_refs: Vec<OpReference> = references
             .iter()
-            .filter_map(|r| match r {
-                SecretReference::OnePassword(op) => Some(op.clone()),
-                _ => None,
-            })
+            .filter_map(|r| r.as_op().cloned())
             .collect();
 
         if op_refs.is_empty() {

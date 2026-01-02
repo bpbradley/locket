@@ -17,7 +17,7 @@ members = [".", "xtask"]
 
 [features]
 default = ["op", "connect", "bws", "compose", "exec"]
-op = ["tokio/process"]
+op = ["tokio/process", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]

@@ -39,6 +39,30 @@ pub enum SecretReference {
     Mock(String),
 }
 
+impl SecretReference {
+    // TODO: consider going to derive_more to reduce boilerplate,
+    // which could help with other impls too. These as_provider methods could
+    // be derived from derive_more::TryInto
+    #[cfg(any(feature = "op", feature = "connect"))]
+    #[allow(irrefutable_let_patterns)]
+    pub fn as_op(&self) -> Option<&OpReference> {
+        if let Self::OnePassword(op) = self {
+            Some(op)
+        } else {
+            None
+        }
+    }
+    #[cfg(feature = "bws")]
+    #[allow(irrefutable_let_patterns)]
+    pub fn as_bws(&self) -> Option<&uuid::Uuid> {
+        if let Self::Bws(uuid) = self {
+            Some(uuid)
+        } else {
+            None
+        }
+    }
+}
+
 /// Defines how to identify and parse valid secret references from string literals.
 pub trait ReferenceParser: Send + Sync {
     fn parse(&self, raw: &str) -> Option<SecretReference>;
