@@ -6,6 +6,7 @@
 
 use super::ConcurrencyLimit;
 use super::references::{ReferenceParser, SecretReference};
+use crate::provider::references::BwsReference;
 use crate::provider::{AuthToken, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
@@ -19,6 +20,7 @@ use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use std::collections::HashMap;
+use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
 
@@ -100,7 +102,7 @@ pub struct BwsProvider {
 
 impl ReferenceParser for BwsProvider {
     fn parse(&self, raw: &str) -> Option<SecretReference> {
-        uuid::Uuid::parse_str(raw).ok().map(SecretReference::Bws)
+        BwsReference::from_str(raw).ok().map(SecretReference::Bws)
     }
 }
 
@@ -144,7 +146,11 @@ impl SecretsProvider for BwsProvider {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let refs: Vec<(SecretReference, Uuid)> = references
             .iter()
-            .filter_map(|r| r.as_bws().map(|id| (r.clone(), *id)))
+            .filter_map(|r| {
+                r.try_into()
+                    .ok()
+                    .map(|bws_ref: &BwsReference| (r.clone(), Uuid::from(*bws_ref)))
+            })
             .collect();
 
         if refs.is_empty() {

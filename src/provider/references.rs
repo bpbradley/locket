@@ -32,33 +32,35 @@ pub enum SecretReference {
 
     #[cfg(feature = "bws")]
     /// A Bitwarden Secrets Manager reference (UUID)
-    Bws(uuid::Uuid),
+    Bws(BwsReference),
 
     #[cfg(any(test, doctest, feature = "testing"))]
     /// A mock reference for testing purposes
     Mock(String),
 }
 
-impl SecretReference {
-    // TODO: consider going to derive_more to reduce boilerplate,
-    // which could help with other impls too. These as_provider methods could
-    // be derived from derive_more::TryInto
-    #[cfg(any(feature = "op", feature = "connect"))]
-    #[allow(irrefutable_let_patterns)]
-    pub fn as_op(&self) -> Option<&OpReference> {
-        if let Self::OnePassword(op) = self {
-            Some(op)
+// TODO: consider going to derive_more to reduce boilerplate,
+// which could help with other impls too.
+impl<'a> TryFrom<&'a SecretReference> for &'a OpReference {
+    type Error = ();
+
+    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
+        if let SecretReference::OnePassword(op) = value {
+            Ok(op)
         } else {
-            None
+            Err(())
         }
     }
-    #[cfg(feature = "bws")]
-    #[allow(irrefutable_let_patterns)]
-    pub fn as_bws(&self) -> Option<&uuid::Uuid> {
-        if let Self::Bws(uuid) = self {
-            Some(uuid)
+}
+
+impl<'a> TryFrom<&'a SecretReference> for &'a BwsReference {
+    type Error = ();
+
+    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
+        if let SecretReference::Bws(bws) = value {
+            Ok(bws)
         } else {
-            None
+            Err(())
         }
     }
 }
@@ -96,8 +98,8 @@ impl FromStr for SecretReference {
 
         // Check BWS
         #[cfg(feature = "bws")]
-        if let Ok(uuid) = uuid::Uuid::parse_str(s) {
-            return Ok(Self::Bws(uuid));
+        if let Ok(bws_ref) = BwsReference::from_str(s) {
+            return Ok(Self::Bws(bws_ref));
         }
 
         // Fallback
@@ -125,6 +127,41 @@ pub enum OpParseError {
 
     #[error("utf8 decode error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
+}
+
+#[cfg(feature = "bws")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BwsReference(uuid::Uuid);
+
+#[cfg(feature = "bws")]
+impl std::fmt::Display for BwsReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(feature = "bws")]
+impl FromStr for BwsReference {
+    type Err = ReferenceParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let uuid = uuid::Uuid::parse_str(s)?;
+        Ok(BwsReference(uuid))
+    }
+}
+
+#[cfg(feature = "bws")]
+impl From<uuid::Uuid> for BwsReference {
+    fn from(u: uuid::Uuid) -> Self {
+        BwsReference(u)
+    }
+}
+
+#[cfg(feature = "bws")]
+impl From<BwsReference> for uuid::Uuid {
+    fn from(bws: BwsReference) -> Self {
+        bws.0
+    }
 }
 
 #[cfg(any(feature = "op", feature = "connect"))]
