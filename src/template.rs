@@ -163,26 +163,33 @@ impl<'a> Template<'a> {
     /// # Example
     ///
     /// ```rust
+    /// # #[cfg(feature = "testing")]
+    /// # {
     /// use locket::template::Template;
     /// use locket::provider::{SecretReference, ReferenceParser};
     /// use std::collections::HashMap;
     /// use std::str::FromStr;
     ///
-    /// struct BwsParser;
-    /// impl ReferenceParser for BwsParser {
+    /// struct MockParser;
+    /// impl ReferenceParser for MockParser {
     ///     fn parse(&self, raw: &str) -> Option<SecretReference> {
-    ///         uuid::Uuid::parse_str(raw).ok().map(SecretReference::Bws)
+    ///         if raw.starts_with("test:") {
+    ///            Some(SecretReference::Mock(raw.to_string()))
+    ///         } else {
+    ///           None
+    ///         }
     ///     }
     /// }
     ///
-    /// let parser = BwsParser;
-    /// let tpl = Template::parse("User: {{ 7d173e0c-61cf-45dc-9fc5-e2745182ede1 }}", &parser);
+    /// let parser = MockParser;
+    /// let tpl = Template::parse("User: {{ test:user }}", &parser);
     ///
-    /// let ref_key = SecretReference::from_str("7d173e0c-61cf-45dc-9fc5-e2745182ede1").unwrap();
+    /// let ref_key = SecretReference::Mock("test:user".to_string());
     /// let mut map = HashMap::new();
     /// map.insert(ref_key, "admin");
     ///
     /// assert_eq!(tpl.render(&map), "User: admin");
+    /// # }
     /// ```
     pub fn render<S>(&self, values: &std::collections::HashMap<SecretReference, S>) -> Cow<'a, str>
     where
