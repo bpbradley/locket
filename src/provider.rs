@@ -174,8 +174,6 @@ pub struct ProviderConfigs {
 }
 
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
-///
-/// It can be trivially constructed by passing a secret string, or it will attempt to resolve the token from the file if provided.
 #[derive(Debug, Clone)]
 pub struct AuthToken(SecretString);
 

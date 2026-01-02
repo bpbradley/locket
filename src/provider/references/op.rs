@@ -44,6 +44,7 @@ pub struct OpReference {
 impl<'a> TryFrom<&'a SecretReference> for &'a OpReference {
     type Error = ();
 
+    #[allow(irrefutable_let_patterns)]
     fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
         if let SecretReference::OnePassword(op) = value {
             Ok(op)
