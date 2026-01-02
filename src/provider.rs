@@ -167,14 +167,11 @@ pub enum ProviderKind {
 
 impl From<ProviderKind> for clap::builder::OsStr {
     fn from(kind: ProviderKind) -> Self {
-        match kind {
-            #[cfg(feature = "op")]
-            ProviderKind::Op => "op".into(),
-            #[cfg(feature = "connect")]
-            ProviderKind::OpConnect => "op-connect".into(),
-            #[cfg(feature = "bws")]
-            ProviderKind::Bws => "bws".into(),
-        }
+        kind.to_possible_value()
+            .expect("ProviderKind variants must have a value")
+            .get_name()
+            .to_string()
+            .into()
     }
 }
 

@@ -25,7 +25,7 @@ exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
 testing = []
 
 [dependencies]
-clap = { version = "4", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive", "env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 notify = "8"
