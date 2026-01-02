@@ -16,9 +16,9 @@ use connect::{OpConnectConfig, OpConnectProvider};
 #[cfg(feature = "op")]
 use op::{OpConfig, OpProvider};
 use secrecy::{ExposeSecret, SecretString};
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::{collections::HashMap, str::FromStr};
 
 #[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
 compile_error!("At least one provider feature must be enabled (e.g. --features op,connect,bws)");
@@ -27,7 +27,6 @@ compile_error!("At least one provider feature must be enabled (e.g. --features o
 mod bws;
 #[cfg(feature = "connect")]
 mod connect;
-mod macros;
 #[cfg(feature = "op")]
 mod op;
 mod references;
@@ -161,7 +160,7 @@ pub enum ProviderKind {
     Bws,
 }
 
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Args, Debug, Clone)]
 pub struct ProviderConfigs {
     #[cfg(feature = "op")]
     #[command(flatten, next_help_heading = "1Password (op)")]
@@ -174,57 +173,62 @@ pub struct ProviderConfigs {
     pub bws: BwsConfig,
 }
 
-pub enum TokenSource {
-    Literal(SecretString),
-    File(CanonicalPath),
-}
-
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
 ///
 /// It can be trivially constructed by passing a secret string, or it will attempt to resolve the token from the file if provided.
-#[derive(Debug, Clone, Default)]
-pub struct AuthToken {
-    token: SecretString,
-}
+#[derive(Debug, Clone)]
+pub struct AuthToken(SecretString);
 
 impl AuthToken {
     /// Simple wrapper for SecretString
     pub fn new(token: SecretString) -> Self {
-        Self { token }
+        Self(token)
     }
-    /// Attempt to create an AuthToken from either a direct token or a file path. If a token is directly passed, it takes precedence.
-    /// Context must be provided for error messages.
-    pub fn try_from_source(source: TokenSource, context: &str) -> Result<Self, ProviderError> {
-        match source {
-            TokenSource::Literal(secret) => {
-                if secret.expose_secret().trim().is_empty() {
-                    return Err(ProviderError::InvalidConfig(format!(
-                        "{} token literal is empty",
-                        context
-                    )));
-                }
-                Ok(Self { token: secret })
-            }
-            TokenSource::File(canon_path) => {
-                let content = std::fs::read_to_string(canon_path.as_path()).map_err(|e| {
-                    ProviderError::InvalidConfig(format!(
-                        "failed to read {} token file {:?}: {}",
-                        context, canon_path, e
-                    ))
-                })?;
 
-                let trimmed = content.trim();
-                if trimmed.is_empty() {
-                    return Err(ProviderError::InvalidConfig(format!(
-                        "{} token file {:?} is empty",
-                        context, canon_path
-                    )));
-                }
+    pub fn try_from_file(path: CanonicalPath) -> Result<Self, ProviderError> {
+        let content = std::fs::read_to_string(path.as_path()).map_err(|e| {
+            ProviderError::InvalidConfig(format!("failed to read token file {:?}: {}", path, e))
+        })?;
 
-                Ok(Self {
-                    token: SecretString::new(trimmed.to_owned().into()),
-                })
-            }
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return Err(ProviderError::InvalidConfig(format!(
+                "token file {:?} is empty",
+                path
+            )));
+        }
+
+        Ok(Self(SecretString::new(trimmed.to_owned().into())))
+    }
+}
+
+impl AsRef<SecretString> for AuthToken {
+    fn as_ref(&self) -> &SecretString {
+        &self.0
+    }
+}
+
+impl FromStr for AuthToken {
+    type Err = ProviderError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err(ProviderError::InvalidConfig(
+                "auth token is empty".to_string(),
+            ));
+        }
+        // If token path starts with "file:", treat it as a file path
+        if let Some(path) = s.strip_prefix("file:") {
+            let cleaned = path.strip_prefix("//").unwrap_or(path);
+            let canon = CanonicalPath::try_new(cleaned).map_err(|e| {
+                ProviderError::InvalidConfig(format!(
+                    "failed to resolve token file '{:?}': {}",
+                    path, e
+                ))
+            })?;
+            Self::try_from_file(canon)
+        } else {
+            Ok(Self(SecretString::new(s.to_owned().into())))
         }
     }
 }
@@ -232,7 +236,7 @@ impl AuthToken {
 /// Allows exposing the inner secret string using ExposeSecret from `secrecy` crate
 impl ExposeSecret<str> for AuthToken {
     fn expose_secret(&self) -> &str {
-        self.token.expose_secret()
+        self.0.expose_secret()
     }
 }
 

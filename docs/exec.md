@@ -37,16 +37,14 @@ locket exec --provider bws --bws-token-file /path/to/token \
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password Service Account token |
-| `--op.token-file` | `OP_SERVICE_ACCOUNT_TOKEN_FILE` |  | Path to file containing 1Password Service Account token |
+| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password token configuration Either provide the token directly or via a file with `file:` prefix |
 | `--op.config-dir` | `OP_CONFIG_DIR` |  | Optional: Path to 1Password config directory Defaults to standard op config locations if not provided, e.g. $XDG_CONFIG_HOME/op |
 ### 1Password Connect
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--connect.host` | `OP_CONNECT_HOST` |  | 1Password Connect Host HTTP(S) URL |
-| `--connect.token` | `OP_CONNECT_TOKEN` |  | 1Password Connect API token |
-| `--connect.token-file` | `OP_CONNECT_TOKEN_FILE` |  | Path to file containing 1Password Connect API token |
+| `--connect.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password Connect Token Either provide the token directly or via a file with `file:` prefix |
 | `--connect.max-concurrent` | `OP_CONNECT_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Connect API |
 ### Bitwarden Secrets Provider
 
@@ -56,5 +54,4 @@ locket exec --provider bws --bws-token-file /path/to/token \
 | `--bws.identity` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
 | `--bws.max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
 | `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
-| `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Secrets Manager machine token |
-| `--bws.token-file` | `BWS_MACHINE_TOKEN_FILE` |  | Path to file containing Bitwarden Secrets Manager machine token |
+| `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Machine Token Either provide the token directly or via a file with `file:` prefix |

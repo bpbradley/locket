@@ -9,9 +9,7 @@
 //! and can be configured with an optional config directory.
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
-use crate::provider::{
-    AuthToken, ConcurrencyLimit, ProviderError, SecretsProvider, macros::define_auth_token,
-};
+use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
@@ -23,19 +21,16 @@ use std::process::Stdio;
 use std::str::FromStr;
 use tokio::process::Command;
 
-define_auth_token!(
-    struct_name: OpToken,
-    prefix: "op",
-    env: "OP_SERVICE_ACCOUNT_TOKEN",
-    group_id: "op_token",
-    doc_string: "1Password Service Account token"
-);
-
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Args, Debug, Clone)]
 pub struct OpConfig {
     /// 1Password token configuration
-    #[command(flatten)]
-    tok: OpToken,
+    /// Either provide the token directly or via a file with `file:` prefix
+    #[arg(
+        long = "op.token",
+        env = "OP_SERVICE_ACCOUNT_TOKEN",
+        hide_env_values = true
+    )]
+    tok: Option<AuthToken>,
 
     /// Optional: Path to 1Password config directory
     /// Defaults to standard op config locations if not provided,
@@ -51,8 +46,11 @@ pub struct OpProvider {
 
 impl OpProvider {
     pub async fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
-        let token: AuthToken = cfg.tok.try_into()?;
-
+        let token = cfg.tok.ok_or_else(|| {
+            ProviderError::InvalidConfig(
+                "missing 1Password service account token (op.token)".to_string(),
+            )
+        })?;
         // Try to authenticate with the provided token
         let mut cmd = Command::new("op");
         cmd.arg("whoami")

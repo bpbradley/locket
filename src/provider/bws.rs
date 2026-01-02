@@ -6,7 +6,7 @@
 
 use super::ConcurrencyLimit;
 use super::references::{ReferenceParser, SecretReference};
-use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
     Client,
@@ -21,14 +21,6 @@ use secrecy::SecretString;
 use std::collections::HashMap;
 use url::Url;
 use uuid::Uuid;
-
-define_auth_token!(
-    struct_name: BwsToken,
-    prefix: "bws",
-    env: "BWS_MACHINE_TOKEN",
-    group_id: "bws_token",
-    doc_string: "Bitwarden Secrets Manager machine token"
-);
 
 #[derive(Args, Debug, Clone)]
 pub struct BwsConfig {
@@ -64,20 +56,10 @@ pub struct BwsConfig {
     )]
     bws_user_agent: String,
 
-    #[command(flatten)]
-    token: BwsToken,
-}
-
-impl Default for BwsConfig {
-    fn default() -> Self {
-        Self {
-            api_url: BwsUrl::from(Url::parse("https://api.bitwarden.com").unwrap()),
-            identity_url: BwsUrl::from(Url::parse("https://identity.bitwarden.com").unwrap()),
-            bws_max_concurrent: ConcurrencyLimit::new(20),
-            bws_user_agent: "locket".to_string(),
-            token: BwsToken::default(),
-        }
-    }
+    /// Bitwarden Machine Token
+    /// Either provide the token directly or via a file with `file:` prefix
+    #[arg(long = "bws.token", env = "BWS_MACHINE_TOKEN", hide_env_values = true)]
+    token: Option<AuthToken>,
 }
 
 /// BWS SDK URL wrapper
@@ -124,7 +106,9 @@ impl ReferenceParser for BwsProvider {
 
 impl BwsProvider {
     pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
-        let token: AuthToken = cfg.token.try_into()?;
+        let token = cfg.token.ok_or_else(|| {
+            ProviderError::InvalidConfig("missing Bitwarden machine token (bws.token)".to_string())
+        })?;
         let settings = ClientSettings {
             identity_url: cfg.identity_url.to_string(),
             api_url: cfg.api_url.to_string(),

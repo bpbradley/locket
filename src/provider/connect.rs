@@ -13,7 +13,7 @@
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
 use crate::provider::ConcurrencyLimit;
-use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
@@ -28,14 +28,6 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use url::Url;
 
-define_auth_token!(
-    struct_name: OpConnectToken,
-    prefix: "connect",
-    env: "OP_CONNECT_TOKEN",
-    group_id: "connect_token",
-    doc_string: "1Password Connect API token"
-);
-
 #[derive(Args, Debug, Clone)]
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
@@ -43,8 +35,13 @@ pub struct OpConnectConfig {
     host: Option<Url>,
 
     /// 1Password Connect Token
-    #[command(flatten)]
-    token: OpConnectToken,
+    /// Either provide the token directly or via a file with `file:` prefix
+    #[arg(
+        long = "connect.token",
+        env = "OP_SERVICE_ACCOUNT_TOKEN",
+        hide_env_values = true
+    )]
+    token: Option<AuthToken>,
 
     /// Maximum allowed concurrent requests to Connect API
     #[arg(
@@ -53,16 +50,6 @@ pub struct OpConnectConfig {
         default_value_t = ConcurrencyLimit::new(20)
     )]
     connect_max_concurrent: ConcurrencyLimit,
-}
-
-impl Default for OpConnectConfig {
-    fn default() -> Self {
-        Self {
-            host: None,
-            token: OpConnectToken::default(),
-            connect_max_concurrent: ConcurrencyLimit::new(20),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,7 +188,11 @@ impl ReferenceParser for OpConnectProvider {
 
 impl OpConnectProvider {
     pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
-        let token: AuthToken = cfg.token.try_into()?;
+        let token = cfg.token.ok_or_else(|| {
+            ProviderError::InvalidConfig(
+                "missing 1Password service account token (connect.token)".to_string(),
+            )
+        })?;
 
         let host = cfg
             .host
