@@ -59,7 +59,7 @@ pub struct BwsConfig {
     /// Bitwarden Machine Token
     /// Either provide the token directly or via a file with `file:` prefix
     #[arg(long = "bws.token", env = "BWS_MACHINE_TOKEN", hide_env_values = true)]
-    token: Option<AuthToken>,
+    bws_token: Option<AuthToken>,
 }
 
 /// BWS SDK URL wrapper
@@ -106,7 +106,7 @@ impl ReferenceParser for BwsProvider {
 
 impl BwsProvider {
     pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
-        let token = cfg.token.ok_or_else(|| {
+        let token = cfg.bws_token.ok_or_else(|| {
             ProviderError::InvalidConfig("missing Bitwarden machine token (bws.token)".to_string())
         })?;
         let settings = ClientSettings {

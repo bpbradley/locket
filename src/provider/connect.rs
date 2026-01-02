@@ -41,7 +41,7 @@ pub struct OpConnectConfig {
         env = "OP_SERVICE_ACCOUNT_TOKEN",
         hide_env_values = true
     )]
-    token: Option<AuthToken>,
+    connect_token: Option<AuthToken>,
 
     /// Maximum allowed concurrent requests to Connect API
     #[arg(
@@ -188,7 +188,7 @@ impl ReferenceParser for OpConnectProvider {
 
 impl OpConnectProvider {
     pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
-        let token = cfg.token.ok_or_else(|| {
+        let token = cfg.connect_token.ok_or_else(|| {
             ProviderError::InvalidConfig(
                 "missing 1Password service account token (connect.token)".to_string(),
             )
