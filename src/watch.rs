@@ -8,6 +8,7 @@
 //! and how to handle the resulting events.
 
 use crate::events::{EventHandler, FsEvent, FsEventRegistry};
+use crate::path::AbsolutePath;
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
@@ -207,25 +208,35 @@ impl<H: EventHandler> FsWatcher<H> {
     /// Map a notify Event to an FsEvent, if relevant
     fn map_fs_event(event: &Event) -> Option<FsEvent> {
         match &event.kind {
-            EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => {
-                event.paths.first().map(|src| FsEvent::Write(src.clone()))
-            }
-            EventKind::Remove(_) => event.paths.first().map(|src| FsEvent::Remove(src.clone())),
+            EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => event
+                .paths
+                .first()
+                .map(|src| FsEvent::Write(AbsolutePath::new(src.clone()))),
+            EventKind::Remove(_) => event
+                .paths
+                .first()
+                .map(|src| FsEvent::Remove(AbsolutePath::new(src.clone()))),
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {
                 RenameMode::Both => {
                     if event.paths.len() == 2 {
                         Some(FsEvent::Move {
-                            from: event.paths[0].clone(),
-                            to: event.paths[1].clone(),
+                            from: AbsolutePath::new(event.paths[0].clone()),
+                            to: AbsolutePath::new(event.paths[1].clone()),
                         })
                     } else {
                         None
                     }
                 }
                 // Renamed to an unknown location == Remove(X)
-                RenameMode::From => event.paths.first().map(|src| FsEvent::Remove(src.clone())),
+                RenameMode::From => event
+                    .paths
+                    .first()
+                    .map(|src| FsEvent::Remove(AbsolutePath::new(src.clone()))),
                 // Renamed from an unknown location == Write(X)
-                RenameMode::To => event.paths.first().map(|src| FsEvent::Write(src.clone())),
+                RenameMode::To => event
+                    .paths
+                    .first()
+                    .map(|src| FsEvent::Write(AbsolutePath::new(src.clone()))),
                 _ => None,
             },
             _ => None,

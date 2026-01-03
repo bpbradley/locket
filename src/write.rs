@@ -360,9 +360,10 @@ mod tests {
 
     #[test]
     fn test_atomic_copy_streaming() {
-        let tmp = tempfile::tempdir().unwrap();
-        let src = AbsolutePath::new(tmp.path().join("src"));
-        let dst = AbsolutePath::new(tmp.path().join("dst"));
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = AbsolutePath::new(tmp_dir.path());
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
 
         fs::write(&src, b"content").unwrap();
 

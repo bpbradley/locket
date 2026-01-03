@@ -29,7 +29,7 @@ impl SecretFile {
         let dest = root.join(safe_name);
         Self {
             source: SecretSource::literal(label, template),
-            dest: AbsolutePath::new(dest),
+            dest,
             max_size: MemSize::MAX,
         }
     }
@@ -63,7 +63,7 @@ impl SecretFile {
 
         Ok(Self {
             source,
-            dest: AbsolutePath::new(dest),
+            dest,
             max_size,
         })
     }

@@ -5,13 +5,14 @@
 //! fetches them, and constructs a `HashMap` translating references to boxed SecretStrings,
 //! which can be exposed by the caller for process injection.
 
+use crate::path::AbsolutePath;
 use crate::provider::{SecretReference, SecretsProvider};
 use crate::secrets::{Secret, SecretError, SecretKey};
 use crate::template::Template;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -57,10 +58,10 @@ impl EnvManager {
     /// This is primarily used by the filesystem watcher to register watches
     /// on `.env` files, ensuring the process environment can be updated if the source changes.
     /// This will return all paths that were registered with the manager, even if they no longer exist.
-    pub fn files(&self) -> Vec<PathBuf> {
+    pub fn files(&self) -> Vec<AbsolutePath> {
         self.secrets
             .iter()
-            .filter_map(|s| s.source().path().map(|p| p.to_path_buf()))
+            .filter_map(|s| s.source().path().map(|p| AbsolutePath::from(p.clone())))
             .collect()
     }
 

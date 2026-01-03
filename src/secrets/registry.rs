@@ -98,14 +98,19 @@ impl SecretFileRegistry {
         }
     }
 
-    pub fn resolve(&self, src: AbsolutePath) -> Option<AbsolutePath> {
-        let mapping = self
-            .mappings
+    /// Helper to find the best (longest prefix) mapping for a given path.
+    fn find_mapping(&self, path: &AbsolutePath) -> Option<(usize, &PathMapping)> {
+        self.mappings
             .iter()
-            .filter(|m| src.starts_with(m.src()))
-            .max_by_key(|m| m.src().as_os_str().len())?;
+            .enumerate()
+            .filter(|(_, m)| path.starts_with(m.src()))
+            .max_by_key(|(_, m)| m.src().as_os_str().len())
+    }
+
+    pub fn resolve(&self, src: AbsolutePath) -> Option<AbsolutePath> {
+        let (_, mapping) = self.find_mapping(&src)?;
         let rel = src.strip_prefix(mapping.src()).ok()?;
-        Some(AbsolutePath::new(mapping.dst().join(rel)))
+        Some(mapping.dst().join(rel))
     }
 
     pub fn upsert(&mut self, src: AbsolutePath) -> Result<Option<SecretFile>, SecretError> {
@@ -126,21 +131,13 @@ impl SecretFileRegistry {
             return Ok(Some(entry.file.clone()));
         }
 
-        // Find the best mapping. i.e. the longest matching prefix.
-        let map = self
-            .mappings
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| src.starts_with(m.src()))
-            .max_by_key(|(_, m)| m.src().as_os_str().len());
-
-        if let Some((idx, mapping)) = map {
+        if let Some((idx, mapping)) = self.find_mapping(&src) {
             let rel = src
                 .strip_prefix(mapping.src())
                 .map_err(|_| SecretError::Parse("path strip failed".into()))?;
             let dest = mapping.dst().join(rel);
 
-            let src_canon = match CanonicalPath::try_new(&src) {
+            let src_canon = match src.canonicalize() {
                 Ok(p) => p,
                 Err(SecretError::SourceMissing(_)) => {
                     debug!("File Missing: {:?}. Ignoring.", src);
@@ -149,11 +146,7 @@ impl SecretFileRegistry {
                 Err(e) => return Err(e),
             };
 
-            let file = SecretFile::from_file(
-                src_canon.clone(),
-                AbsolutePath::new(dest),
-                self.max_file_size,
-            )?;
+            let file = SecretFile::from_file(src_canon.clone(), dest, self.max_file_size)?;
 
             let entry = RegistryEntry {
                 file: file.clone(),
@@ -193,7 +186,7 @@ impl SecretFileRegistry {
         &mut self,
         from: &AbsolutePath,
         to: &AbsolutePath,
-    ) -> Option<(PathBuf, PathBuf)> {
+    ) -> Option<(AbsolutePath, AbsolutePath)> {
         // Identify all affected files in the registry
         let keys: Vec<AbsolutePath> = self
             .files
@@ -220,13 +213,11 @@ impl SecretFileRegistry {
         // Determine the relative movement within the mapping to project the output paths.
         let rel_from = from.strip_prefix(mapping.src()).ok()?;
         // Use CanonicalPath to verify existence of the old root anchor on disk
-        let old_root_dst = CanonicalPath::try_new(mapping.dst().join(rel_from))
-            .ok()?
-            .into_inner();
+        let old_root_dst: CanonicalPath = mapping.dst().join(rel_from).canonicalize().ok()?;
 
         let rel_to = to.strip_prefix(mapping.src()).ok()?;
         // Use AbsolutePath to normalize the new root anchor (it may not exist yet)
-        let new_root_dst = AbsolutePath::new(mapping.dst().join(rel_to)).into_inner();
+        let new_root_dst: AbsolutePath = mapping.dst().join(rel_to);
 
         // Verification pass
         // Ensure every file is eligible and consistent before mutating state.
@@ -245,13 +236,13 @@ impl SecretFileRegistry {
 
             // Check for drift
             // i.e. the file's current destination doesn't match calculation
-            if entry.file.dest() != &AbsolutePath::new(old_root_dst.join(rel)) {
+            if entry.file.dest() != &old_root_dst.join(rel) {
                 return None;
             }
 
             // Calculate new state
-            let new_k = AbsolutePath::new(to.join(rel));
-            let new_d = AbsolutePath::new(new_root_dst.join(rel)).into_inner();
+            let new_k = to.join(rel);
+            let new_d = new_root_dst.join(rel);
 
             updates.push((k.clone(), new_k, new_d));
         }
@@ -261,7 +252,7 @@ impl SecretFileRegistry {
         for (old_k, new_k, new_d) in updates {
             if let Some(mut entry) = self.files.remove(&old_k) {
                 // Re-create SecretFile to ensure internal consistency (validating new paths)
-                let src_canon = match CanonicalPath::try_new(&new_k) {
+                let src_canon = match new_k.canonicalize() {
                     Ok(p) => p,
                     Err(e) => {
                         warn!(
@@ -272,14 +263,10 @@ impl SecretFileRegistry {
                     }
                 };
 
-                match SecretFile::from_file(
-                    src_canon.clone(),
-                    AbsolutePath::new(new_d),
-                    self.max_file_size,
-                ) {
+                match SecretFile::from_file(src_canon, new_d, self.max_file_size) {
                     Ok(new_file) => {
                         entry.file = new_file;
-                        self.files.insert(AbsolutePath::new(new_k), entry);
+                        self.files.insert(new_k, entry);
                     }
                     Err(e) => {
                         warn!("Failed to rebase file entry {:?}: {}", new_k, e);
@@ -290,7 +277,7 @@ impl SecretFileRegistry {
             }
         }
 
-        Some((old_root_dst, new_root_dst))
+        Some((old_root_dst.into(), new_root_dst))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &SecretFile> {

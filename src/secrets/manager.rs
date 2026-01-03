@@ -13,7 +13,7 @@ use crate::write::FileWriter;
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use secrecy::ExposeSecret;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -204,13 +204,12 @@ impl SecretFileManager {
         &self.opts
     }
 
-    pub fn sources(&self) -> Vec<PathBuf> {
+    pub fn sources(&self) -> Vec<AbsolutePath> {
         let pinned = self
             .registry
             .iter()
-            .filter_map(|f| f.source().path().map(|p| p.to_path_buf()));
-
-        let mapped = self.opts.mapping.iter().map(|m| m.src().to_path_buf());
+            .filter_map(|f| f.source().path().map(|p| AbsolutePath::from(p.clone())));
+        let mapped = self.opts.mapping.iter().map(|m| AbsolutePath::new(m.src()));
 
         pinned.chain(mapped).collect()
     }
@@ -326,10 +325,10 @@ impl SecretFileManager {
 
     fn collisions(&self) -> Result<(), SecretError> {
         // Collect all secret destinations and label their sources
-        let mut entries: Vec<(&Path, String)> = Vec::new();
+        let mut entries: Vec<(&AbsolutePath, String)> = Vec::new();
 
         for file in self.iter_secrets() {
-            entries.push((file.dest(), format!("File({:?})", file.source().label())));
+            entries.push((file.dest(), format!("File({})", file.source().label())));
         }
 
         // Sort Lexicographically
@@ -387,7 +386,7 @@ impl SecretFileManager {
         Ok(())
     }
 
-    fn cleanup_parents(&self, removed_files: Vec<SecretFile>, ceiling: &Path) {
+    fn cleanup_parents(&self, removed_files: Vec<SecretFile>, ceiling: &AbsolutePath) {
         let mut candidates = std::collections::HashSet::new();
         for file in removed_files {
             if let Some(parent) = file.dest().parent() {
@@ -396,13 +395,15 @@ impl SecretFileManager {
         }
 
         for dir in candidates {
-            if dir.starts_with(ceiling) && dir.exists() {
-                self.bubble_delete(dir, ceiling);
+            if let Ok(candidate) = CanonicalPath::try_new(dir)
+                && candidate.starts_with(ceiling)
+            {
+                self.bubble_delete(candidate.into(), ceiling);
             }
         }
     }
 
-    fn bubble_delete(&self, start_dir: PathBuf, ceiling: &Path) {
+    fn bubble_delete(&self, start_dir: AbsolutePath, ceiling: &AbsolutePath) {
         let mut current = start_dir;
         loop {
             if !current.starts_with(ceiling) {
@@ -411,11 +412,11 @@ impl SecretFileManager {
             // Attempt removal; stop if not empty or other error
             match std::fs::remove_dir(&current) {
                 Ok(_) => {
-                    if current == ceiling {
+                    if current == *ceiling {
                         break;
                     }
                     match current.parent() {
-                        Some(p) => current = p.to_path_buf(),
+                        Some(p) => current = p,
                         None => break,
                     }
                 }
@@ -444,7 +445,7 @@ impl SecretFileManager {
                         && let Some(ceiling) = self.registry.resolve(old.clone())
                         && let Some(ceil_parent) = ceiling.parent()
                     {
-                        self.bubble_delete(parent.to_path_buf(), ceil_parent);
+                        self.bubble_delete(parent, &ceil_parent);
                     }
                     return Ok(());
                 }
@@ -505,36 +506,32 @@ impl SecretFileManager {
 /// reflect changes in template source files to the managed secret files.
 #[async_trait]
 impl EventHandler for SecretFileManager {
-    fn paths(&self) -> Vec<PathBuf> {
+    fn paths(&self) -> Vec<AbsolutePath> {
         self.sources()
     }
 
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
         for event in events {
             let result = match event {
-                FsEvent::Write(src) => match CanonicalPath::try_new(&src) {
+                FsEvent::Write(src) => match src.canonicalize() {
                     Ok(canon) => self.handle_write(canon).await,
                     Err(e) => {
                         debug!(?src, "write/create event for missing file; ignoring: {}", e);
                         Ok(())
                     }
                 },
-                FsEvent::Remove(src) => {
-                    let abs = AbsolutePath::new(src);
-                    self.handle_remove(abs)
-                }
+                FsEvent::Remove(src) => self.handle_remove(src),
 
                 FsEvent::Move { from, to } => {
-                    let old_abs = AbsolutePath::new(from);
-                    match CanonicalPath::try_new(&to) {
-                        Ok(new_canon) => self.handle_move(old_abs, new_canon).await,
+                    match to.canonicalize() {
+                        Ok(new_canon) => self.handle_move(from, new_canon).await,
                         Err(e) => {
                             // Moved to path is missing. Treat as a delete of old file.
                             debug!(
                                 ?to,
                                 "move destination missing; downgrading to remove: {}", e
                             );
-                            self.handle_remove(old_abs)
+                            self.handle_remove(from)
                         }
                     }
                 }

@@ -26,11 +26,17 @@ impl AbsolutePath {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self(path.as_ref().absolute())
     }
-    pub fn canonicalize(self) -> Result<CanonicalPath, SecretError> {
+    pub fn canonicalize(&self) -> Result<CanonicalPath, SecretError> {
         CanonicalPath::try_new(&self.0)
     }
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+    pub fn parent(&self) -> Option<AbsolutePath> {
+        self.0.parent().map(AbsolutePath::new)
+    }
+    pub fn join(&self, path: impl AsRef<Path>) -> Self {
+        Self::new(self.0.join(path))
     }
 }
 
@@ -51,6 +57,12 @@ impl CanonicalPath {
     }
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+    pub fn join(&self, path: impl AsRef<Path>) -> AbsolutePath {
+        AbsolutePath::new(self.0.join(path))
+    }
+    pub fn parent(&self) -> Option<AbsolutePath> {
+        self.0.parent().map(AbsolutePath::new)
     }
 }
 
@@ -139,10 +151,10 @@ impl PathMapping {
     pub fn try_new(src: CanonicalPath, dst: AbsolutePath) -> Result<Self, SecretError> {
         Ok(Self { src, dst })
     }
-    pub fn src(&self) -> &Path {
+    pub fn src(&self) -> &CanonicalPath {
         &self.src
     }
-    pub fn dst(&self) -> &Path {
+    pub fn dst(&self) -> &AbsolutePath {
         &self.dst
     }
 }

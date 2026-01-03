@@ -8,6 +8,7 @@
 use crate::{
     env::{EnvError, EnvManager},
     events::{EventHandler, FsEvent, HandlerError, wait_for_signal},
+    path::AbsolutePath,
     secrets::SecretKey,
 };
 use async_trait::async_trait;
@@ -20,7 +21,6 @@ use nix::unistd::Pid;
 use secrecy::ExposeSecret;
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -434,7 +434,7 @@ impl Drop for ProcessManager {
 
 #[async_trait]
 impl EventHandler for ProcessManager {
-    fn paths(&self) -> Vec<PathBuf> {
+    fn paths(&self) -> Vec<AbsolutePath> {
         self.env.files()
     }
 

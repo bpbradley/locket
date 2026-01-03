@@ -8,13 +8,13 @@
 //! This decoupling allows event producers (like a filesystem watcher) to be agnostic about
 //! event consumers (like a process manager or template renderer).
 
+use crate::path::AbsolutePath;
 #[cfg(any(feature = "exec", feature = "compose"))]
 use crate::{env::EnvError, process::ProcessError};
 use crate::{provider::ProviderError, secrets::SecretError};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
-use std::path::PathBuf;
 use std::process::ExitStatus;
 use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
@@ -75,7 +75,7 @@ pub trait EventHandler: Send + Sync {
     ///
     /// The event loop uses this to configure the underlying monitors (e.g., `inotify`).
     /// The handler must guarantee that these resources are valid targets for monitoring.
-    fn paths(&self) -> Vec<PathBuf>;
+    fn paths(&self) -> Vec<AbsolutePath>;
 
     /// Reacts to a batch of events.
     ///
@@ -117,11 +117,14 @@ pub trait EventHandler: Send + Sync {
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum FsEvent {
     /// A resource has been modified or created and is ready for processing.
-    Write(PathBuf),
+    Write(AbsolutePath),
     /// A resource has been removed.
-    Remove(PathBuf),
+    Remove(AbsolutePath),
     /// A resource has changed location.
-    Move { from: PathBuf, to: PathBuf },
+    Move {
+        from: AbsolutePath,
+        to: AbsolutePath,
+    },
 }
 
 /// Registry to collect and coalesce filesystem events.
@@ -129,7 +132,7 @@ pub enum FsEvent {
 /// It ensures that if a file is written, moved, and then deleted within the
 /// processing window, the handler sees only the relevant outcome.
 pub struct FsEventRegistry {
-    map: IndexMap<PathBuf, FsEvent>,
+    map: IndexMap<AbsolutePath, FsEvent>,
 }
 
 impl FsEventRegistry {
@@ -157,7 +160,7 @@ impl FsEventRegistry {
     /// Handle a move event by resolving it against existing events in the registry
     /// to produce the correct resultant event. This handler attempts to logically resolve the eventual
     /// state of the file after a move, considering prior writes or moves.
-    fn handle_move(&mut self, from: PathBuf, to: PathBuf) {
+    fn handle_move(&mut self, from: AbsolutePath, to: AbsolutePath) {
         // Resolve what the event for 'to' should be, based on the state of 'from'.
         let event = match self.map.get(&from) {
             // Write(A) -> Move(A->B) === Write(B).
@@ -184,7 +187,7 @@ impl FsEventRegistry {
 
     /// Update the registry with a new event for a given path, applying coalescing logic
     /// to avoid redundant or conflicting events.
-    fn update(&mut self, path: PathBuf, new_event: FsEvent) {
+    fn update(&mut self, path: AbsolutePath, new_event: FsEvent) {
         // Often when a file is moved, the source is redundantly removed as well.
         // Ignore such Remove events if the file has already been moved.
         if let FsEvent::Remove(_) = &new_event

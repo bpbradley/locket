@@ -42,7 +42,7 @@ pub struct OpConnectConfig {
     /// Either provide the token directly or via a file with `file:` prefix
     #[arg(
         long = "connect.token",
-        env = "OP_SERVICE_ACCOUNT_TOKEN",
+        env = "OP_CONNECT_TOKEN",
         hide_env_values = true,
         required_if_eq("provider", ProviderKind::OpConnect)
     )]
