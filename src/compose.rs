@@ -35,8 +35,17 @@ pub enum ComposeError {
     #[error("Invalid Args: {0}")]
     Argument(String),
 
-    #[error("Metadata generation failed: {0}")]
-    Metadata(String),
+    #[error(transparent)]
+    Metadata(#[from] MetadataError),
+}
+
+#[derive(Debug, Error)]
+pub enum MetadataError {
+    #[error("CLI definition missing subcommand: {0}")]
+    MissingSubcommand(String),
+
+    #[error("serialization failed: {0}")]
+    Serialization(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]

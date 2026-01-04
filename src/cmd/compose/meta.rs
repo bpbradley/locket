@@ -1,4 +1,5 @@
 use crate::cmd::Cli;
+use crate::compose::MetadataError;
 use crate::error::LocketError;
 use clap::{Arg, Command, CommandFactory};
 use serde::Serialize;
@@ -37,44 +38,34 @@ struct Parameter {
 }
 
 pub async fn metadata(_project: String) -> Result<(), LocketError> {
-    let run = || -> Result<(), String> {
-        let cmd = Cli::command();
+    let cmd = Cli::command();
+    let compose = get_subcommand(&cmd, "compose")?;
 
-        let compose = find_subcommand(&cmd, "compose")
-            .ok_or("CLI definition missing 'compose' subcommand")?;
-
-        let meta = ProviderMetadata {
-            description: cmd.get_about().unwrap_or_default().to_string(),
-            up: extract_metadata(find_subcommand(compose, "up")),
-            down: extract_metadata(find_subcommand(compose, "down")),
-        };
-
-        let json = serde_json::to_string_pretty(&meta)
-            .map_err(|e| format!("Serialization failed: {}", e))?;
-
-        println!("{}", json);
-        Ok(())
+    let meta = ProviderMetadata {
+        description: cmd.get_about().unwrap_or_default().to_string(),
+        up: extract_metadata(get_subcommand(compose, "up")?),
+        down: extract_metadata(get_subcommand(compose, "down")?),
     };
 
-    match run() {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            eprintln!("[ERROR] Metadata generation failed: {}", e);
-            Err(LocketError::Compose(
-                crate::compose::ComposeError::Metadata(e),
-            ))
-        }
-    }
+    serde_json::to_writer_pretty(std::io::stdout(), &meta).map_err(MetadataError::from)?;
+
+    // Ensure trailing newline
+    println!();
+
+    Ok(())
 }
 
-fn find_subcommand<'a>(cmd: &'a Command, name: &str) -> Option<&'a Command> {
-    cmd.get_subcommands().find(|s| s.get_name() == name)
+fn get_subcommand<'a>(cmd: &'a Command, name: &str) -> Result<&'a Command, MetadataError> {
+    cmd.get_subcommands()
+        .find(|s| s.get_name() == name)
+        .ok_or_else(|| MetadataError::MissingSubcommand(name.to_string()))
 }
 
-fn extract_metadata(cmd: Option<&Command>) -> CommandMetadata {
+fn extract_metadata(cmd: &Command) -> CommandMetadata {
     let parameters = cmd
-        .map(|c| c.get_arguments().filter_map(Parameter::from_arg).collect())
-        .unwrap_or_default();
+        .get_arguments()
+        .filter_map(Parameter::from_arg)
+        .collect();
 
     CommandMetadata { parameters }
 }

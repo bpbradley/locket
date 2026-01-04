@@ -46,3 +46,10 @@ pub enum LocketError {
     #[error(transparent)]
     Logging(#[from] LoggingError),
 }
+
+#[cfg(feature = "compose")]
+impl From<crate::compose::MetadataError> for LocketError {
+    fn from(e: crate::compose::MetadataError) -> Self {
+        LocketError::Compose(e.into())
+    }
+}
