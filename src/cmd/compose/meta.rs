@@ -49,9 +49,6 @@ pub async fn metadata(_project: String) -> Result<(), LocketError> {
 
     serde_json::to_writer_pretty(std::io::stdout(), &meta).map_err(MetadataError::from)?;
 
-    // Ensure trailing newline
-    println!();
-
     Ok(())
 }
 

@@ -25,7 +25,7 @@ locket exec --provider bws --bws-token=file:/path/to/token \
 | `--env` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
 | `--timeout` | `LOCKET_EXEC_TIMEOUT` | `30s` | Timeout duration for process termination signals. Unitless numbers are interpreted as seconds |
 | `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise. Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds |
-| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json` |
+| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json`, `compose` |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
 | `<cmd>` |  |  | Command to execute with secrets injected into environment Must be the last argument(s), following a `--` separator. Example: locket exec -e locket.env -- docker compose up -d |
 ### Provider Configuration

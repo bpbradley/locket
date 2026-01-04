@@ -49,6 +49,7 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | `--bws.max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
 | `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
 | `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Machine Token Either provide the token directly or via a file with `file:` prefix |
+| `--log-level` | `LOCKET_LOG_LEVEL` | `debug` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
 
 ---
 

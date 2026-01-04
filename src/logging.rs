@@ -18,11 +18,15 @@ pub enum LoggingError {
 #[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
 pub enum LogFormat {
     #[default]
+    /// Plain text log format
     Text,
+    /// JSON log format
     Json,
     #[cfg(feature = "compose")]
+    /// Special log format for Docker Compose Provider Service specification
     Compose,
 }
+
 impl LogFormat {
     pub fn as_str(self) -> &'static str {
         match self {

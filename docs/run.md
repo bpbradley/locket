@@ -31,7 +31,7 @@ locket run --provider bws --bws-token=file:/path/to/token \
 | `--file-mode` | `LOCKET_FILE_MODE` | `600` | File permission mode |
 | `--dir-mode` | `LOCKET_DIR_MODE` | `700` | Directory permission mode |
 | `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise. Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds |
-| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json` |
+| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json`, `compose` |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
 ### Provider Configuration
 
