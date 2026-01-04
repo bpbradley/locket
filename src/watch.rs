@@ -211,17 +211,17 @@ impl<H: EventHandler> FsWatcher<H> {
             EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => event
                 .paths
                 .first()
-                .map(|src| FsEvent::Write(AbsolutePath::new(src.clone()))),
+                .map(|src| FsEvent::Write(src.into())),
             EventKind::Remove(_) => event
                 .paths
                 .first()
-                .map(|src| FsEvent::Remove(AbsolutePath::new(src.clone()))),
+                .map(|src| FsEvent::Remove(src.into())),
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {
                 RenameMode::Both => {
-                    if event.paths.len() == 2 {
+                    if let [from, to, ..] = &event.paths[..] {
                         Some(FsEvent::Move {
-                            from: AbsolutePath::new(event.paths[0].clone()),
-                            to: AbsolutePath::new(event.paths[1].clone()),
+                            from: from.into(),
+                            to: to.into(),
                         })
                     } else {
                         None
@@ -231,12 +231,12 @@ impl<H: EventHandler> FsWatcher<H> {
                 RenameMode::From => event
                     .paths
                     .first()
-                    .map(|src| FsEvent::Remove(AbsolutePath::new(src.clone()))),
+                    .map(|src| FsEvent::Remove(src.into())),
                 // Renamed from an unknown location == Write(X)
                 RenameMode::To => event
                     .paths
                     .first()
-                    .map(|src| FsEvent::Write(AbsolutePath::new(src.clone()))),
+                    .map(|src| FsEvent::Write(src.into())),
                 _ => None,
             },
             _ => None,

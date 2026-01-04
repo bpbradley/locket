@@ -12,7 +12,6 @@ use crate::template::Template;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -66,7 +65,7 @@ impl EnvManager {
     }
 
     /// Checks if a specific path is tracked by this manager.
-    pub fn tracks(&self, path: &Path) -> bool {
+    pub fn tracks(&self, path: &AbsolutePath) -> bool {
         self.files().iter().any(|p| p == path)
     }
 

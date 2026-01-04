@@ -72,6 +72,49 @@ impl From<CanonicalPath> for AbsolutePath {
     }
 }
 
+
+impl From<PathBuf> for AbsolutePath {
+    fn from(p: PathBuf) -> Self {
+        Self::new(p)
+    }
+}
+
+impl From<&Path> for AbsolutePath {
+    fn from(p: &Path) -> Self {
+        Self::new(p)
+    }
+}
+
+impl From<&PathBuf> for AbsolutePath {
+    fn from(p: &PathBuf) -> Self {
+        Self::new(p)
+    }
+}
+
+impl TryFrom<PathBuf> for CanonicalPath {
+    type Error = SecretError;
+
+    fn try_from(p: PathBuf) -> Result<Self, Self::Error> {
+        CanonicalPath::try_new(&p)
+    }
+}
+
+impl TryFrom<&Path> for CanonicalPath {
+    type Error = SecretError;
+
+    fn try_from(p: &Path) -> Result<Self, Self::Error> {
+        CanonicalPath::try_new(p)
+    }
+}
+
+impl TryFrom<&PathBuf> for CanonicalPath {
+    type Error = SecretError;
+
+    fn try_from(p: &PathBuf) -> Result<Self, Self::Error> {
+        CanonicalPath::try_new(p)
+    }
+}
+
 /// Extension trait for `Path` to provide robust normalization and security checks.
 trait PathExt {
     /// Logically cleans the path by resolving `.` and `..` components.
