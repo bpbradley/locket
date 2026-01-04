@@ -39,7 +39,7 @@ pub enum Command {
     /// Example:
     ///
     /// ```sh
-    /// locket run --provider bws --bws-token-file /path/to/token \
+    /// locket run --provider bws --bws-token=file:/path/to/token \
     ///     --secret=/path/to/secrets.yaml \
     ///     --secret=key=@key.pem \
     ///     --map /templates=/run/secrets/locket
@@ -52,7 +52,7 @@ pub enum Command {
     /// Example:
     ///
     /// ```sh
-    /// locket exec --provider bws --bws-token-file /path/to/token \
+    /// locket exec --provider bws --bws-token=file:/path/to/token \
     ///     -e locket.env -e OVERRIDE={{ reference }} \
     ///     -- docker compose up -d
     /// ```

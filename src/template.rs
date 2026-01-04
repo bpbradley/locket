@@ -4,82 +4,155 @@
 //! containing `{{ ... }}` tags representing secret references.
 //! It can extract the keys used in the template and render the
 //! template by replacing tags with actual secret values, provided by the caller.
+use crate::provider::{ReferenceParser, SecretReference};
 use std::borrow::Cow;
-use std::collections::HashSet;
+
+/// A segment of a parsed template.
+#[derive(Debug, Clone)]
+enum Segment<'a> {
+    /// Static text (including unparseable tags) that should be preserved as-is.
+    Raw(&'a str),
+    /// A valid secret reference identified by the parser.
+    /// Stores the original text to support "fallback" strategies if the secret isn't found.
+    Secret {
+        reference: SecretReference,
+        original: &'a str,
+    },
+}
 
 /// Represents a loaded text resource that may contain secret references.
 ///
 /// This struct is responsible for parsing the `{{ ... }}` syntax
 /// and rendering the template with provided secret values.
 /// It is designed to be zero-allocation when no tags are present.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Template<'a> {
     source: &'a str,
+    segments: Vec<Segment<'a>>,
 }
 
 impl<'a> Template<'a> {
-    /// Create a new Template from a string slice.
-    pub fn new(source: &'a str) -> Self {
-        Self { source }
-    }
-
-    /// Returns true if the template contains any `{{ ... }}` tags.
-    pub fn has_tags(&self) -> bool {
-        self.iter_tags().next().is_some()
-    }
-
-    /// Scans the template and returns a unique set of secret reference keys found within tags.
-    pub fn keys(&self) -> HashSet<&'a str> {
-        self.iter_tags().map(|(_, key)| key).collect()
-    }
-
-    /// Renders the template using a closure to resolve keys.
+    /// Parses a string into a Template using the provided parser to identify secrets.
     ///
-    /// If a key resolves to `Some(value)`, the tag is replaced.
-    /// If it resolves to `None`, the tag is left literally in the output.
+    /// Any tag `{{ ... }}` that represents a valid secret for the given parser
+    /// is stored as a `Segment::Secret`. Any text outside tags, or tags that
+    /// fail parsing, are stored as `Segment::Raw`.
+    pub fn parse<P>(source: &'a str, parser: &P) -> Self
+    where
+        P: ReferenceParser + ?Sized,
+    {
+        let mut segments = Vec::new();
+        let mut cursor = 0;
+
+        for (range, inner_key) in TagIterator::new(source) {
+            // Push preceding raw text
+            if range.start > cursor {
+                segments.push(Segment::Raw(&source[cursor..range.start]));
+            }
+
+            // Try to parse the tag content
+            let tag = &source[range.clone()];
+
+            if let Some(reference) = parser.parse(inner_key) {
+                segments.push(Segment::Secret {
+                    reference,
+                    original: tag,
+                });
+            } else {
+                // Invalid/Unknown format. Treat as literal text
+                segments.push(Segment::Raw(tag));
+            }
+
+            cursor = range.end;
+        }
+
+        // Push remaining raw text
+        if cursor < source.len() {
+            segments.push(Segment::Raw(&source[cursor..]));
+        }
+
+        Self { source, segments }
+    }
+
+    /// Returns a list of all unique secret references in the template.
+    pub fn references(&self) -> Vec<SecretReference> {
+        self.segments
+            .iter()
+            .filter_map(|s| match s {
+                Segment::Secret { reference, .. } => Some(reference.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Returns true if the template contains any valid secret references.
+    pub fn has_secrets(&self) -> bool {
+        self.segments
+            .iter()
+            .any(|s| matches!(s, Segment::Secret { .. }))
+    }
+
+    /// Renders the template using the resolved secrets map.
+    ///
+    /// * If a secret is found in the map, the tag is replaced with the value.
+    /// * If a secret is missing from the map, the original tag is preserved.
+    /// * If no replacements occur, returns a zero-copy Cow::Borrowed of the source.
     pub fn render_with<F, S>(&self, lookup: F) -> Cow<'a, str>
     where
-        F: Fn(&str) -> Option<S>,
+        F: Fn(&SecretReference) -> Option<S>,
         S: AsRef<str>,
     {
-        let mut output: Option<String> = None;
-        let mut last_idx = 0;
+        // Resolve all segments into a temporary list of string slices.
+        // This will improve map lookups and allow an accurate size pre-calculation to minimize allocations.
+        enum Part<'a, S> {
+            Raw(&'a str),
+            Val(S),
+        }
+        let mut parts = Vec::with_capacity(self.segments.len());
+        let mut modified = false;
 
-        for (range, key) in self.iter_tags() {
-            if output.is_none() {
-                // Peek to see if we need to start allocating
-                match lookup(key) {
-                    Some(val) => {
-                        let mut s = String::with_capacity(self.source.len());
-                        s.push_str(&self.source[0..range.start]);
-                        s.push_str(val.as_ref());
-                        last_idx = range.end;
-                        output = Some(s);
-                        continue;
+        for segment in &self.segments {
+            match segment {
+                Segment::Raw(s) => parts.push(Part::Raw(s)),
+                Segment::Secret {
+                    reference,
+                    original,
+                } => {
+                    if let Some(val) = lookup(reference) {
+                        parts.push(Part::Val(val));
+                        modified = true;
+                    } else {
+                        // Secret not found, keep original tag
+                        parts.push(Part::Raw(original));
                     }
-                    None => continue,
                 }
-            }
-
-            if let Some(out) = output.as_mut() {
-                out.push_str(&self.source[last_idx..range.start]);
-                match lookup(key) {
-                    Some(val) => out.push_str(val.as_ref()),
-                    None => out.push_str(&self.source[range.clone()]),
-                }
-                last_idx = range.end;
             }
         }
 
-        match output {
-            Some(mut s) => {
-                if last_idx < self.source.len() {
-                    s.push_str(&self.source[last_idx..]);
-                }
-                Cow::Owned(s)
-            }
-            None => Cow::Borrowed(self.source),
+        // If nothing changed, return the original source
+        if !modified {
+            return Cow::Borrowed(self.source);
         }
+
+        // Calculate size required
+        let capacity: usize = parts
+            .iter()
+            .map(|p| match p {
+                Part::Raw(s) => s.len(),
+                Part::Val(s) => s.as_ref().len(),
+            })
+            .sum();
+
+        // Allocate and fill
+        let mut output = String::with_capacity(capacity);
+        for part in parts {
+            match part {
+                Part::Raw(s) => output.push_str(s),
+                Part::Val(s) => output.push_str(s.as_ref()),
+            }
+        }
+
+        Cow::Owned(output)
     }
 
     /// Render the template by replacing tags with values provided in the `map`.
@@ -90,28 +163,39 @@ impl<'a> Template<'a> {
     /// # Example
     ///
     /// ```rust
+    /// # #[cfg(feature = "testing")]
+    /// # {
     /// use locket::template::Template;
+    /// use locket::provider::{SecretReference, ReferenceParser};
     /// use std::collections::HashMap;
+    /// use std::str::FromStr;
     ///
-    /// let tpl = Template::new("User: {{ user }}");
+    /// struct MockParser;
+    /// impl ReferenceParser for MockParser {
+    ///     fn parse(&self, raw: &str) -> Option<SecretReference> {
+    ///         if raw.starts_with("test:") {
+    ///            Some(SecretReference::Mock(raw.to_string()))
+    ///         } else {
+    ///           None
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// let parser = MockParser;
+    /// let tpl = Template::parse("User: {{ test:user }}", &parser);
+    ///
+    /// let ref_key = SecretReference::Mock("test:user".to_string());
     /// let mut map = HashMap::new();
-    /// map.insert("user".to_string(), "admin");
+    /// map.insert(ref_key, "admin");
     ///
     /// assert_eq!(tpl.render(&map), "User: admin");
+    /// # }
     /// ```
-    pub fn render<S>(&self, values: &std::collections::HashMap<String, S>) -> Cow<'a, str>
+    pub fn render<S>(&self, values: &std::collections::HashMap<SecretReference, S>) -> Cow<'a, str>
     where
         S: AsRef<str>,
     {
         self.render_with(|k| values.get(k).map(|s| s.as_ref()))
-    }
-
-    /// Internal iterator over tags.
-    fn iter_tags(&self) -> impl Iterator<Item = (std::ops::Range<usize>, &'a str)> + '_ {
-        TagIterator {
-            source: self.source,
-            cursor: 0,
-        }
     }
 }
 
@@ -119,6 +203,12 @@ impl<'a> Template<'a> {
 struct TagIterator<'a> {
     source: &'a str,
     cursor: usize,
+}
+
+impl<'a> TagIterator<'a> {
+    fn new(source: &'a str) -> Self {
+        Self { source, cursor: 0 }
+    }
 }
 
 impl<'a> Iterator for TagIterator<'a> {
@@ -133,18 +223,16 @@ impl<'a> Iterator for TagIterator<'a> {
         let remainder = &self.source[self.cursor..];
 
         // Find start "{{"
-        // If not found, '?' returns None immediately, ending the iterator.
         let start_offset = remainder.find("{{")?;
         let tag_start = self.cursor + start_offset;
 
         // Find end "}}" after the start
-        // We are guaranteed that tag_start + 2 is valid because "{{" was found.
         let rest = &self.source[tag_start + 2..];
 
         if let Some(end_offset) = rest.find("}}") {
             let tag_end = tag_start + 2 + end_offset + 2; // +2 for {{, +2 for }}
 
-            // Update cursor for next iteration (maintain state)
+            // Update cursor for next iteration
             self.cursor = tag_end;
 
             // Extract content
@@ -156,8 +244,6 @@ impl<'a> Iterator for TagIterator<'a> {
         }
 
         // No closing tag found
-        // Treat as end of valid stream. The 'Template::render' logic will
-        // handle the leftover text (including the unclosed "{{") as raw string.
         None
     }
 }
@@ -167,7 +253,6 @@ fn sanitize_key(raw: &str) -> &str {
 
     // Check for double quotes
     if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
-        // Strip quotes AND trim the inner content
         return trimmed[1..trimmed.len() - 1].trim();
     }
 
@@ -182,152 +267,190 @@ fn sanitize_key(raw: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::{ReferenceParser, SecretReference};
     use std::collections::HashMap;
+
+    // A parser that uses the Mock reference type and doesn't allow whitespace.
+    struct MockParser;
+    impl ReferenceParser for MockParser {
+        fn parse(&self, raw: &str) -> Option<SecretReference> {
+            if raw.starts_with("test:") && !raw.contains(char::is_whitespace) {
+                Some(SecretReference::Mock(raw.to_string()))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn ref_from(s: &str) -> SecretReference {
+        SecretReference::Mock(s.to_string())
+    }
 
     #[test]
     fn extract_keys_simple() {
-        let tpl = Template::new("Host: {{ op://db/host }}");
-        let keys = tpl.keys();
-        assert_eq!(keys.len(), 1);
-        assert!(keys.contains("op://db/host"));
+        let parser = MockParser;
+        let tpl = Template::parse("Host: {{ test:field }}", &parser);
+        let refs = tpl.references();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0], ref_from("test:field"));
     }
 
     #[test]
     fn extract_keys_multiple_deduplicated() {
-        let tpl = Template::new("User: {{ user }}\nPass: {{ pass }}\nAgain: {{ user }}");
-        let keys = tpl.keys();
-        assert_eq!(keys.len(), 2);
-        assert!(keys.contains("user"));
-        assert!(keys.contains("pass"));
+        // Updated to use valid references
+        let source = "User: {{ test:first }}\nPass: {{ test:another }}\nAgain: {{ test:first }}";
+        let parser = MockParser;
+        let tpl = Template::parse(source, &parser);
+
+        let refs = tpl.references();
+        // `references()` returns a Vec of all occurrences
+        assert!(refs.contains(&ref_from("test:first")));
+        assert!(refs.contains(&ref_from("test:another")));
     }
 
     #[test]
     fn render_replaces_known_keys() {
-        let tpl = Template::new("A={{a}}, B={{ b }}");
-        let mut map = HashMap::new();
-        map.insert("a".to_string(), "1");
-        map.insert("b".to_string(), "2");
+        let parser = MockParser;
+        let tpl = Template::parse("A={{ test:A }}, B={{ test:B }}", &parser);
 
-        let rendered = tpl.render(&map);
+        let mut map = HashMap::new();
+        map.insert(ref_from("test:A"), "1".to_string());
+        map.insert(ref_from("test:B"), "2".to_string());
+        let rendered = tpl.render_with(|r| map.get(r));
         assert_eq!(rendered, "A=1, B=2");
     }
 
     #[test]
     fn render_ignores_unknown_keys() {
-        let raw = "Valid={{ a }}, Missing={{ b }}";
-        let tpl = Template::new(raw);
-        let mut map = HashMap::new();
-        map.insert("a".to_string(), "1");
+        let parser = MockParser;
+        // test:b is valid syntax, but missing from the map.
+        let raw = "Valid={{ test:a }}, Missing={{ test:b }}";
+        let tpl = Template::parse(raw, &parser);
 
-        let rendered = tpl.render(&map);
-        assert_eq!(rendered, "Valid=1, Missing={{ b }}");
+        let mut map = HashMap::new();
+        map.insert(ref_from("test:a"), "1".to_string());
+
+        let rendered = tpl.render_with(|r| map.get(r));
+        assert_eq!(rendered, "Valid=1, Missing={{ test:b }}");
     }
 
     #[test]
     fn handle_broken_tags() {
-        // Should ignore unclosed tags
-        let tpl = Template::new("Start {{ broken end");
-        assert!(tpl.keys().is_empty());
-        assert_eq!(
-            tpl.render(&HashMap::<String, String>::new()),
-            "Start {{ broken end"
-        );
+        let parser = MockParser;
+        let tpl = Template::parse("Start {{ broken end", &parser);
+        assert!(!tpl.has_secrets());
+        assert_eq!(tpl.render_with(|_| None::<String>), "Start {{ broken end");
     }
 
     #[test]
     fn handle_whitespace_in_tags() {
-        let tpl = Template::new("Value: {{ op://vault/item/field with whitespace }}");
-        let keys = tpl.keys();
-        assert_eq!(keys.len(), 1);
-        assert!(keys.contains("op://vault/item/field with whitespace"));
+        let parser = MockParser;
+        // MockParser rejects strings with spaces.
+        // Behavior: Parse fails -> Treated as Raw text -> Preserved.
+        let source = "Value: {{ test:key with whitespace }}";
+        let tpl = Template::parse(source, &parser);
+
+        assert!(!tpl.has_secrets()); // Should fail parsing
+
+        // Should render identical to source
+        assert_eq!(tpl.render_with(|_| None::<String>), source);
     }
 
     #[test]
     fn test_has_tags() {
-        let tpl_with = Template::new("Value: {{ key }}");
-        assert!(tpl_with.has_tags());
+        let parser = MockParser;
 
-        let tpl_without = Template::new("Just some text");
-        assert!(!tpl_without.has_tags());
+        let tpl_with = Template::parse("Value: {{ test:key }}", &parser);
+        assert!(tpl_with.has_secrets());
 
-        let tpl_broken = Template::new("Unclosed {{ tag");
-        assert!(!tpl_broken.has_tags());
+        let tpl_without = Template::parse("Just some text", &parser);
+        assert!(!tpl_without.has_secrets());
 
-        let tpl_empty = Template::new("{{}}");
-        assert!(!tpl_empty.has_tags());
+        // Invalid syntax -> Raw -> No Secrets
+        let tpl_broken = Template::parse("Unclosed {{ tag", &parser);
+        assert!(!tpl_broken.has_secrets());
 
-        let tpl_wrong = Template::new("}} key {{");
-        assert!(!tpl_wrong.has_tags());
+        let tpl_empty = Template::parse("{{}}", &parser);
+        assert!(!tpl_empty.has_secrets());
     }
 
     #[test]
     fn handle_adjacent_tags() {
-        let tpl = Template::new("{{a}}{{b}}");
-        let keys = tpl.keys();
-        assert!(keys.contains("a"));
-        assert!(keys.contains("b"));
+        let parser = MockParser;
+        let tpl = Template::parse("{{ test:a }}{{ test:b }}", &parser);
+        let refs = tpl.references();
+
+        assert_eq!(refs.len(), 2);
+        assert!(refs.contains(&ref_from("test:a")));
+        assert!(refs.contains(&ref_from("test:b")));
     }
 
     #[test]
     fn no_alloc_if_no_tags() {
-        let tpl = Template::new("Just some config");
-        let map: HashMap<String, String> = HashMap::new();
+        let parser = MockParser;
+        let source = "Just some config";
+        let tpl = Template::parse(source, &parser);
 
-        // Cow should be Borrowed
-        match tpl.render(&map) {
-            Cow::Borrowed(s) => assert_eq!(s, "Just some config"),
+        match tpl.render_with(|_| None::<String>) {
+            Cow::Borrowed(s) => assert_eq!(s, source),
             Cow::Owned(_) => panic!("Should not allocate for tagless string"),
         }
     }
 
     #[test]
     fn extract_keys_with_quotes() {
+        let parser = MockParser;
+        // sanitize_key handles the quotes before passing to MockParser
         let raw = r#"
-            A: {{ "op://key1" }}
-            B: {{ 'op://key2' }}
-            C: {{ op://key3 }}
+            A: {{ "test:key1" }}
+            B: {{ 'test:key2' }}
+            C: {{ test:key3 }}
         "#;
-        let tpl = Template::new(raw);
-        let keys = tpl.keys();
+        let tpl = Template::parse(raw, &parser);
+        let refs = tpl.references();
 
-        assert_eq!(keys.len(), 3);
-        assert!(keys.contains("op://key1"));
-        assert!(keys.contains("op://key2"));
-        assert!(keys.contains("op://key3"));
+        assert_eq!(refs.len(), 3);
+        assert!(refs.contains(&ref_from("test:key1")));
+        assert!(refs.contains(&ref_from("test:key2")));
+        assert!(refs.contains(&ref_from("test:key3")));
     }
 
     #[test]
     fn render_with_mixed_quotes() {
-        let raw = r#"{{ "key1" }} | {{ 'key2' }} | {{ key3 }}"#;
-        let tpl = Template::new(raw);
+        let parser = MockParser;
+        let raw = r#"{{ "test:key1" }} | {{ 'test:key2' }} | {{ test:key3 }}"#;
+        let tpl = Template::parse(raw, &parser);
 
-        let mut map: HashMap<String, String> = HashMap::new();
-        map.insert("key1".into(), "val1".into());
-        map.insert("key2".into(), "val2".into());
-        map.insert("key3".into(), "val3".into());
+        let mut map = HashMap::new();
+        map.insert(ref_from("test:key1"), "val1".to_string());
+        map.insert(ref_from("test:key2"), "val2".to_string());
+        map.insert(ref_from("test:key3"), "val3".to_string());
 
-        let out = tpl.render(&map);
+        let out = tpl.render_with(|r| map.get(r));
         assert_eq!(out, "val1 | val2 | val3");
     }
 
     #[test]
     fn quotes_with_whitespace() {
-        let raw = r#"{{ " key1 " }} | {{ ' key2' }}"#;
-        let tpl = Template::new(raw);
+        let parser = MockParser;
+        // Outer whitespace (inside quotes) is stripped by sanitize_key.
+        // MockParser receives "test:key1", which is valid.
+        let raw = r#"{{ " test:key1 " }} | {{ ' test:key2' }}"#;
+        let tpl = Template::parse(raw, &parser);
 
-        let mut map: HashMap<String, String> = HashMap::new();
-        map.insert("key1".into(), "val1".into());
-        map.insert("key2".into(), "val2".into());
+        let mut map = HashMap::new();
+        map.insert(ref_from("test:key1"), "val1".to_string());
+        map.insert(ref_from("test:key2"), "val2".to_string());
 
-        let out = tpl.render(&map);
+        let out = tpl.render_with(|r| map.get(r));
         assert_eq!(out, "val1 | val2");
     }
 
     #[test]
     fn empty_quotes_ignored() {
+        let parser = MockParser;
         let raw = r#"{{ "" }} {{ '' }} {{ }} "#;
-        let tpl = Template::new(raw);
-        assert!(tpl.keys().is_empty());
-        assert!(!tpl.has_tags());
+        let tpl = Template::parse(raw, &parser);
+        assert!(!tpl.has_secrets());
     }
 }

@@ -3,9 +3,8 @@
 //! The health is determined by the presence of a "ready" status file,
 //! which is created when all secrets have been successfully materialized.
 //! If the file is absent, the sidecar is considered unhealthy.
-use crate::path::parse_absolute;
+use crate::path::AbsolutePath;
 use clap::Args;
-use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -23,14 +22,13 @@ pub struct StatusFile {
     #[arg(
         long = "status-file",
         env = "LOCKET_STATUS_FILE",
-        default_value = "/tmp/.locket/ready",
-        value_parser = parse_absolute,
+        default_value = "/tmp/.locket/ready"
     )]
-    path: PathBuf,
+    path: AbsolutePath,
 }
 
 impl StatusFile {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: AbsolutePath) -> Self {
         Self { path }
     }
     pub fn is_ready(&self) -> bool {

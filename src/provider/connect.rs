@@ -11,66 +11,60 @@
 //! The provider uses the reqwest HTTP client
 //! and handles authentication via bearer tokens.
 
-use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
+use super::references::{OpReference, ReferenceParser, SecretReference};
+use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{ConcurrencyLimit, ProviderKind};
 use async_trait::async_trait;
 use clap::Args;
 use futures::stream::{self, StreamExt};
-use percent_encoding::percent_decode_str;
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing::debug;
 use url::Url;
-
-define_auth_token!(
-    struct_name: OpConnectToken,
-    prefix: "connect",
-    env: "OP_CONNECT_TOKEN",
-    group_id: "connect_token",
-    doc_string: "1Password Connect API token"
-);
 
 #[derive(Args, Debug, Clone)]
 pub struct OpConnectConfig {
     /// 1Password Connect Host HTTP(S) URL
-    #[arg(long = "connect.host", env = "OP_CONNECT_HOST")]
-    pub host: Option<String>,
+    #[arg(
+        long = "connect.host",
+        env = "OP_CONNECT_HOST",
+        required_if_eq("provider", ProviderKind::OpConnect)
+    )]
+    host: Option<Url>,
 
     /// 1Password Connect Token
-    #[command(flatten)]
-    token: OpConnectToken,
+    /// Either provide the token directly or via a file with `file:` prefix
+    #[arg(
+        long = "connect.token",
+        env = "OP_CONNECT_TOKEN",
+        hide_env_values = true,
+        required_if_eq("provider", ProviderKind::OpConnect)
+    )]
+    connect_token: Option<AuthToken>,
 
     /// Maximum allowed concurrent requests to Connect API
     #[arg(
         long = "connect.max-concurrent",
         env = "OP_CONNECT_MAX_CONCURRENT",
-        default_value_t = 20
+        default_value_t = ConcurrencyLimit::new(20)
     )]
-    pub connect_max_concurrent: usize,
-}
-
-impl Default for OpConnectConfig {
-    fn default() -> Self {
-        Self {
-            host: None,
-            token: OpConnectToken::default(),
-            connect_max_concurrent: 20,
-        }
-    }
+    connect_max_concurrent: ConcurrencyLimit,
 }
 
 #[derive(Debug, Deserialize)]
 struct VaultResponse {
-    id: String,
+    id: VaultId,
 }
 
 #[derive(Debug, Deserialize)]
 struct ItemResponse {
-    id: String,
+    id: ItemId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,11 +84,94 @@ struct ErrorResponse {
     message: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct OpUuid(String);
+
+impl fmt::Display for OpUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for OpUuid {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() == 26
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            Ok(Self(s.to_string()))
+        } else {
+            Err(ProviderError::InvalidId(format!("invalid id '{}'", s)))
+        }
+    }
+}
+
+impl AsRef<str> for OpUuid {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct VaultId(OpUuid);
+
+impl fmt::Display for VaultId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for VaultId {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        OpUuid::from_str(s)
+            .map(Self)
+            .map_err(|_| ProviderError::InvalidId(format!("invalid vault id '{}'", s)))
+    }
+}
+
+impl AsRef<str> for VaultId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct ItemId(OpUuid);
+
+impl fmt::Display for ItemId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for ItemId {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        OpUuid::from_str(s)
+            .map(Self)
+            .map_err(|_| ProviderError::InvalidId(format!("invalid item id '{}'", s)))
+    }
+}
+
+impl AsRef<str> for ItemId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
 /// Cache for Name -> UUID resolution to minimize API calls
 #[derive(Default, Debug)]
 struct ResolutionCache {
-    vaults: HashMap<String, String>,          // Vault Name -> Vault UUID
-    items: HashMap<(String, String), String>, // (Vault UUID, Item Name) -> Item UUID
+    vaults: HashMap<String, VaultId>,
+    items: HashMap<(VaultId, String), ItemId>,
 }
 
 pub struct OpConnectProvider {
@@ -102,18 +179,29 @@ pub struct OpConnectProvider {
     host: Url,
     token: AuthToken,
     cache: Arc<Mutex<ResolutionCache>>,
-    max_concurrent: usize,
+    max_concurrent: ConcurrencyLimit,
+}
+
+#[cfg(any(feature = "op", feature = "connect"))]
+impl ReferenceParser for OpConnectProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        OpReference::from_str(raw)
+            .ok()
+            .map(SecretReference::OnePassword)
+    }
 }
 
 impl OpConnectProvider {
     pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
-        let token: AuthToken = cfg.token.try_into()?;
-        let host_str = cfg
+        let token = cfg.connect_token.ok_or_else(|| {
+            ProviderError::InvalidConfig(
+                "missing 1Password service account token (connect.token)".to_string(),
+            )
+        })?;
+
+        let host = cfg
             .host
             .ok_or_else(|| ProviderError::InvalidConfig("missing OP_CONNECT_HOST".into()))?;
-
-        let host = Url::parse(&host_str)
-            .map_err(|e| ProviderError::InvalidConfig(format!("bad host url: {}", e)))?;
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
@@ -162,29 +250,17 @@ impl OpConnectProvider {
     }
 
     /// Pre-resolves all Vault and Item names found in the reference list.
-    async fn prewarm_cache(&self, references: &[&str]) -> Result<(), ProviderError> {
+    async fn prewarm_cache(&self, references: &[&OpReference]) -> Result<(), ProviderError> {
         let mut vaults = HashSet::new();
         let mut items = HashSet::new();
 
-        for path in references {
-            // Basic heuristic parse to find names/UUIDs.
-            // We strip op:// and use '/' as a rough separator.
-            // Strict parsing happens later in fetch_single.
-            let parts: Vec<&str> = path.trim_start_matches("op://").split('/').collect();
-
-            // We need at least Vault/Item
-            if parts.len() < 2 {
-                continue;
+        for reference in references {
+            if reference.vault.parse::<VaultId>().is_err() {
+                vaults.insert(reference.vault.clone());
             }
 
-            let (vault_ref, item_ref) = (parts[0], parts[1]);
-
-            // If it's NOT a UUID, we queue it for resolution
-            if !is_uuid(vault_ref) {
-                vaults.insert(vault_ref.to_string());
-            }
-            if !is_uuid(item_ref) {
-                items.insert((vault_ref.to_string(), item_ref.to_string()));
+            if reference.item.parse::<ItemId>().is_err() {
+                items.insert((reference.vault.clone(), reference.item.clone()));
             }
         }
 
@@ -192,7 +268,7 @@ impl OpConnectProvider {
             .map(|vault| async move {
                 let _ = self.resolve_vault_id(&vault).await;
             })
-            .buffer_unordered(self.max_concurrent)
+            .buffer_unordered(self.max_concurrent.into_inner())
             .collect::<Vec<_>>()
             .await;
 
@@ -204,16 +280,16 @@ impl OpConnectProvider {
                 };
                 let _ = self.resolve_item_id(&vault_uuid, &item).await;
             })
-            .buffer_unordered(self.max_concurrent)
+            .buffer_unordered(self.max_concurrent.into_inner())
             .collect::<Vec<_>>()
             .await;
 
         Ok(())
     }
 
-    async fn resolve_vault_id(&self, name_or_id: &str) -> Result<String, ProviderError> {
-        if is_uuid(name_or_id) {
-            return Ok(name_or_id.to_string());
+    async fn resolve_vault_id(&self, name_or_id: &str) -> Result<VaultId, ProviderError> {
+        if let Ok(id) = name_or_id.parse::<VaultId>() {
+            return Ok(id);
         }
 
         {
@@ -266,13 +342,13 @@ impl OpConnectProvider {
 
     async fn resolve_item_id(
         &self,
-        vault_uuid: &str,
+        vault_uuid: &VaultId,
         item_name_or_id: &str,
-    ) -> Result<String, ProviderError> {
-        if is_uuid(item_name_or_id) {
-            return Ok(item_name_or_id.to_string());
+    ) -> Result<ItemId, ProviderError> {
+        if let Ok(id) = item_name_or_id.parse::<ItemId>() {
+            return Ok(id);
         }
-        let key = (vault_uuid.to_string(), item_name_or_id.to_string());
+        let key = (vault_uuid.clone(), item_name_or_id.to_string());
         {
             let cache = self.cache.lock().await;
             if let Some(uuid) = cache.items.get(&key) {
@@ -314,43 +390,9 @@ impl OpConnectProvider {
         Ok(item.id.clone())
     }
 
-    async fn fetch_single(&self, raw_path: &str) -> Result<SecretString, ProviderError> {
-        let url = Url::parse(raw_path)
-            .map_err(|e| ProviderError::InvalidConfig(format!("bad reference URL: {}", e)))?;
-
-        let vault_ref = url.host_str().ok_or_else(|| {
-            ProviderError::InvalidConfig(format!("missing vault name: {}", raw_path))
-        })?;
-
-        let segments: Vec<&str> = url
-            .path_segments()
-            .ok_or_else(|| ProviderError::InvalidConfig("empty path".into()))?
-            .collect();
-
-        // Parse Item/Section/Field structure
-        let (item_ref, _section, raw_field) = match segments.len() {
-            2 => (segments[0], None, segments[1]),
-            3 => (segments[0], Some(segments[1]), segments[2]),
-            _ => {
-                return Err(ProviderError::InvalidConfig(format!(
-                    "invalid path segments: {}",
-                    raw_path
-                )));
-            }
-        };
-
-        debug!(
-            "Fetching secret: item: {}, section: {:?}, field: {}",
-            item_ref, _section, raw_field
-        );
-
-        let field_cow = percent_decode_str(raw_field)
-            .decode_utf8()
-            .map_err(|e| ProviderError::InvalidConfig(format!("utf8 decode error: {}", e)))?;
-        let field = field_cow.as_ref();
-
-        let vault_id = self.resolve_vault_id(vault_ref).await?;
-        let item_id = self.resolve_item_id(&vault_id, item_ref).await?;
+    async fn fetch_single(&self, op_ref: &OpReference) -> Result<SecretString, ProviderError> {
+        let vault_id = self.resolve_vault_id(&op_ref.vault).await?;
+        let item_id = self.resolve_item_id(&vault_id, &op_ref.item).await?;
 
         let mut api_url = self.host.clone();
         api_url.set_path(&format!("/v1/vaults/{}/items/{}", vault_id, item_id));
@@ -365,7 +407,9 @@ impl OpConnectProvider {
 
         match resp.status() {
             StatusCode::OK => {}
-            StatusCode::NOT_FOUND => return Err(ProviderError::NotFound(raw_path.to_string())),
+            StatusCode::NOT_FOUND => {
+                return Err(ProviderError::NotFound(op_ref.to_string()));
+            }
             StatusCode::UNAUTHORIZED => {
                 return Err(ProviderError::Unauthorized("invalid token".into()));
             }
@@ -381,22 +425,13 @@ impl OpConnectProvider {
 
         let target_field = fields
             .iter()
-            .find(|f| {
-                if f.id == field {
-                    return true;
-                }
-                if let Some(label) = &f.label
-                    && label == field
-                {
-                    return true;
-                }
-
-                false
-            })
-            .ok_or_else(|| ProviderError::NotFound(format!("field '{}' not found", field)))?;
+            .find(|f| f.id == op_ref.field || f.label.as_ref() == Some(&op_ref.field))
+            .ok_or_else(|| {
+                ProviderError::NotFound(format!("field '{}' not found", op_ref.field))
+            })?;
 
         let secret_value = target_field.value.as_ref().ok_or_else(|| {
-            ProviderError::NotFound(format!("field '{}' exists but has no value", field))
+            ProviderError::NotFound(format!("field '{}' exists but has no value", op_ref.field))
         })?;
 
         Ok(secret_value.clone())
@@ -405,32 +440,35 @@ impl OpConnectProvider {
 
 #[async_trait]
 impl SecretsProvider for OpConnectProvider {
-    fn accepts_key(&self, key: &str) -> bool {
-        key.starts_with("op://")
-    }
-
     async fn fetch_map(
         &self,
-        references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
+        let op_refs: Vec<&OpReference> = references
+            .iter()
+            .filter_map(|r| r.try_into().ok())
+            .collect();
+
+        if op_refs.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         // We must first resolve any vault or item names to UUIDs.
         // So we first collect all unique names, and pre-resolve them
         // into cache so that we don't need to resolve these again in the future
-        if let Err(e) = self.prewarm_cache(references).await {
+        if let Err(e) = self.prewarm_cache(&op_refs).await {
             tracing::warn!("cache pre-warm failed: {}", e);
         }
 
-        let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
-
-        let results: Vec<Result<Option<(String, SecretString)>, ProviderError>> =
-            stream::iter(refs)
-                .map(|key| async move {
-                    match self.fetch_single(&key).await {
-                        Ok(val) => Ok(Some((key, val))),
+        let results: Vec<Result<Option<(SecretReference, SecretString)>, ProviderError>> =
+            stream::iter(op_refs.into_iter().cloned())
+                .map(|op_ref| async move {
+                    match self.fetch_single(&op_ref).await {
+                        Ok(val) => Ok(Some((SecretReference::OnePassword(op_ref), val))),
                         Err(e) => Err(e),
                     }
                 })
-                .buffer_unordered(self.max_concurrent)
+                .buffer_unordered(self.max_concurrent.into_inner())
                 .collect::<Vec<_>>()
                 .await;
 
@@ -448,10 +486,4 @@ impl SecretsProvider for OpConnectProvider {
 
         Ok(map)
     }
-}
-
-fn is_uuid(s: &str) -> bool {
-    s.len() == 26
-        && s.chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }

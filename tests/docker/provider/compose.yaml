@@ -6,7 +6,7 @@ services:
       type: locket
       options:
         provider: op-connect
-        connect.token-file: /etc/tokens/connect
+        connect.token: file:/etc/tokens/connect
         connect.host: $OP_CONNECT_HOST
         env_file: locket.env
         env:
@@ -17,7 +17,7 @@ services:
       type: locket
       options:
         provider: bws
-        bws.token-file: /etc/tokens/bws
+        bws.token: file:/etc/tokens/bws
         env:
           - TEXT={{814d7d9a-54a5-47a0-afc0-b3a7015213c4}}
   demo:

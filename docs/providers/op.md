@@ -16,7 +16,7 @@ If these issues are not satisfactory, the [1password connect provider](./connect
 1. [Create a Service Account](https://developer.1password.com/docs/service-accounts/get-started#create-a-service-account)
 1. Make sure to set permissions on the service account for the Vaults that it should have access to.
 1. Store the Service Account token securely (i.e. in 1password)
-1. Authenticate locket using the service account token via `--op.token` or `--op.token-file` (or via env variables)
+1. Authenticate locket using the service account token via `--op.token` (or via env variables, supports raw token or `file:path/to/token`)
 1. If using provider mode, [install `op` cli](https://developer.1password.com/docs/cli/get-started/) dependency. 
 
 
@@ -40,7 +40,7 @@ services:
       - ./templates:/templates:ro
       - out-op:/run/secrets/locket
     command: # Or use environment variables
-      - "--op.token-file=/run/secrets/op_token"
+      - "--op.token=file:/run/secrets/op_token"
 secrets:
   op_token:
     file: /etc/tokens/op
@@ -83,7 +83,7 @@ services:
       - op-cfg:/config:rw # Mount config directory
       - /etc/passwd:/etc/passwd:ro # Mount /etc/passwd (can be a separate, stripped down version with just one user if desired)
     command:
-      - "--op.token-file=/run/secrets/op_token"
+      - "--op.token=file:/run/secrets/op_token"
 ```
 
 ## Example Provider Configuration
@@ -101,7 +101,7 @@ services:
       type: locket
       options:
         provider: op
-        op.token-file: /etc/op/token
+        op.token: file:/etc/op/token
         secrets:
           - "secret1={{ op://Mordin/SecretPassword/Test Section/text }}"
           - "secret2={{ op://Mordin/SecretPassword/Test Section/date }}"
@@ -115,4 +115,3 @@ services:
     depends_on:
       - locket
 ```
-

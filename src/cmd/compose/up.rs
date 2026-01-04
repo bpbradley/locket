@@ -1,6 +1,6 @@
 use crate::compose::ComposeMsg;
 use crate::env::EnvManager;
-use crate::provider::Provider;
+use crate::provider::{Provider, ProviderArgs};
 use crate::secrets::Secret;
 use clap::Args;
 use secrecy::ExposeSecret;
@@ -9,7 +9,7 @@ use secrecy::ExposeSecret;
 pub struct UpArgs {
     /// Provider configuration
     #[command(flatten)]
-    pub provider: Provider,
+    pub provider: ProviderArgs,
 
     /// Files containing environment variables which may contain secret references
     #[arg(
@@ -46,7 +46,7 @@ pub struct UpArgs {
 pub async fn up(project: String, args: UpArgs) -> Result<(), crate::error::LocketError> {
     ComposeMsg::info(format!("Starting project: {}", project));
 
-    let provider = args.provider.build().await?;
+    let provider = Provider::from(args.provider).build().await?;
 
     let mut secrets = Vec::with_capacity(args.env_file.len() + args.env.len());
 
@@ -58,8 +58,8 @@ pub async fn up(project: String, args: UpArgs) -> Result<(), crate::error::Locke
     let env = manager.resolve().await?;
 
     for (key, value) in env {
-        ComposeMsg::set_env(&key, value.expose_secret());
-        ComposeMsg::debug(format!("Injected secret: {}", key));
+        ComposeMsg::set_env(key.as_ref(), value.expose_secret());
+        ComposeMsg::debug(format!("Injected secret: {}", key.as_ref()));
     }
 
     Ok(())

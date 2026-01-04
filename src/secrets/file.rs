@@ -1,32 +1,32 @@
 use super::{MemSize, Secret, SecretError, SecretSource};
-use crate::path::PathExt;
+use crate::path::{AbsolutePath, CanonicalPath};
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Representation of a secret file, which contains secret references
 /// and is intended to be materialized to a specific destination path.
 #[derive(Debug, Clone)]
 pub struct SecretFile {
     source: SecretSource,
-    dest: PathBuf,
+    dest: AbsolutePath,
     max_size: MemSize,
 }
 
 impl SecretFile {
     pub fn from_file(
-        src: impl AsRef<Path>,
-        dest: impl AsRef<Path>,
+        src: CanonicalPath,
+        dest: AbsolutePath,
         max_size: MemSize,
     ) -> Result<Self, SecretError> {
         Ok(Self {
-            source: SecretSource::file(src)?,
-            dest: dest.as_ref().absolute(),
+            source: SecretSource::File(src),
+            dest,
             max_size,
         })
     }
-    pub fn from_template(label: String, template: String, root: &Path) -> Self {
+    pub fn from_template(label: String, template: String, root: &AbsolutePath) -> Self {
         let safe_name = sanitize_filename::sanitize(&label);
-        let dest = root.absolute().join(safe_name);
+        let dest = root.join(safe_name);
         Self {
             source: SecretSource::literal(label, template),
             dest,
@@ -35,7 +35,7 @@ impl SecretFile {
     }
     pub fn from_secret(
         secret: Secret,
-        root: &Path,
+        root: &AbsolutePath,
         max_size: MemSize,
     ) -> Result<Self, SecretError> {
         let (key, source) = match secret {
@@ -54,12 +54,12 @@ impl SecretFile {
                     ))
                 })?;
 
-                (filename.to_string(), source)
+                (filename.to_string().try_into()?, source)
             }
         };
 
         let safe_name = sanitize_filename::sanitize(&key);
-        let dest = root.absolute().join(safe_name);
+        let dest = root.join(safe_name);
 
         Ok(Self {
             source,
@@ -68,9 +68,10 @@ impl SecretFile {
         })
     }
 
-    pub fn dest(&self) -> &Path {
+    pub fn dest(&self) -> &AbsolutePath {
         &self.dest
     }
+
     pub fn source(&self) -> &SecretSource {
         &self.source
     }
@@ -81,7 +82,11 @@ impl SecretFile {
             .limit(self.max_size)
             .fetch()?
             .ok_or_else(|| {
-                let path = self.source.path().unwrap_or_else(|| Path::new("<unknown>"));
+                let path = self
+                    .source
+                    .path()
+                    .map(|p| p.as_ref())
+                    .unwrap_or_else(|| Path::new("<unknown>"));
                 SecretError::SourceMissing(path.to_path_buf())
             })
     }

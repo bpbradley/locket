@@ -59,7 +59,7 @@ services:
     # Configurations can be supplied via command like below, or via env variables.
     command:
         - "--provider=op-connect"
-        - "--op.token-file=/run/secrets/op_token"
+        - "--op.token=file:/run/secrets/op_token"
         - "--map=/templates:/run/secrets/locket" # Supports multiple maps, if needed.
         - "--secret=db_pass={{ op://vault/db/pass }}"
         - "--secret=db_host={{ op://vault/db/host }}"
@@ -141,7 +141,7 @@ services:
       type: locket
       options:
         provider: op-connect
-        connect.token-file: /etc/connect/token
+        connect.token: file:/etc/connect/token
         connect.host: $OP_CONNECT_HOST
         secrets:
           - "secret1={{ op://Mordin/SecretPassword/Test Section/text }}"
@@ -208,7 +208,7 @@ Simply wrap your command with `locket exec`. You can supply secrets via individu
 ```bash
 locket exec \
     --provider bws \
-    --bws.token-file /path/to/token \
+    --bws.token file:/path/to/token \
     --env .env \
     --env .env.override \
     --env MY_SECRET={{reference}}\
@@ -222,7 +222,7 @@ reference `$MY_SECRET` for example, and it will have the resolved secret availab
 ```sh
 locket exec \
   --provider bws \
-  --bws.token-file /etc/tokens/bws \
+  --bws.token file:/etc/tokens/bws \
   -e MY_SECRET={{3832b656-a93b-45ad-bdfa-b267016802c3}} \
   -- python3
 
