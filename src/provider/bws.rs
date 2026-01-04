@@ -80,8 +80,7 @@ impl BwsUrl {
     /// This is needed because the BWS SDK does not accept URLs with trailing slashes
     pub fn as_bws_string(&self) -> &str {
         let s = self.0.as_str();
-        s
-        //s.strip_suffix('/').unwrap_or(s)
+        s.strip_suffix('/').unwrap_or(s)
     }
 }
 

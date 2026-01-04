@@ -8,7 +8,6 @@
 //! and how to handle the resulting events.
 
 use crate::events::{EventHandler, FsEvent, FsEventRegistry};
-use crate::path::AbsolutePath;
 use notify::{
     Event, RecursiveMode, Result as NotifyResult, Watcher,
     event::{EventKind, ModifyKind, RenameMode},
@@ -208,14 +207,10 @@ impl<H: EventHandler> FsWatcher<H> {
     /// Map a notify Event to an FsEvent, if relevant
     fn map_fs_event(event: &Event) -> Option<FsEvent> {
         match &event.kind {
-            EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => event
-                .paths
-                .first()
-                .map(|src| FsEvent::Write(src.into())),
-            EventKind::Remove(_) => event
-                .paths
-                .first()
-                .map(|src| FsEvent::Remove(src.into())),
+            EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => {
+                event.paths.first().map(|src| FsEvent::Write(src.into()))
+            }
+            EventKind::Remove(_) => event.paths.first().map(|src| FsEvent::Remove(src.into())),
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {
                 RenameMode::Both => {
                     if let [from, to, ..] = &event.paths[..] {
@@ -228,15 +223,9 @@ impl<H: EventHandler> FsWatcher<H> {
                     }
                 }
                 // Renamed to an unknown location == Remove(X)
-                RenameMode::From => event
-                    .paths
-                    .first()
-                    .map(|src| FsEvent::Remove(src.into())),
+                RenameMode::From => event.paths.first().map(|src| FsEvent::Remove(src.into())),
                 // Renamed from an unknown location == Write(X)
-                RenameMode::To => event
-                    .paths
-                    .first()
-                    .map(|src| FsEvent::Write(src.into())),
+                RenameMode::To => event.paths.first().map(|src| FsEvent::Write(src.into())),
                 _ => None,
             },
             _ => None,

@@ -72,7 +72,6 @@ impl From<CanonicalPath> for AbsolutePath {
     }
 }
 
-
 impl From<PathBuf> for AbsolutePath {
     fn from(p: PathBuf) -> Self {
         Self::new(p)
