@@ -1,5 +1,6 @@
 use crate::compose::ComposeMsg;
 use crate::env::EnvManager;
+use crate::logging::{LogFormat, LogLevel, Logger};
 use crate::provider::{Provider, ProviderArgs};
 use crate::secrets::Secret;
 use clap::Args;
@@ -39,12 +40,17 @@ pub struct UpArgs {
     )]
     pub env: Vec<Secret>,
 
+    /// Log level
+    #[arg(long, env = "LOCKET_LOG_LEVEL", value_enum, default_value_t = LogLevel::Debug)]
+    pub log_level: LogLevel,
+
     /// Service name from Docker Compose
     #[arg(help_heading = None)]
     pub service: String,
 }
 
 pub async fn up(project: String, args: UpArgs) -> Result<(), crate::error::LocketError> {
+    Logger::new(LogFormat::Compose, args.log_level).init()?;
     info!("Starting project: {}", project);
 
     let provider = Provider::from(args.provider).build().await?;

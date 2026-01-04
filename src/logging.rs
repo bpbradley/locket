@@ -74,13 +74,18 @@ impl Logger {
         }
     }
     fn filter(&self) -> EnvFilter {
-        // Respect RUST_LOG if set
-        if let Ok(filter) = EnvFilter::try_from_default_env() {
-            return filter;
-        }
-        // Otherwise, scope to requested log level
-        let level = self.log_level.as_str();
-        let directives = format!("info,locket={}", level);
+        let requested_level = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+            // If the user provides a complex filter (e.g. "locket=debug,hyper=warn"),
+            // we trust they know what they are doing and respect it.
+            if rust_log.contains(',') || rust_log.contains('=') {
+                return EnvFilter::new(rust_log);
+            }
+            rust_log
+        } else {
+            // Fallback to CLI args
+            self.log_level.as_str().to_string()
+        };
+        let directives = format!("info,locket={}", requested_level);
         EnvFilter::new(directives)
     }
     pub fn init(&self) -> Result<(), LoggingError> {

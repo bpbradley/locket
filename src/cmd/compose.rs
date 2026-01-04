@@ -5,7 +5,6 @@
 //! This also implemented the optional `metadata` command, which allows Docker
 //! to query the provider for its capabilities.
 //! The metadata is derived from clap configuration on-demand.
-use crate::logging::{LogFormat, LogLevel, Logger};
 use clap::{Args, Subcommand};
 pub mod down;
 pub mod meta;
@@ -34,7 +33,6 @@ pub enum ComposeCommand {
 
 pub async fn compose(args: ComposeArgs) -> Result<(), crate::error::LocketError> {
     let project = args.project_name;
-    Logger::new(LogFormat::Compose, LogLevel::Info).init()?;
     match args.cmd {
         ComposeCommand::Up(args) => up::up(project, *args).await,
         ComposeCommand::Down => down::down(project).await,
