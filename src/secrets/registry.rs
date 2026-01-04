@@ -82,7 +82,7 @@ impl SecretFileRegistry {
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
             {
-                if let Err(e) = self.upsert(AbsolutePath::new(entry.path())) {
+                if let Err(e) = self.upsert(entry.path().into()) {
                     warn!("Failed to scan mapped file {:?}: {}", entry.path(), e);
                 }
             }

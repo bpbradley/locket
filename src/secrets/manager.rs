@@ -209,7 +209,11 @@ impl SecretFileManager {
             .registry
             .iter()
             .filter_map(|f| f.source().path().map(|p| AbsolutePath::from(p.clone())));
-        let mapped = self.opts.mapping.iter().map(|m| AbsolutePath::new(m.src()));
+        let mapped = self
+            .opts
+            .mapping
+            .iter()
+            .map(|m| AbsolutePath::from(m.src().clone()));
 
         pinned.chain(mapped).collect()
     }
