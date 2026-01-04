@@ -1,8 +1,11 @@
+//! Defines the Bitwarden Secrets (BWS) reference type and its parsing logic.
 use super::ReferenceParseError;
 use super::SecretReference;
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// Represents a syntactically valid Bitwarden Secrets Manager secret reference.
+/// Syntax: `<uuid>`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BwsReference(Uuid);
 

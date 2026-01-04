@@ -1,3 +1,4 @@
+//! Defines the 1Password (op) secret reference type and its parsing logic.
 use super::SecretReference;
 use percent_encoding::percent_decode_str;
 use std::str::FromStr;

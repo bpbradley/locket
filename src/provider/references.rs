@@ -1,4 +1,4 @@
-// src/secrets/references.rs
+//! Defines secret reference types and parsing logic for each supported provider.
 use std::str::FromStr;
 use thiserror::Error;
 
