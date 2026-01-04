@@ -7,6 +7,12 @@
   "ignorePaths": [
     ".github/workflows/release.yml"
   ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["rustls-webpki"],
+      "enabled": false
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
