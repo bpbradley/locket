@@ -49,7 +49,7 @@ locket run --provider bws --bws-token=file:/path/to/token \
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--connect.host` | `OP_CONNECT_HOST` |  | 1Password Connect Host HTTP(S) URL |
-| `--connect.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password Connect Token Either provide the token directly or via a file with `file:` prefix |
+| `--connect.token` | `OP_CONNECT_TOKEN` |  | 1Password Connect Token Either provide the token directly or via a file with `file:` prefix |
 | `--connect.max-concurrent` | `OP_CONNECT_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Connect API |
 ### Bitwarden Secrets Provider
 
