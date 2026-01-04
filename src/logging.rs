@@ -20,12 +20,16 @@ pub enum LogFormat {
     #[default]
     Text,
     Json,
+    #[cfg(feature = "compose")]
+    Compose,
 }
 impl LogFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             LogFormat::Text => "text",
             LogFormat::Json => "json",
+            #[cfg(feature = "compose")]
+            LogFormat::Compose => "compose",
         }
     }
 }
@@ -90,6 +94,12 @@ impl Logger {
             LogFormat::Text => tracing_subscriber::registry()
                 .with(filter)
                 .with(fmt::layer().with_target(false))
+                .try_init()
+                .map_err(LoggingError::from),
+            #[cfg(feature = "compose")]
+            LogFormat::Compose => tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt::layer().event_format(crate::compose::ComposeFormatter))
                 .try_init()
                 .map_err(LoggingError::from),
         }
