@@ -75,6 +75,16 @@ pub struct BwsConfig {
 #[derive(Debug, Clone)]
 struct BwsUrl(Url);
 
+impl BwsUrl {
+    /// Get the URL as a string, stripping any trailing slash
+    /// This is needed because the BWS SDK does not accept URLs with trailing slashes
+    pub fn as_bws_string(&self) -> &str {
+        let s = self.0.as_str();
+        s
+        //s.strip_suffix('/').unwrap_or(s)
+    }
+}
+
 impl std::str::FromStr for BwsUrl {
     type Err = ProviderError;
 
@@ -85,12 +95,13 @@ impl std::str::FromStr for BwsUrl {
 
 impl std::fmt::Display for BwsUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = self.0.as_str();
-        if let Some(stripped) = s.strip_suffix('/') {
-            write!(f, "{}", stripped)
-        } else {
-            write!(f, "{}", s)
-        }
+        write!(f, "{}", self.as_bws_string())
+    }
+}
+
+impl AsRef<str> for BwsUrl {
+    fn as_ref(&self) -> &str {
+        self.as_bws_string()
     }
 }
 
