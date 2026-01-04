@@ -3,8 +3,8 @@ use crate::{
     error::LocketError,
     events::EventHandler,
     logging::Logger,
-    process::{ProcessManager, ProcessTimeout},
-    provider::Provider,
+    process::{ProcessManager, ProcessTimeout, ShellCommand},
+    provider::{Provider, ProviderArgs},
     secrets::Secret,
     watch::{DebounceDuration, FsWatcher},
 };
@@ -78,7 +78,7 @@ pub struct ExecArgs {
 
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
-    provider: Provider,
+    provider: ProviderArgs,
 
     /// Command to execute with secrets injected into environment
     /// Must be the last argument(s), following a `--` separator.
@@ -96,7 +96,7 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
     debug!("effective config: {:#?}", args);
 
     // Initialize Provider
-    let provider = args.provider.build().await?;
+    let provider = Provider::from(args.provider).build().await?;
 
     // Initialize EnvManager
     let mut env_secrets = args.env;
@@ -105,7 +105,8 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
 
     // Initialize ProcessManager
     let interactive = args.interactive.unwrap_or(!args.watch);
-    let mut handler = ProcessManager::new(env_manager, args.cmd.clone(), interactive, args.timeout);
+    let command = ShellCommand::try_from(args.cmd)?;
+    let mut handler = ProcessManager::new(env_manager, command, interactive, args.timeout);
 
     // Initial Start
     // We must start the process at least once regardless of mode.
@@ -115,8 +116,10 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
     // Execution Mode Branch
     if args.watch {
         let watcher = FsWatcher::new(args.debounce, handler);
-
-        watcher.run().await?;
+        // Watcher gives ownership of the handler back when it exits
+        // so we can clean up properly.
+        handler = watcher.run().await?;
+        handler.cleanup().await;
         info!("watch loop terminated gracefully");
         Ok(())
     } else {

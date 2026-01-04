@@ -1,6 +1,10 @@
 use crate::{
-    events::HandlerError, health::HealthError, logging::LoggingError, provider::ProviderError,
-    secrets::SecretError, watch::WatchError,
+    events::HandlerError,
+    health::HealthError,
+    logging::LoggingError,
+    provider::{ProviderError, ReferenceParseError},
+    secrets::SecretError,
+    watch::WatchError,
 };
 use thiserror::Error;
 
@@ -11,6 +15,9 @@ pub enum LocketError {
 
     #[error(transparent)]
     Provider(#[from] ProviderError),
+
+    #[error(transparent)]
+    ReferenceParse(#[from] ReferenceParseError),
 
     #[error(transparent)]
     Watch(#[from] WatchError),
@@ -38,4 +45,11 @@ pub enum LocketError {
 
     #[error(transparent)]
     Logging(#[from] LoggingError),
+}
+
+#[cfg(feature = "compose")]
+impl From<crate::compose::MetadataError> for LocketError {
+    fn from(e: crate::compose::MetadataError) -> Self {
+        LocketError::Compose(e.into())
+    }
 }

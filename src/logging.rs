@@ -18,14 +18,22 @@ pub enum LoggingError {
 #[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
 pub enum LogFormat {
     #[default]
+    /// Plain text log format
     Text,
+    /// JSON log format
     Json,
+    #[cfg(feature = "compose")]
+    /// Special log format for Docker Compose Provider Service specification
+    Compose,
 }
+
 impl LogFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             LogFormat::Text => "text",
             LogFormat::Json => "json",
+            #[cfg(feature = "compose")]
+            LogFormat::Compose => "compose",
         }
     }
 }
@@ -70,13 +78,18 @@ impl Logger {
         }
     }
     fn filter(&self) -> EnvFilter {
-        // Respect RUST_LOG if set
-        if let Ok(filter) = EnvFilter::try_from_default_env() {
-            return filter;
-        }
-        // Otherwise, scope to requested log level
-        let level = self.log_level.as_str();
-        let directives = format!("info,locket={}", level);
+        let requested_level = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+            // If the user provides a complex filter (e.g. "locket=debug,hyper=warn"),
+            // we trust they know what they are doing and respect it.
+            if rust_log.contains(',') || rust_log.contains('=') {
+                return EnvFilter::new(rust_log);
+            }
+            rust_log
+        } else {
+            // Fallback to CLI args
+            self.log_level.as_str().to_string()
+        };
+        let directives = format!("info,locket={}", requested_level);
         EnvFilter::new(directives)
     }
     pub fn init(&self) -> Result<(), LoggingError> {
@@ -90,6 +103,12 @@ impl Logger {
             LogFormat::Text => tracing_subscriber::registry()
                 .with(filter)
                 .with(fmt::layer().with_target(false))
+                .try_init()
+                .map_err(LoggingError::from),
+            #[cfg(feature = "compose")]
+            LogFormat::Compose => tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt::layer().event_format(crate::compose::ComposeFormatter))
                 .try_init()
                 .map_err(LoggingError::from),
         }

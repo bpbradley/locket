@@ -4,7 +4,10 @@
 //!
 //! It uses the official Bitwarden SDK
 
-use crate::provider::{AuthToken, ProviderError, SecretsProvider, macros::define_auth_token};
+use super::ConcurrencyLimit;
+use super::references::{ReferenceParser, SecretReference};
+use crate::provider::references::BwsReference;
+use crate::provider::{AuthToken, ProviderError, ProviderKind, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
     Client,
@@ -17,15 +20,9 @@ use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use std::collections::HashMap;
+use std::str::FromStr;
+use url::Url;
 use uuid::Uuid;
-
-define_auth_token!(
-    struct_name: BwsToken,
-    prefix: "bws",
-    env: "BWS_MACHINE_TOKEN",
-    group_id: "bws_token",
-    doc_string: "Bitwarden Secrets Manager machine token"
-);
 
 #[derive(Args, Debug, Clone)]
 pub struct BwsConfig {
@@ -35,7 +32,7 @@ pub struct BwsConfig {
         env = "BWS_API_URL",
         default_value = "https://api.bitwarden.com"
     )]
-    pub api_url: String,
+    api_url: BwsUrl,
 
     /// Bitwarden Identity URL
     #[arg(
@@ -43,51 +40,95 @@ pub struct BwsConfig {
         env = "BWS_IDENTITY_URL",
         default_value = "https://identity.bitwarden.com"
     )]
-    pub identity_url: String,
+    identity_url: BwsUrl,
 
     /// Maximum number of concurrent requests to Bitwarden Secrets Manager
     #[arg(
         long = "bws.max-concurrent",
         env = "BWS_MAX_CONCURRENT",
-        default_value_t = 20
+        default_value_t = ConcurrencyLimit::new(20)
     )]
-    pub bws_max_concurrent: usize,
+    bws_max_concurrent: ConcurrencyLimit,
 
     /// BWS User Agent
     #[arg(
         long = "bws.user-agent",
         env = "BWS_USER_AGENT",
-        default_value = "locket"
+        default_value = env!("CARGO_PKG_NAME"),
     )]
-    pub bws_user_agent: String,
+    bws_user_agent: String,
 
-    #[command(flatten)]
-    pub token: BwsToken,
+    /// Bitwarden Machine Token
+    /// Either provide the token directly or via a file with `file:` prefix
+    #[arg(
+        long = "bws.token",
+        env = "BWS_MACHINE_TOKEN",
+        hide_env_values = true,
+        required_if_eq("provider", ProviderKind::Bws)
+    )]
+    bws_token: Option<AuthToken>,
 }
 
-impl Default for BwsConfig {
-    fn default() -> Self {
-        Self {
-            api_url: "https://api.bitwarden.com".to_string(),
-            identity_url: "https://identity.bitwarden.com".to_string(),
-            bws_max_concurrent: 20,
-            bws_user_agent: "locket".to_string(),
-            token: BwsToken::default(),
-        }
+/// BWS SDK URL wrapper
+/// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
+/// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
+#[derive(Debug, Clone)]
+struct BwsUrl(Url);
+
+impl BwsUrl {
+    /// Get the URL as a string, stripping any trailing slash
+    /// This is needed because the BWS SDK does not accept URLs with trailing slashes
+    pub fn as_bws_string(&self) -> &str {
+        let s = self.0.as_str();
+        s.strip_suffix('/').unwrap_or(s)
+    }
+}
+
+impl std::str::FromStr for BwsUrl {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(BwsUrl(Url::parse(s)?))
+    }
+}
+
+impl std::fmt::Display for BwsUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_bws_string())
+    }
+}
+
+impl AsRef<str> for BwsUrl {
+    fn as_ref(&self) -> &str {
+        self.as_bws_string()
+    }
+}
+
+impl From<Url> for BwsUrl {
+    fn from(url: Url) -> Self {
+        BwsUrl(url)
     }
 }
 
 pub struct BwsProvider {
     client: Client,
-    max_concurrent: usize,
+    max_concurrent: ConcurrencyLimit,
+}
+
+impl ReferenceParser for BwsProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        BwsReference::from_str(raw).ok().map(SecretReference::Bws)
+    }
 }
 
 impl BwsProvider {
     pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
-        let token: AuthToken = cfg.token.try_into()?;
+        let token = cfg.bws_token.ok_or_else(|| {
+            ProviderError::InvalidConfig("missing Bitwarden machine token (bws.token)".to_string())
+        })?;
         let settings = ClientSettings {
-            identity_url: cfg.identity_url,
-            api_url: cfg.api_url,
+            identity_url: cfg.identity_url.to_string(),
+            api_url: cfg.api_url.to_string(),
             user_agent: cfg.bws_user_agent,
             device_type: DeviceType::SDK,
         };
@@ -114,43 +155,44 @@ impl BwsProvider {
 
 #[async_trait]
 impl SecretsProvider for BwsProvider {
-    fn accepts_key(&self, key: &str) -> bool {
-        // BWS native reference is just a UUID.
-        // TODO: Maybe we can support a bws:// scheme as well to allow access by name?
-        Uuid::parse_str(key).is_ok()
-    }
-
     async fn fetch_map(
         &self,
-        references: &[&str],
-    ) -> Result<HashMap<String, SecretString>, ProviderError> {
+        references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
+        let refs: Vec<(SecretReference, Uuid)> = references
+            .iter()
+            .filter_map(|r| {
+                r.try_into()
+                    .ok()
+                    .map(|bws_ref: &BwsReference| (r.clone(), Uuid::from(*bws_ref)))
+            })
+            .collect();
+
+        if refs.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut map = HashMap::with_capacity(refs.len());
         let client = &self.client;
 
-        let refs: Vec<String> = references.iter().map(|s| s.to_string()).collect();
-
-        let results: Vec<Result<(String, SecretString), ProviderError>> = stream::iter(refs)
-            .map(|key| async move {
-                let id = Uuid::parse_str(&key)
-                    .map_err(|_| ProviderError::InvalidConfig(format!("invalid uuid: {}", key)))?;
-
+        let mut stream = stream::iter(refs)
+            .map(|(key, id)| async move {
                 let req = SecretGetRequest { id };
+
                 let resp = client
                     .secrets()
                     .get(&req)
                     .await
-                    .map_err(|e| ProviderError::NotFound(format!("{} ({})", key, e)))?;
+                    .map_err(|e| ProviderError::NotFound(format!("{} ({})", id, e)))?;
 
                 Ok((key, SecretString::new(resp.value.into())))
             })
-            .buffer_unordered(self.max_concurrent)
-            .collect()
-            .await;
+            .buffer_unordered(self.max_concurrent.into_inner());
 
-        let mut map = HashMap::new();
-        for res in results {
-            match res {
-                Ok((k, v)) => {
-                    map.insert(k, v);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok((key, value)) => {
+                    map.insert(key, value);
                 }
                 Err(e) => return Err(e),
             }

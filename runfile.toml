@@ -26,7 +26,7 @@ cmd = "cargo run -- exec --watch --interactive -- python3"
 
 [test]
 description = "cargo test"
-cmd = "cargo test"
+cmd = "cargo test --features testing"
 
 [fmt]
 description = "cargo fmt --all"
@@ -48,6 +48,11 @@ cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoi
 description = "Run test of docker image"
 path = "tests/docker/sidecar"
 cmd = "docker compose -f compose.tests.yaml -p tests up"
+
+[docker-provider]
+description = "Run test of docker provider"
+path = "tests/docker/provider"
+cmd = "docker compose --verbose -p provider up"
 
 [release-rc]
 description = "Create a release candidate from the current version"

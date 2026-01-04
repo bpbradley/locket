@@ -10,6 +10,13 @@ use crate::secrets::SecretError;
 use serde::Serialize;
 use std::io::Write;
 use thiserror::Error;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::fmt::{
+    FmtContext, FormatFields,
+    format::{FormatEvent, Writer},
+};
+use tracing_subscriber::registry::LookupSpan;
 
 #[derive(Debug, Error)]
 pub enum ComposeError {
@@ -28,16 +35,17 @@ pub enum ComposeError {
     #[error("Invalid Args: {0}")]
     Argument(String),
 
-    #[error("Metadata generation failed: {0}")]
-    Metadata(String),
+    #[error(transparent)]
+    Metadata(#[from] MetadataError),
 }
 
-impl ComposeError {
-    pub fn report(&self) -> sysexits::ExitCode {
-        ComposeMsg::error(self);
-        eprintln!("[ERROR] Details: {:?}", self);
-        sysexits::ExitCode::DataErr
-    }
+#[derive(Debug, Error)]
+pub enum MetadataError {
+    #[error("CLI definition missing subcommand: {0}")]
+    MissingSubcommand(String),
+
+    #[error("serialization failed: {0}")]
+    Serialization(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]
@@ -74,19 +82,57 @@ impl ComposeMsg {
         }
     }
 
-    pub fn info(msg: impl std::fmt::Display) {
-        Self::emit(MessageType::Info, msg.to_string());
-    }
-
-    pub fn debug(msg: impl std::fmt::Display) {
-        Self::emit(MessageType::Debug, msg.to_string());
-    }
-
-    pub fn error(msg: impl std::fmt::Display) {
-        Self::emit(MessageType::Error, msg.to_string());
-    }
-
     pub fn set_env(key: &str, value: &str) {
         Self::emit(MessageType::SetEnv, format!("{}={}", key, value));
+    }
+}
+
+pub struct ComposeFormatter;
+
+impl<S, N> FormatEvent<S, N> for ComposeFormatter
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        _ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> std::fmt::Result {
+        let meta = event.metadata();
+        let level = *meta.level();
+
+        let msg_type = match level {
+            Level::ERROR | Level::WARN => MessageType::Error,
+            Level::INFO => MessageType::Info,
+            _ => MessageType::Debug,
+        };
+
+        let mut message = String::new();
+        let mut visitor = MessageVisitor(&mut message);
+        event.record(&mut visitor);
+
+        let payload = ComposeResponse { msg_type, message };
+
+        let json = serde_json::to_string(&payload).map_err(|_| std::fmt::Error)?;
+        writeln!(writer, "{}", json)
+    }
+}
+
+// Helper visitor to extract the message string from the event
+struct MessageVisitor<'a>(&'a mut String);
+
+impl<'a> Visit for MessageVisitor<'a> {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            use std::fmt::Write;
+            let _ = write!(self.0, "{:?}", value);
+        }
+    }
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "message" {
+            self.0.push_str(value);
+        }
     }
 }

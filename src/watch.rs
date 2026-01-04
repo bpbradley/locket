@@ -208,24 +208,24 @@ impl<H: EventHandler> FsWatcher<H> {
     fn map_fs_event(event: &Event) -> Option<FsEvent> {
         match &event.kind {
             EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_)) => {
-                event.paths.first().map(|src| FsEvent::Write(src.clone()))
+                event.paths.first().map(|src| FsEvent::Write(src.into()))
             }
-            EventKind::Remove(_) => event.paths.first().map(|src| FsEvent::Remove(src.clone())),
+            EventKind::Remove(_) => event.paths.first().map(|src| FsEvent::Remove(src.into())),
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {
                 RenameMode::Both => {
-                    if event.paths.len() == 2 {
+                    if let [from, to, ..] = &event.paths[..] {
                         Some(FsEvent::Move {
-                            from: event.paths[0].clone(),
-                            to: event.paths[1].clone(),
+                            from: from.into(),
+                            to: to.into(),
                         })
                     } else {
                         None
                     }
                 }
                 // Renamed to an unknown location == Remove(X)
-                RenameMode::From => event.paths.first().map(|src| FsEvent::Remove(src.clone())),
+                RenameMode::From => event.paths.first().map(|src| FsEvent::Remove(src.into())),
                 // Renamed from an unknown location == Write(X)
-                RenameMode::To => event.paths.first().map(|src| FsEvent::Write(src.clone())),
+                RenameMode::To => event.paths.first().map(|src| FsEvent::Write(src.into())),
                 _ => None,
             },
             _ => None,

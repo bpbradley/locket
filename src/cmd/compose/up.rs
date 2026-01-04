@@ -1,15 +1,17 @@
 use crate::compose::ComposeMsg;
 use crate::env::EnvManager;
-use crate::provider::Provider;
+use crate::logging::{LogFormat, LogLevel, Logger};
+use crate::provider::{Provider, ProviderArgs};
 use crate::secrets::Secret;
 use clap::Args;
 use secrecy::ExposeSecret;
+use tracing::{debug, info};
 
 #[derive(Args, Debug)]
 pub struct UpArgs {
     /// Provider configuration
     #[command(flatten)]
-    pub provider: Provider,
+    pub provider: ProviderArgs,
 
     /// Files containing environment variables which may contain secret references
     #[arg(
@@ -38,15 +40,20 @@ pub struct UpArgs {
     )]
     pub env: Vec<Secret>,
 
+    /// Log level
+    #[arg(long, env = "LOCKET_LOG_LEVEL", value_enum, default_value_t = LogLevel::Debug)]
+    pub log_level: LogLevel,
+
     /// Service name from Docker Compose
     #[arg(help_heading = None)]
     pub service: String,
 }
 
 pub async fn up(project: String, args: UpArgs) -> Result<(), crate::error::LocketError> {
-    ComposeMsg::info(format!("Starting project: {}", project));
+    Logger::new(LogFormat::Compose, args.log_level).init()?;
+    info!("Starting project: {}", project);
 
-    let provider = args.provider.build().await?;
+    let provider = Provider::from(args.provider).build().await?;
 
     let mut secrets = Vec::with_capacity(args.env_file.len() + args.env.len());
 
@@ -58,8 +65,8 @@ pub async fn up(project: String, args: UpArgs) -> Result<(), crate::error::Locke
     let env = manager.resolve().await?;
 
     for (key, value) in env {
-        ComposeMsg::set_env(&key, value.expose_secret());
-        ComposeMsg::debug(format!("Injected secret: {}", key));
+        ComposeMsg::set_env(key.as_ref(), value.expose_secret());
+        debug!("Injected secret: {}", key.as_ref());
     }
 
     Ok(())

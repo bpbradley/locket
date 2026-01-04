@@ -11,7 +11,7 @@ All secrets will be collected and materialized according to configuration.
 Example:
 
 ```sh
-locket run --provider bws --bws-token-file /path/to/token \
+locket run --provider bws --bws-token=file:/path/to/token \
     --secret=/path/to/secrets.yaml \
     --secret=key=@key.pem \
     --map /templates=/run/secrets/locket
@@ -31,7 +31,7 @@ locket run --provider bws --bws-token-file /path/to/token \
 | `--file-mode` | `LOCKET_FILE_MODE` | `600` | File permission mode |
 | `--dir-mode` | `LOCKET_DIR_MODE` | `700` | Directory permission mode |
 | `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise. Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds |
-| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json` |
+| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json`, `compose` |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
 ### Provider Configuration
 
@@ -42,16 +42,14 @@ locket run --provider bws --bws-token-file /path/to/token \
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password Service Account token |
-| `--op.token-file` | `OP_SERVICE_ACCOUNT_TOKEN_FILE` |  | Path to file containing 1Password Service Account token |
+| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password token configuration Either provide the token directly or via a file with `file:` prefix |
 | `--op.config-dir` | `OP_CONFIG_DIR` |  | Optional: Path to 1Password config directory Defaults to standard op config locations if not provided, e.g. $XDG_CONFIG_HOME/op |
 ### 1Password Connect
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--connect.host` | `OP_CONNECT_HOST` |  | 1Password Connect Host HTTP(S) URL |
-| `--connect.token` | `OP_CONNECT_TOKEN` |  | 1Password Connect API token |
-| `--connect.token-file` | `OP_CONNECT_TOKEN_FILE` |  | Path to file containing 1Password Connect API token |
+| `--connect.token` | `OP_CONNECT_TOKEN` |  | 1Password Connect Token Either provide the token directly or via a file with `file:` prefix |
 | `--connect.max-concurrent` | `OP_CONNECT_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Connect API |
 ### Bitwarden Secrets Provider
 
@@ -61,5 +59,4 @@ locket run --provider bws --bws-token-file /path/to/token \
 | `--bws.identity` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
 | `--bws.max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
 | `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
-| `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Secrets Manager machine token |
-| `--bws.token-file` | `BWS_MACHINE_TOKEN_FILE` |  | Path to file containing Bitwarden Secrets Manager machine token |
+| `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Machine Token Either provide the token directly or via a file with `file:` prefix |

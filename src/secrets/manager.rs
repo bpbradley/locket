@@ -4,7 +4,7 @@
 //! managing secret files based on file-backed templates containing secret references.
 
 use crate::events::{EventHandler, FsEvent, HandlerError};
-use crate::path::{PathExt, PathMapping, parse_absolute};
+use crate::path::{AbsolutePath, CanonicalPath, PathMapping};
 use crate::provider::SecretsProvider;
 use crate::secrets::registry::SecretFileRegistry;
 use crate::secrets::{MemSize, Secret, SecretError, SecretSource, file::SecretFile};
@@ -13,8 +13,7 @@ use crate::write::FileWriter;
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use secrecy::ExposeSecret;
-use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -52,10 +51,9 @@ pub struct SecretFileOpts {
     #[arg(
         long = "out",
         env = "DEFAULT_SECRET_DIR",
-        default_value = "/run/secrets/locket",
-        value_parser = parse_absolute,
+        default_value = "/run/secrets/locket"
     )]
-    pub secret_dir: PathBuf,
+    pub secret_dir: AbsolutePath,
     #[arg(
         long = "inject-policy",
         env = "INJECT_POLICY",
@@ -93,8 +91,8 @@ impl SecretFileOpts {
         self.mapping = mapping;
         self
     }
-    pub fn with_secret_dir(mut self, dir: impl AsRef<Path>) -> Self {
-        self.secret_dir = dir.as_ref().absolute();
+    pub fn with_secret_dir(mut self, dir: AbsolutePath) -> Self {
+        self.secret_dir = dir;
         self
     }
     pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
@@ -109,20 +107,14 @@ impl SecretFileOpts {
         self.writer = writer;
         self
     }
-    pub fn resolve(&mut self) -> Result<(), SecretError> {
+    fn resolve(&mut self) -> Result<(), SecretError> {
         let mut sources = Vec::new();
         let mut destinations = Vec::new();
 
-        for m in &mut self.mapping {
-            // Enforce that all source paths exist at startup to avoid ambiguity on what this source is
-            // This should already be enforced on the user input, but we double check just in case.
-            // This will force the path to be canonicalized in a way that resolves symlinks and
-            // requires that the path exists.
-            m.resolve()?;
+        for m in &self.mapping {
             sources.push(m.src());
             destinations.push(m.dst());
         }
-        self.secret_dir = self.secret_dir.absolute();
         destinations.push(&self.secret_dir);
 
         // Check for feedback loops and self-destruct scenarios
@@ -150,8 +142,8 @@ impl SecretFileOpts {
 impl Default for SecretFileOpts {
     fn default() -> Self {
         Self {
-            mapping: vec![PathMapping::default()],
-            secret_dir: PathBuf::from("/run/secrets/locket"),
+            mapping: Vec::new(),
+            secret_dir: AbsolutePath::new("./secrets"),
             secrets: Vec::new(),
             policy: InjectFailurePolicy::CopyUnmodified,
             max_file_size: MemSize::default(),
@@ -174,11 +166,13 @@ pub struct SecretFileManager {
 
 impl SecretFileManager {
     pub fn new(
-        opts: SecretFileOpts,
+        mut opts: SecretFileOpts,
         provider: Arc<dyn SecretsProvider>,
     ) -> Result<Self, SecretError> {
         let mut pinned = Vec::new();
         let mut literals = Vec::new();
+
+        opts.resolve()?;
 
         for s in &opts.secrets {
             let f = SecretFile::from_secret(s.clone(), &opts.secret_dir, opts.max_file_size)?;
@@ -197,6 +191,8 @@ impl SecretFileManager {
             provider,
         };
 
+        manager.collisions()?;
+
         Ok(manager)
     }
 
@@ -208,73 +204,63 @@ impl SecretFileManager {
         &self.opts
     }
 
-    pub fn sources(&self) -> Vec<PathBuf> {
+    pub fn sources(&self) -> Vec<AbsolutePath> {
         let pinned = self
             .registry
             .iter()
-            .filter_map(|f| f.source().path().map(|p| p.to_path_buf()));
-
-        let mapped = self.opts.mapping.iter().map(|m| m.src().to_path_buf());
+            .filter_map(|f| f.source().path().map(|p| AbsolutePath::from(p.clone())));
+        let mapped = self
+            .opts
+            .mapping
+            .iter()
+            .map(|m| AbsolutePath::from(m.src().clone()));
 
         pinned.chain(mapped).collect()
     }
 
-    pub fn add_value(&mut self, label: &str, template: impl AsRef<str>) -> &mut Self {
-        let v = SecretFile::from_template(
-            label.to_string(),
-            template.as_ref().to_string(),
-            &self.opts.secret_dir,
-        );
-        self.literals.push(v);
-        self
-    }
-
-    pub async fn resolve(&self, file: &SecretFile) -> Result<String, SecretError> {
+    async fn resolve(&self, file: &SecretFile) -> Result<String, SecretError> {
         let f = file.clone();
         let content =
             tokio::task::spawn_blocking(move || f.content().map(|c| c.into_owned())).await??;
 
-        let tpl = Template::new(&content);
-        let keys = tpl.keys();
-        let has_keys = !keys.is_empty();
+        let tpl = Template::parse(&content, &*self.provider);
 
-        let candidates: Vec<&str> = if has_keys {
-            keys.into_iter().collect()
+        if tpl.has_secrets() {
+            let references_to_fetch = tpl.references();
+
+            info!(dst=?file.dest(), count=references_to_fetch.len(), "fetching secrets from template");
+            let secrets_map = self.provider.fetch_map(&references_to_fetch).await?;
+
+            let output = tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()));
+            Ok(output.into_owned())
         } else {
-            vec![content.trim()]
-        };
+            // Try to parse the entire trimmed content as a single reference.
+            if let Some(reference) = self.provider.parse(content.trim()) {
+                info!(dst=?file.dest(), "fetching bare secret");
 
-        let references: Vec<&str> = candidates
-            .into_iter()
-            .filter(|k| self.provider.accepts_key(k))
-            .collect();
+                let secrets_map = self
+                    .provider
+                    .fetch_map(std::slice::from_ref(&reference))
+                    .await?;
 
-        if references.is_empty() {
-            debug!(dst=?file.dest(), "no resolveable secrets found; passing through");
-            return Ok(content);
-        }
-
-        info!(dst=?file.dest(), count=references.len(), "fetching secrets");
-        let secrets_map = self.provider.fetch_map(&references).await?;
-
-        let output = if has_keys {
-            tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()))
-        } else {
-            match secrets_map.get(content.trim()) {
-                Some(val) => Cow::Borrowed(val.expose_secret()),
-                None => {
-                    warn!(dst=?file.dest(), "provider returned success but secret value was missing");
-                    Cow::Borrowed(content.as_str())
+                match secrets_map.get(&reference) {
+                    Some(val) => Ok(val.expose_secret().to_string()),
+                    None => {
+                        warn!(dst=?file.dest(), "provider returned success but secret value was missing");
+                        Ok(content) // Fallback to original content
+                    }
                 }
+            } else {
+                // Not a template and not a bare secret, so just return the original content.
+                debug!(dst=?file.dest(), "no resolvable secrets found; passing through");
+                Ok(content)
             }
-        };
-
-        Ok(output.into_owned())
+        }
     }
 
     pub async fn materialize(&self, file: &SecretFile, content: String) -> Result<(), SecretError> {
         let writer = self.opts.writer.clone();
-        let dest = file.dest().to_path_buf();
+        let dest = file.dest().clone();
         let bytes = content.into_bytes();
 
         tokio::task::spawn_blocking(move || writer.atomic_write(&dest, &bytes)).await??;
@@ -341,12 +327,12 @@ impl SecretFileManager {
         Ok(())
     }
 
-    pub fn collisions(&self) -> Result<(), SecretError> {
+    fn collisions(&self) -> Result<(), SecretError> {
         // Collect all secret destinations and label their sources
-        let mut entries: Vec<(&Path, String)> = Vec::new();
+        let mut entries: Vec<(&AbsolutePath, String)> = Vec::new();
 
         for file in self.iter_secrets() {
-            entries.push((file.dest(), format!("File({:?})", file.source().label())));
+            entries.push((file.dest(), format!("File({})", file.source().label())));
         }
 
         // Sort Lexicographically
@@ -378,8 +364,8 @@ impl SecretFileManager {
         Ok(())
     }
 
-    fn handle_remove(&mut self, src: &Path) -> Result<(), SecretError> {
-        let removed = self.registry.remove(&src.clean());
+    fn handle_remove(&mut self, src: AbsolutePath) -> Result<(), SecretError> {
+        let removed = self.registry.remove(&src);
         if removed.is_empty() {
             debug!(
                 ?src,
@@ -397,14 +383,14 @@ impl SecretFileManager {
         }
 
         // Clean up empty parent directories
-        if let Some(ceiling) = self.registry.resolve(src) {
+        if let Some(ceiling) = self.registry.resolve(src.clone()) {
             self.cleanup_parents(removed, &ceiling);
         }
 
         Ok(())
     }
 
-    fn cleanup_parents(&self, removed_files: Vec<SecretFile>, ceiling: &Path) {
+    fn cleanup_parents(&self, removed_files: Vec<SecretFile>, ceiling: &AbsolutePath) {
         let mut candidates = std::collections::HashSet::new();
         for file in removed_files {
             if let Some(parent) = file.dest().parent() {
@@ -413,13 +399,15 @@ impl SecretFileManager {
         }
 
         for dir in candidates {
-            if dir.starts_with(ceiling) && dir.exists() {
-                self.bubble_delete(dir, ceiling);
+            if let Ok(candidate) = CanonicalPath::try_new(dir)
+                && candidate.starts_with(ceiling)
+            {
+                self.bubble_delete(candidate.into(), ceiling);
             }
         }
     }
 
-    fn bubble_delete(&self, start_dir: PathBuf, ceiling: &Path) {
+    fn bubble_delete(&self, start_dir: AbsolutePath, ceiling: &AbsolutePath) {
         let mut current = start_dir;
         loop {
             if !current.starts_with(ceiling) {
@@ -428,11 +416,11 @@ impl SecretFileManager {
             // Attempt removal; stop if not empty or other error
             match std::fs::remove_dir(&current) {
                 Ok(_) => {
-                    if current == ceiling {
+                    if current == *ceiling {
                         break;
                     }
                     match current.parent() {
-                        Some(p) => current = p.to_path_buf(),
+                        Some(p) => current = p,
                         None => break,
                     }
                 }
@@ -441,11 +429,12 @@ impl SecretFileManager {
         }
     }
 
-    async fn handle_move(&mut self, old: &Path, new: &Path) -> Result<(), SecretError> {
-        let from_clean = old.clean();
-        let to_clean = new.canon().unwrap_or_else(|_| new.absolute());
-
-        if let Some((from_dst, to_dst)) = self.registry.try_rebase(&from_clean, &to_clean) {
+    async fn handle_move(
+        &mut self,
+        old: AbsolutePath,
+        new: CanonicalPath,
+    ) -> Result<(), SecretError> {
+        if let Some((from_dst, to_dst)) = self.registry.try_rebase(&old, &new.clone().into()) {
             debug!(?from_dst, ?to_dst, "attempting optimistic rename");
 
             if let Some(p) = to_dst.parent() {
@@ -457,17 +446,17 @@ impl SecretFileManager {
                     debug!(?old, ?new, "moved");
                     // Cleanup old parent dirs
                     if let Some(parent) = from_dst.parent()
-                        && let Some(ceiling) = self.registry.resolve(old)
+                        && let Some(ceiling) = self.registry.resolve(old.clone())
                         && let Some(ceil_parent) = ceiling.parent()
                     {
-                        self.bubble_delete(parent.to_path_buf(), ceil_parent);
+                        self.bubble_delete(parent, &ceil_parent);
                     }
                     return Ok(());
                 }
                 Err(e) => {
                     warn!(error=?e, "move failed; falling back to reinjection");
                     // rollback registry state
-                    self.registry.remove(&to_clean);
+                    self.registry.remove(&new.clone().into());
                     if from_dst.exists() {
                         let _ = tokio::fs::remove_file(&from_dst).await;
                     }
@@ -477,17 +466,16 @@ impl SecretFileManager {
 
         // Fallback
         debug!(?old, ?new, "fallback move via remove + write");
-        self.handle_remove(&from_clean)?;
-        self.handle_write(&to_clean).await?;
+        self.handle_remove(old)?;
+        self.handle_write(new).await?;
 
         Ok(())
     }
 
-    async fn handle_write(&mut self, src: &Path) -> Result<(), SecretError> {
-        let src = src.clean();
+    async fn handle_write(&mut self, src: CanonicalPath) -> Result<(), SecretError> {
         if src.is_dir() {
             debug!(?src, "directory write event; scanning for children");
-            let entries: Vec<PathBuf> = walkdir::WalkDir::new(src)
+            let entries: Vec<PathBuf> = walkdir::WalkDir::new(&src)
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
@@ -495,12 +483,15 @@ impl SecretFileManager {
                 .collect();
 
             for entry in entries {
-                Box::pin(self.handle_write(&entry)).await?;
+                if let Ok(canon_entry) = CanonicalPath::try_new(entry) {
+                    // Pinning is required for async recursion
+                    Box::pin(self.handle_write(canon_entry)).await?;
+                }
             }
             return Ok(());
         }
 
-        match self.registry.upsert(&src)? {
+        match self.registry.upsert(src.into())? {
             Some(file) => {
                 self.process(&file).await?;
             }
@@ -519,16 +510,35 @@ impl SecretFileManager {
 /// reflect changes in template source files to the managed secret files.
 #[async_trait]
 impl EventHandler for SecretFileManager {
-    fn paths(&self) -> Vec<PathBuf> {
+    fn paths(&self) -> Vec<AbsolutePath> {
         self.sources()
     }
 
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
         for event in events {
             let result = match event {
-                FsEvent::Write(src) => self.handle_write(&src).await,
-                FsEvent::Remove(src) => self.handle_remove(&src),
-                FsEvent::Move { from, to } => self.handle_move(&from, &to).await,
+                FsEvent::Write(src) => match src.canonicalize() {
+                    Ok(canon) => self.handle_write(canon).await,
+                    Err(e) => {
+                        debug!(?src, "write/create event for missing file; ignoring: {}", e);
+                        Ok(())
+                    }
+                },
+                FsEvent::Remove(src) => self.handle_remove(src),
+
+                FsEvent::Move { from, to } => {
+                    match to.canonicalize() {
+                        Ok(new_canon) => self.handle_move(from, new_canon).await,
+                        Err(e) => {
+                            // Moved to path is missing. Treat as a delete of old file.
+                            debug!(
+                                ?to,
+                                "move destination missing; downgrading to remove: {}", e
+                            );
+                            self.handle_remove(from)
+                        }
+                    }
+                }
             };
 
             if let Err(e) = result {
@@ -548,18 +558,18 @@ mod tests {
 
     #[test]
     fn secret_value_sanitization() {
-        let root = Path::new("/");
+        let root = AbsolutePath::new("/");
 
-        let v = SecretFile::from_template("Db_Password".to_string(), "".to_string(), root);
-        assert_eq!(v.dest(), Path::new("/Db_Password")); // absolute() call in from_template might affect this depending on platform, but logic holds
+        let v = SecretFile::from_template("Db_Password".to_string(), "".to_string(), &root);
+        assert_eq!(v.dest(), Path::new("/Db_Password"));
 
-        let v = SecretFile::from_template("A/B/C".to_string(), "".to_string(), root);
+        let v = SecretFile::from_template("A/B/C".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/ABC"));
 
-        let v = SecretFile::from_template("weird name".to_string(), "".to_string(), root);
+        let v = SecretFile::from_template("weird name".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/weird name"));
 
-        let v = SecretFile::from_template("..//--__".to_string(), "".to_string(), root);
+        let v = SecretFile::from_template("..//--__".to_string(), "".to_string(), &root);
         assert_eq!(v.dest(), Path::new("/..--__"));
     }
 

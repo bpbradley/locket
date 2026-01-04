@@ -14,7 +14,7 @@ services:
       - "--provider=op-connect"
       - "--log-level=debug"
       - "--mode=park"
-      - "--connect.token-file=/run/secrets/op_token"
+      - "--connect.token=file:/run/secrets/op_token"
       - "--secret=test_secret=op://Mordin/SecretPassword/password"
     environment:
       OP_CONNECT_HOST: $OP_CONNECT_HOST

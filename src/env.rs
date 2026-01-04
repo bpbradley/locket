@@ -5,14 +5,14 @@
 //! fetches them, and constructs a `HashMap` translating references to boxed SecretStrings,
 //! which can be exposed by the caller for process injection.
 
-use crate::provider::SecretsProvider;
-use crate::secrets::{Secret, SecretError};
+use crate::path::AbsolutePath;
+use crate::provider::{SecretReference, SecretsProvider};
+use crate::secrets::{Secret, SecretError, SecretKey};
 use crate::template::Template;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 use std::sync::Arc;
-use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnvError {
@@ -57,15 +57,15 @@ impl EnvManager {
     /// This is primarily used by the filesystem watcher to register watches
     /// on `.env` files, ensuring the process environment can be updated if the source changes.
     /// This will return all paths that were registered with the manager, even if they no longer exist.
-    pub fn files(&self) -> Vec<PathBuf> {
+    pub fn files(&self) -> Vec<AbsolutePath> {
         self.secrets
             .iter()
-            .filter_map(|s| s.source().path().map(PathBuf::from))
+            .filter_map(|s| s.source().path().map(|p| AbsolutePath::from(p.clone())))
             .collect()
     }
 
     /// Checks if a specific path is tracked by this manager.
-    pub fn tracks(&self, path: &Path) -> bool {
+    pub fn tracks(&self, path: &AbsolutePath) -> bool {
         self.files().iter().any(|p| p == path)
     }
 
@@ -75,20 +75,18 @@ impl EnvManager {
     /// This is done in two passes on the secret sources:
     /// 1. Reads all sources to build a map of raw values.
     /// 2. Scans raw values for templates, batches distinct secret keys,
-    ///    and resolves them via the provider.
+    ///    and fetches them via the provider.
     ///
     /// The resolved content is returned as a map of `{ key -> SecretString }`.
     ///
     /// # Errors
     /// Returns `EnvError` if file reading fails, parsing fails, or the provider encounters an error.
-    pub async fn resolve(&self) -> Result<HashMap<String, SecretString>, EnvError> {
+    pub async fn resolve(&self) -> Result<HashMap<SecretKey, SecretString>, EnvError> {
         let secrets = self.secrets.clone();
         let map = tokio::task::spawn_blocking(move || {
-            let mut inner = HashMap::new();
-
+            let mut inner: HashMap<SecretKey, String> = HashMap::new();
             for secret in secrets {
                 let content = secret.source().read().fetch()?;
-
                 let content = match content {
                     Some(c) => c,
                     None => continue,
@@ -99,7 +97,7 @@ impl EnvManager {
                         let cursor = std::io::Cursor::new(content.as_bytes());
                         for item in dotenvy::from_read_iter(cursor) {
                             let (k, v) = item.map_err(|e| EnvError::Parse(e.to_string()))?;
-                            inner.insert(k, v);
+                            inner.insert(k.try_into()?, v);
                         }
                     }
                     Secret::Named { key, .. } => {
@@ -107,23 +105,19 @@ impl EnvManager {
                     }
                 }
             }
-            Ok::<HashMap<String, String>, EnvError>(inner)
+            Ok::<HashMap<SecretKey, String>, EnvError>(inner)
         })
         .await??;
-        let mut references = Vec::new();
+        let mut references = HashSet::new();
 
         for v in map.values() {
-            let tpl = Template::new(v);
-            let keys = tpl.keys();
-
-            if !keys.is_empty() {
-                for key in keys {
-                    if self.provider.accepts_key(key) {
-                        references.push(key.to_string());
-                    }
+            let tpl = Template::parse(v, &*self.provider);
+            if tpl.has_secrets() {
+                for r in tpl.references() {
+                    references.insert(r);
                 }
-            } else if self.provider.accepts_key(v.trim()) {
-                references.push(v.trim().to_string());
+            } else if let Some(r) = self.provider.parse(v.trim()) {
+                references.insert(r);
             }
         }
 
@@ -131,34 +125,25 @@ impl EnvManager {
             return Ok(wrap_all(map));
         }
 
-        // Deduplicate to save provider calls
-        references.sort();
-        references.dedup();
-        let ref_strs: Vec<&str> = references.iter().map(|s| s.as_str()).collect();
+        let ref_vec: Vec<SecretReference> = references.into_iter().collect();
+        let secrets_map = self.provider.fetch_map(&ref_vec).await?;
 
-        info!(count = references.len(), "batch fetching secrets");
-        let secrets_map = self.provider.fetch_map(&ref_strs).await?;
-
-        let mut result = HashMap::with_capacity(map.len());
+        let mut result: HashMap<SecretKey, SecretString> = HashMap::with_capacity(map.len());
 
         for (k, v) in map {
-            let tpl = Template::new(&v);
+            let tpl = Template::parse(&v, &*self.provider);
 
-            if tpl.has_tags() {
-                // Render string with multiple replacements
-                let rendered =
-                    tpl.render_with(|key| secrets_map.get(key).map(|s| s.expose_secret()));
+            if tpl.has_secrets() {
+                let rendered = tpl.render_with(|k| secrets_map.get(k).map(|s| s.expose_secret()));
                 result.insert(k, SecretString::new(rendered.into_owned().into()));
-            } else if self.provider.accepts_key(v.trim()) {
-                // Direct replacement
-                if let Some(secret_val) = secrets_map.get(v.trim()) {
-                    result.insert(k, secret_val.clone());
-                } else {
-                    // Provider didn't find it, keep original
-                    result.insert(k, SecretString::new(v.into()));
-                }
             } else {
-                // No secret reference found
+                let trimmed = v.trim();
+                if let Some(r) = self.provider.parse(trimmed)
+                    && let Some(val) = secrets_map.get(&r)
+                {
+                    result.insert(k, val.clone());
+                    continue;
+                }
                 result.insert(k, SecretString::new(v.into()));
             }
         }
@@ -166,7 +151,7 @@ impl EnvManager {
     }
 }
 
-fn wrap_all(map: HashMap<String, String>) -> HashMap<String, SecretString> {
+fn wrap_all(map: HashMap<SecretKey, String>) -> HashMap<SecretKey, SecretString> {
     map.into_iter()
         .map(|(k, v)| (k, SecretString::new(v.into())))
         .collect()

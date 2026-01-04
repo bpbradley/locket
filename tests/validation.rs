@@ -1,32 +1,89 @@
-use locket::path::PathMapping;
-use locket::secrets::{SecretError, SecretFileOpts};
+use locket::path::{AbsolutePath, CanonicalPath, PathMapping};
+use locket::provider::{ProviderError, ReferenceParser, SecretReference, SecretsProvider};
+use locket::secrets::{Secret, SecretError, SecretFileManager, SecretFileOpts};
+use secrecy::SecretString;
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 use tempfile::tempdir;
 
-#[test]
-fn validate_fails_source_missing() {
-    let tmp = tempdir().unwrap();
-    let missing_src = tmp.path().join("ghost");
-    let dst = tmp.path().join("out");
+struct NoOpProvider;
 
-    let mut opts =
-        SecretFileOpts::default().with_mapping(vec![PathMapping::new(&missing_src, &dst)]);
+impl ReferenceParser for NoOpProvider {
+    fn parse(&self, _raw: &str) -> Option<SecretReference> {
+        None
+    }
+}
+
+#[async_trait::async_trait]
+impl SecretsProvider for NoOpProvider {
+    async fn fetch_map(
+        &self,
+        _references: &[SecretReference],
+    ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
+        Ok(HashMap::new())
+    }
+}
+
+#[test]
+fn collisions_structure_conflict() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // Create distinct source directories so we don't conflict on the input side
+    let src_a = tmp.path().join("src_a");
+    let src_b = tmp.path().join("src_b");
+    let output = tmp.path().join("out");
+
+    std::fs::create_dir_all(&src_a).unwrap();
+    std::fs::create_dir_all(&src_b).unwrap();
+
+    // Maps to "/out/config" (File `config`)
+    let blocker_src = src_a.join("config");
+    std::fs::write(&blocker_src, "I am a file").unwrap();
+
+    // Maps to "/out/config/nested" (Ambiguous directory `config`)
+    let blocked_src = src_b.join("nested");
+    std::fs::write(&blocked_src, "I am inside a dir").unwrap();
+
+    let opts = SecretFileOpts::default().with_mapping(vec![
+        make_mapping(blocker_src.clone(), output.join("config")),
+        make_mapping(blocked_src.clone(), output.join("config/nested")),
+    ]);
+
+    let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+
+    assert!(secrets.is_err(), "Should detect structure conflict");
     assert!(matches!(
-        opts.resolve(),
-        Err(SecretError::SourceMissing(p)) if p == missing_src
+        secrets,
+        Err(SecretError::StructureConflict { .. })
     ));
 }
 
 #[test]
-fn validate_relative_paths_are_canonicalized() {
-    let tmp = tempdir().unwrap();
-    let src = tmp.path().join("templates");
-    std::fs::create_dir_all(&src).unwrap();
-    let relative = src.join("..").join("templates");
+fn collisions_on_output_dst() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src_dir = tmp.path().join("src");
+    let out_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&src_dir).unwrap();
 
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(&relative, "out")]);
-    assert!(opts.resolve().is_ok());
-    // Verify it resolved to the absolute path
-    assert_eq!(opts.mapping[0].src(), src.as_path());
+    let file_src = src_dir.join("dup");
+    std::fs::write(&file_src, "x").unwrap();
+
+    let mut values = HashMap::new();
+    values.insert("dup".to_string(), "y".to_string());
+
+    let args: Vec<Secret> = Secret::try_from_map(values.clone()).unwrap();
+
+    let opts = SecretFileOpts::default()
+        .with_secret_dir(AbsolutePath::new(&out_dir))
+        .with_mapping(vec![make_mapping(&src_dir, &out_dir)])
+        .with_secrets(args);
+
+    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+
+    assert!(manager.is_err());
+
+    assert!(matches!(manager, Err(SecretError::Collision { .. })));
 }
 
 #[test]
@@ -37,10 +94,10 @@ fn validate_fails_loop_dst_inside_src() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
-
+    let opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
+    let manager = SecretFileManager::new(opts.clone(), Arc::new(NoOpProvider));
     assert!(matches!(
-        opts.resolve(),
+        manager,
         Err(SecretError::Loop { src: s, dst: d }) if s == src && d == dst
     ));
 }
@@ -53,10 +110,10 @@ fn validate_fails_destructive() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(&src, &dst)]);
-
+    let opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
+    let manager = SecretFileManager::new(opts.clone(), Arc::new(NoOpProvider));
     assert!(matches!(
-        opts.resolve(),
+        manager,
         Err(SecretError::Destructive { src: s, dst: d }) if s == src && d == dst
     ));
 }
@@ -70,12 +127,14 @@ fn validate_fails_value_dir_loop() {
     let dst = tmp.path().join("safe_out");
     let bad_value_dir = src.join("values");
 
-    let mut opts = SecretFileOpts::default()
-        .with_mapping(vec![PathMapping::new(&src, &dst)])
-        .with_secret_dir(bad_value_dir.clone());
+    let opts = SecretFileOpts::default()
+        .with_mapping(vec![make_mapping(&src, &dst)])
+        .with_secret_dir(AbsolutePath::new(&bad_value_dir));
+
+    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
 
     assert!(matches!(
-        opts.resolve(),
+        manager,
         Err(SecretError::Loop { src: s, dst: d }) if s == src && d == bad_value_dir
     ));
 }
@@ -88,7 +147,16 @@ fn validate_succeeds_valid_config() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let mut opts = SecretFileOpts::default().with_mapping(vec![PathMapping::new(src, dst)]);
+    let opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
+    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
 
-    assert!(opts.resolve().is_ok());
+    assert!(manager.is_ok());
+}
+
+fn make_mapping(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> PathMapping {
+    PathMapping::try_new(
+        CanonicalPath::try_new(src).expect("test source must exist"),
+        AbsolutePath::new(dst),
+    )
+    .expect("mapping creation failed")
 }

@@ -6,7 +6,7 @@
 //! It also handles the low-level "reading" mechanics via `SecretSource` and `SourceReader`,
 //! ensuring that file reads are memory-limited.
 
-use crate::path::PathExt;
+use crate::path::CanonicalPath;
 use crate::provider::ProviderError;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -61,6 +61,57 @@ pub enum SecretError {
 
     #[error("parse error: {0}")]
     Parse(String),
+
+    #[error("file write error: {0}")]
+    Write(#[from] crate::write::WriterError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct SecretKey(String);
+
+impl TryFrom<String> for SecretKey {
+    type Error = SecretError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+
+        if trimmed.is_empty() {
+            return Err(SecretError::Parse("Secret key cannot be empty".to_string()));
+        }
+
+        if trimmed.contains('=') {
+            return Err(SecretError::Parse(
+                "Secret key cannot contain '=' character".to_string(),
+            ));
+        }
+
+        if trimmed.contains('\0') {
+            return Err(SecretError::Parse(
+                "Secret key cannot contain null bytes".to_string(),
+            ));
+        }
+
+        // Store the trimmed version
+        Ok(SecretKey(trimmed.to_string()))
+    }
+}
+
+impl AsRef<str> for SecretKey {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<SecretKey> for String {
+    fn from(val: SecretKey) -> Self {
+        val.0
+    }
+}
+
+impl From<&SecretKey> for String {
+    fn from(val: &SecretKey) -> Self {
+        val.0.clone()
+    }
 }
 
 /// The primitive definition of a secret, which is ultimately responsible for holding
@@ -85,7 +136,10 @@ pub enum Secret {
     /// A named secret with an explicit key.
     ///
     /// Input format: `"KEY=VALUE"` or `"KEY=@path/to/file"`
-    Named { key: String, source: SecretSource },
+    Named {
+        key: SecretKey,
+        source: SecretSource,
+    },
 }
 
 impl Secret {
@@ -100,7 +154,10 @@ impl Secret {
             SecretSource::literal(&key, val)
         };
 
-        Ok(Self::Named { key, source })
+        Ok(Self::Named {
+            key: key.try_into()?,
+            source,
+        })
     }
 
     /// Creates an Anonymous secret from a file path.
@@ -136,7 +193,7 @@ impl FromStr for Secret {
             };
 
             return Ok(Self::Named {
-                key: key.to_string(),
+                key: key.to_string().try_into()?,
                 source,
             });
         }
@@ -153,7 +210,7 @@ impl FromStr for Secret {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretSource {
     /// Template loaded from a file path on disk.
-    File(PathBuf),
+    File(CanonicalPath),
     /// Template provided as a raw string literal.
     Literal {
         label: Option<String>,
@@ -167,8 +224,7 @@ impl SecretSource {
     /// # Errors
     /// Returns error if the path cannot be canonicalized (does not exist).
     pub fn file(path: impl AsRef<Path>) -> Result<Self, SecretError> {
-        let canon = path.as_ref().canon()?;
-        Ok(Self::File(canon))
+        Ok(Self::File(CanonicalPath::try_new(path)?))
     }
 
     /// Create a source from a string literal.
@@ -198,7 +254,7 @@ impl SecretSource {
     }
 
     /// If the source is a file, returns its path.
-    pub fn path(&self) -> Option<&Path> {
+    pub fn path(&self) -> Option<&CanonicalPath> {
         match self {
             SecretSource::File(p) => Some(p),
             SecretSource::Literal { .. } => None,
@@ -231,7 +287,7 @@ impl<'a> SourceReader<'a> {
                 Ok(meta) => {
                     if meta.len() > self.max_size.bytes {
                         return Err(SecretError::SourceTooLarge {
-                            path: path.clone(),
+                            path: path.to_path_buf(),
                             size: meta.len(),
                             limit: self.max_size.bytes,
                         });
