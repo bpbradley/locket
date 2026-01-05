@@ -11,10 +11,11 @@ All secrets will be collected and materialized according to configuration.
 Example:
 
 ```sh
-locket inject --provider bws --bws-token=file:/path/to/token \
-    --secret=/path/to/secrets.yaml \
-    --secret=key=@key.pem \
-    --map /templates=/run/secrets/locket
+locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS provider
+    --out /run/secrets/locket \ # Output directory for materialized secrets
+    --secret=/path/to/secrets.yaml \ # An anonymous secret file, will be placed in /run/secrets/locket/secrets.yaml
+    --secret=key=@key.pem \ # A named secret file, will be placed in /run/secrets/locket/key.pem
+    --map ./tpl:/run/secrets/locket/mapped \ # Maps all templates in `./tpl/` directory to secrets in `/run/secrets/locket/mapped`
 ```
 
 ### Options
