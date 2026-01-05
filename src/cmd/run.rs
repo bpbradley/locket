@@ -13,9 +13,9 @@ use tracing::{debug, error, info};
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
 pub enum RunMode {
     #[default]
-    /// Collect and materialize all secrets once and then exit
+    /// **CLI Default** Collect and materialize all secrets once and then exit
     OneShot,
-    /// Continuously watch for changes on configured templates and update secrets as needed
+    /// **Docker Default** Continuously watch for changes on configured templates and update secrets as needed
     Watch,
     /// Run once and then park to keep the process alive
     Park,
@@ -24,10 +24,14 @@ pub enum RunMode {
 #[derive(Args, Debug)]
 pub struct RunArgs {
     /// Mode of operation
-    #[arg(long = "mode", env = "LOCKET_RUN_MODE", value_enum, default_value_t = RunMode::Watch)]
+    #[arg(long = "mode", env = "LOCKET_RUN_MODE", value_enum, default_value_t)]
     pub mode: RunMode,
 
-    /// Status file path used for healthchecks
+    /// Status file path used for healthchecks.
+    ///
+    /// If not provided, no status file is created.
+    ///
+    /// **Docker Default:** `/dev/shm/locket/ready`
     #[arg(
         long = "status-file",
         env = "LOCKET_STATUS_FILE",
@@ -39,9 +43,12 @@ pub struct RunArgs {
     pub manager: SecretFileOpts,
 
     /// Debounce duration for filesystem events in watch mode.
+    /// 
     /// Events occurring within this duration will be coalesced into a single update
     /// so as to not overwhelm the secrets manager with rapid successive updates from
-    /// filesystem noise. Handles human-readable strings like "100ms", "2s", etc.
+    /// filesystem noise. 
+    /// 
+    /// Handles human-readable strings like "100ms", "2s", etc.
     /// Unitless numbers are interpreted as milliseconds.
     #[arg(long, env = "WATCH_DEBOUNCE", default_value_t = DebounceDuration::default())]
     debounce: DebounceDuration,

@@ -12,4 +12,4 @@ Exits with code 0 if all known secrets are materialized, otherwise exits with no
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--status-file` | `LOCKET_STATUS_FILE` | `/tmp/.locket/ready` | Status file path used for healthchecks |
+| `--status-file` | `LOCKET_STATUS_FILE` | `/dev/shm/locket/ready` | Status file path used for healthchecks |

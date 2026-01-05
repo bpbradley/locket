@@ -21,16 +21,16 @@ locket run --provider bws --bws-token=file:/path/to/token \
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--mode` | `LOCKET_RUN_MODE` | `watch` | Mode of operation <br> **Choices:** `one-shot`, `watch`, `park` |
-| `--status-file` | `LOCKET_STATUS_FILE` | `/tmp/.locket/ready` | Status file path used for healthchecks |
-| `--map` | `SECRET_MAP` | `/templates:/run/secrets/locket` | Mapping of source paths (holding secret templates) to destination paths (where secrets are materialized and reflected) in the form `SRC:DST` or `SRC=DST`. Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments. e.g. `--map /templates:/run/secrets/locket/app --map /other_templates:/run/secrets/locket/other` |
-| `--secret` | `LOCKET_SECRETS` |  | Additional secret values specified as LABEL=SECRET_TEMPLATE Multiple values can be provided, separated by commas. Or supplied multiple times as arguments. Loading from file is supported via `LABEL=@/path/to/file`. e.g. `--secret db_password={{op://..}} --secret api_key={{op://..}}` |
+| `--mode` | `LOCKET_RUN_MODE` | `one-shot` | Mode of operation <br> **Choices:** `one-shot`, `watch`, `park` |
+| `--status-file` | `LOCKET_STATUS_FILE` |  | Status file path used for healthchecks.<br><br>If not provided, no status file is created.<br><br>**Docker Default:** `/dev/shm/locket/ready` |
+| `--map` | `SECRET_MAP` |  | Mapping of source paths to destination paths.<br><br>Maps sources (holding secret templates) to destination paths (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.<br><br>Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments.<br><br>Example: `--map /templates:/run/secrets/app`<br><br>**CLI Default:** None **Docker Default:** `/templates:/run/secrets/locket` |
+| `--secret` | `LOCKET_SECRETS` |  | Additional secret values specified as LABEL=SECRET_TEMPLATE<br><br>Multiple values can be provided, separated by commas. Or supplied multiple times as arguments.<br><br>Loading from file is supported via `LABEL=@/path/to/file`. Example: `--secret db_password={{op://..}} --secret api_key={{op://..}}` |
 | `--out` | `DEFAULT_SECRET_DIR` | `/run/secrets/locket` | Directory where secret values (literals) are materialized |
 | `--inject-policy` | `INJECT_POLICY` | `copy-unmodified` | Policy for handling injection failures <br> **Choices:** `error`, `copy-unmodified`, `ignore` |
-| `--max-file-size` | `MAX_FILE_SIZE` | `10M` | Maximum allowable size for a template file. Files larger than this will be rejected. Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes) |
+| `--max-file-size` | `MAX_FILE_SIZE` | `10M` | Maximum allowable size for a template file. Files larger than this will be rejected.<br><br>Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes). |
 | `--file-mode` | `LOCKET_FILE_MODE` | `600` | File permission mode |
 | `--dir-mode` | `LOCKET_DIR_MODE` | `700` | Directory permission mode |
-| `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode. Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise. Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds |
+| `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode.<br><br>Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise.<br><br>Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds. |
 | `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br> **Choices:** `text`, `json`, `compose` |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
 ### Provider Configuration
