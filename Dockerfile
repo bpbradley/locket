@@ -1,4 +1,4 @@
-ARG RUST_TAG=1.91-alpine3.22
+ARG RUST_TAG=1.92-alpine3.22
 FROM rust:${RUST_TAG} AS build
 WORKDIR /src
 RUN apk add --no-cache musl-dev build-base pkgconfig \
@@ -13,7 +13,7 @@ RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
   --no-default-features --features "${FEATURES}" \
  && strip target/x86_64-unknown-linux-musl/release/locket
 
-FROM alpine:3.22 AS rootfs
+FROM alpine:3.23 AS rootfs
 RUN addgroup -g 65532 nonroot \
  && adduser -D -H -u 65532 -G nonroot nonroot
 
@@ -61,7 +61,7 @@ HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
   CMD ["locket","healthcheck"]
 ENTRYPOINT ["locket","run"]
 
-FROM alpine:3.22 AS opstage
+FROM alpine:3.23 AS opstage
 ARG OP_VERSION=2.32.0
 RUN set -eux; \
     apk add --no-cache ca-certificates wget; \
@@ -85,7 +85,7 @@ COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 
 # Debug image with full distro, extra tools, and shell access
-FROM alpine:3.22 AS debug
+FROM alpine:3.23 AS debug
 LABEL org.opencontainers.image.title="locket (debug)"
 
 RUN apk add --no-cache bash curl vim tree strace jq coreutils
