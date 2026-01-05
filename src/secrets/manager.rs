@@ -30,7 +30,7 @@ pub struct SecretFileOpts {
     /// Example: `--map /templates:/run/secrets/app`
     ///
     /// **CLI Default:** No mappings
-    /// **Docker Default:** `/templates:/run/secrets/locket`
+    /// {n}**Docker Default:** `/templates:/run/secrets/locket`
     #[arg(
         long = "map",
         env = "SECRET_MAP",

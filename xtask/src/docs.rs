@@ -220,12 +220,9 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
         .map(|s| s.to_string())
         .unwrap_or_default();
     let mut help = help_msg
-        .replace("\n\n", "<br><br>") // Preserve paragraph breaks
-        .replace("\n- ", "<br>- ") // Preserve list breaks
-        .replace("\n* ", "<br>* ") // Preserve list breaks
-        .replace("\n**", "<br>**") // Preserve bold breaks
-        .replace("\n", " "); // Turn source-wrapping into spaces
-
+        .replace("{n}", "<br>")
+        .replace("\n", "<br>"); // Preserve line breaks in markdown tables
+    
     let possible_values = arg.get_possible_values();
     if !possible_values.is_empty() {
         let values_list: Vec<_> = possible_values
