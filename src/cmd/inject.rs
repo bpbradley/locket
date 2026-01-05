@@ -13,9 +13,9 @@ use tracing::{debug, error, info};
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
 pub enum InjectMode {
     #[default]
-    /// **CLI Default** Collect and materialize all secrets once and then exit
+    /// **Default** Materialize all secrets once and exit
     OneShot,
-    /// **Docker Default** Continuously watch for changes on configured templates and update secrets as needed
+    /// **Docker Default** Watch for changes on templates and reinject
     Watch,
     /// Inject once and then park to keep the process alive
     Park,

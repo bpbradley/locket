@@ -91,12 +91,12 @@ pub struct SecretFileOpts {
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum InjectFailurePolicy {
-    /// Injection failures are treated as errors and will abort the process
+    /// Failures are treated as errors and will abort the process
     Error,
-    /// On injection failure, copy the unmodified secret to destination
+    /// On failure, copy the unmodified secret to destination
     #[default]
     CopyUnmodified,
-    /// On injection failure, just log a warning and proceed with the secret ignored
+    /// On failure, ignore the secret and log a warning
     Ignore,
 }
 
