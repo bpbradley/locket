@@ -22,7 +22,7 @@ locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS 
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--mode` | `LOCKET_RUN_MODE` | `one-shot` | Mode of operation <br> **Choices:** `one-shot`, `watch`, `park` |
+| `--mode` | `LOCKET_INJECT_MODE` | `one-shot` | Mode of operation <br> **Choices:** `one-shot`, `watch`, `park` |
 | `--status-file` | `LOCKET_STATUS_FILE` |  | Status file path used for healthchecks.<br><br>If not provided, no status file is created.<br><br>**Docker Default:** `/dev/shm/locket/ready` |
 | `--map` | `SECRET_MAP` |  | Mapping of source paths to destination paths.<br><br>Maps sources (holding secret templates) to destination paths (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.<br><br>Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments.<br><br>Example: `--map /templates:/run/secrets/app`<br><br>**CLI Default:** No mappings <br>**Docker Default:** `/templates:/run/secrets/locket` |
 | `--secret` | `LOCKET_SECRETS` |  | Additional secret values specified as LABEL=SECRET_TEMPLATE<br><br>Multiple values can be provided, separated by commas. Or supplied multiple times as arguments.<br><br>Loading from file is supported via `LABEL=@/path/to/file`.<br><br>Example:<br><br>``` --secret db_password={{op://..}} --secret api_key={{op://..}} ``` |

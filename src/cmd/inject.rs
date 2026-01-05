@@ -24,7 +24,7 @@ pub enum InjectMode {
 #[derive(Args, Debug)]
 pub struct InjectArgs {
     /// Mode of operation
-    #[arg(long = "mode", env = "LOCKET_RUN_MODE", value_enum, default_value_t)]
+    #[arg(long = "mode", env = "LOCKET_INJECT_MODE", value_enum, default_value_t)]
     pub mode: InjectMode,
 
     /// Status file path used for healthchecks.
