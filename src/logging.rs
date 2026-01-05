@@ -23,7 +23,7 @@ pub enum LogFormat {
     /// JSON log format
     Json,
     #[cfg(feature = "compose")]
-    /// Special log format for Docker Compose Provider Service specification
+    /// Special format for Docker Compose Provider specification
     Compose,
 }
 

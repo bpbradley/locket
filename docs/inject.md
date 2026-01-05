@@ -32,7 +32,7 @@ locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS 
 | `--file-mode` | `LOCKET_FILE_MODE` | `600` | File permission mode |
 | `--dir-mode` | `LOCKET_DIR_MODE` | `700` | Directory permission mode |
 | `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode.<br><br>Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise.<br><br>Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds. |
-| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br><br> **Choices:**<br>- `text`: Plain text log format<br>- `json`: JSON log format<br>- `compose`: Special log format for Docker Compose Provider Service specification |
+| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br><br> **Choices:**<br>- `text`: Plain text log format<br>- `json`: JSON log format<br>- `compose`: Special format for Docker Compose Provider specification |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
 ### Provider Configuration
 
