@@ -29,7 +29,7 @@ pub struct SecretFileOpts {
     ///
     /// Example: `--map /templates:/run/secrets/app`
     ///
-    /// **CLI Default:** None
+    /// **CLI Default:** No mappings
     /// **Docker Default:** `/templates:/run/secrets/locket`
     #[arg(
         long = "map",
@@ -45,6 +45,7 @@ pub struct SecretFileOpts {
     /// Or supplied multiple times as arguments.
     ///
     /// Loading from file is supported via `LABEL=@/path/to/file`.
+    /// 
     /// Example: `--secret db_password={{op://..}} --secret api_key={{op://..}}`
     #[arg(
         long = "secret",

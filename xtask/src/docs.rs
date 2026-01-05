@@ -221,6 +221,9 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
         .unwrap_or_default();
     let mut help = help_msg
         .replace("\n\n", "<br><br>") // Preserve paragraph breaks
+        .replace("\n- ", "<br>- ") // Preserve list breaks
+        .replace("\n* ", "<br>* ") // Preserve list breaks
+        .replace("\n**", "<br>**") // Preserve bold breaks
         .replace("\n", " "); // Turn source-wrapping into spaces
 
     let possible_values = arg.get_possible_values();
