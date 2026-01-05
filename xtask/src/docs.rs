@@ -219,10 +219,8 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
         .or_else(|| arg.get_help()) // Fallback to short help if no long help exists
         .map(|s| s.to_string())
         .unwrap_or_default();
-    let mut help = help_msg
-        .replace("{n}", "<br>")
-        .replace("\n", "<br>"); // Preserve line breaks in markdown tables
-    
+    let mut help = help_msg.replace("{n}", "<br>").replace("\n", "<br>"); // Preserve line breaks in markdown tables
+
     let possible_values = arg.get_possible_values();
     if !possible_values.is_empty() {
         let values_list: Vec<_> = possible_values

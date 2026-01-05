@@ -45,8 +45,13 @@ pub struct SecretFileOpts {
     /// Or supplied multiple times as arguments.
     ///
     /// Loading from file is supported via `LABEL=@/path/to/file`.
+    ///
+    /// Example: 
     /// 
-    /// Example: `--secret db_password={{op://..}} --secret api_key={{op://..}}`
+    /// ```
+    ///     --secret db_password={{op://..}} 
+    ///     --secret api_key={{op://..}}
+    /// ```
     #[arg(
         long = "secret",
         env = "LOCKET_SECRETS",
