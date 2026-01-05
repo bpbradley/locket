@@ -4,8 +4,8 @@
 //! which is created when all secrets have been successfully materialized.
 //! If the file is absent, the sidecar is considered unhealthy.
 use crate::path::AbsolutePath;
-use thiserror::Error;
 use std::str::FromStr;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum HealthError {

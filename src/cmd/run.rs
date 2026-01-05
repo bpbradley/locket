@@ -32,10 +32,7 @@ pub struct RunArgs {
     /// If not provided, no status file is created.
     ///
     /// **Docker Default:** `/dev/shm/locket/ready`
-    #[arg(
-        long = "status-file",
-        env = "LOCKET_STATUS_FILE",
-    )]
+    #[arg(long = "status-file", env = "LOCKET_STATUS_FILE")]
     pub status_file: Option<StatusFile>,
 
     /// Secret Management Configuration
@@ -43,11 +40,11 @@ pub struct RunArgs {
     pub manager: SecretFileOpts,
 
     /// Debounce duration for filesystem events in watch mode.
-    /// 
+    ///
     /// Events occurring within this duration will be coalesced into a single update
     /// so as to not overwhelm the secrets manager with rapid successive updates from
-    /// filesystem noise. 
-    /// 
+    /// filesystem noise.
+    ///
     /// Handles human-readable strings like "100ms", "2s", etc.
     /// Unitless numbers are interpreted as milliseconds.
     #[arg(long, env = "WATCH_DEBOUNCE", default_value_t = DebounceDuration::default())]

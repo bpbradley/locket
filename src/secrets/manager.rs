@@ -21,14 +21,14 @@ use tracing::{debug, info, warn};
 pub struct SecretFileOpts {
     /// Mapping of source paths to destination paths.
     ///
-    /// Maps sources (holding secret templates) to destination paths 
+    /// Maps sources (holding secret templates) to destination paths
     /// (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.
     ///
-    /// Multiple mappings can be provided, separated by commas, or supplied 
+    /// Multiple mappings can be provided, separated by commas, or supplied
     /// multiple times as arguments.
     ///
     /// Example: `--map /templates:/run/secrets/app`
-    /// 
+    ///
     /// **CLI Default:** None
     /// **Docker Default:** `/templates:/run/secrets/locket`
     #[arg(
@@ -40,10 +40,10 @@ pub struct SecretFileOpts {
     pub mapping: Vec<PathMapping>,
 
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
-    /// 
+    ///
     /// Multiple values can be provided, separated by commas.
     /// Or supplied multiple times as arguments.
-    /// 
+    ///
     /// Loading from file is supported via `LABEL=@/path/to/file`.
     /// Example: `--secret db_password={{op://..}} --secret api_key={{op://..}}`
     #[arg(
@@ -73,7 +73,7 @@ pub struct SecretFileOpts {
     pub policy: InjectFailurePolicy,
 
     /// Maximum allowable size for a template file. Files larger than this will be rejected.
-    /// 
+    ///
     /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
     #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = MemSize::default().to_string())]
     pub max_file_size: MemSize,

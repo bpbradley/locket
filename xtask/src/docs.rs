@@ -214,11 +214,14 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
         "".to_string()
     };
 
-    let help_msg = arg.get_long_help()
-    .or_else(|| arg.get_help()) // Fallback to short help if no long help exists
-    .map(|s| s.to_string())
-    .unwrap_or_default();
-    let mut help = help_msg.replace("\n\n", "<br><br>").replace("\n", " ");
+    let help_msg = arg
+        .get_long_help()
+        .or_else(|| arg.get_help()) // Fallback to short help if no long help exists
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let mut help = help_msg
+        .replace("\n\n", "<br><br>") // Preserve paragraph breaks
+        .replace("\n", " "); // Turn source-wrapping into spaces
 
     let possible_values = arg.get_possible_values();
     if !possible_values.is_empty() {
