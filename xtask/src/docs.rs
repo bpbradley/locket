@@ -214,16 +214,32 @@ fn write_arg_row(writer: &mut impl Write, arg: &Arg) -> io::Result<()> {
         "".to_string()
     };
 
-    let help_msg = arg.get_help().map(|s| s.to_string()).unwrap_or_default();
-    let mut help = help_msg.replace("\n", " ");
+    let help_msg = arg
+        .get_long_help()
+        .or_else(|| arg.get_help()) // Fallback to short help if no long help exists
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let mut help = help_msg.replace("{n}", "<br>").replace("\n", "<br>"); // Preserve line breaks in markdown tables
 
     let possible_values = arg.get_possible_values();
     if !possible_values.is_empty() {
-        let values_list: Vec<_> = possible_values
+        let values_list: Vec<String> = possible_values
             .iter()
-            .map(|v| format!("`{}`", v.get_name()))
+            .map(|v| {
+                let name = v.get_name();
+                match v.get_help() {
+                    Some(h) => {
+                        format!("- `{}`: {}", name, h)
+                    }
+                    None => format!("- `{}`", name),
+                }
+            })
             .collect();
-        help = format!("{} <br> **Choices:** {}", help, values_list.join(", "));
+        help = format!(
+            "{} <br><br> **Choices:**<br>{}",
+            help,
+            values_list.join("<br>")
+        );
     }
 
     writeln!(writer, "| {} | {} | {} | {} |", flag, env, default, help)?;

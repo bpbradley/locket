@@ -23,7 +23,7 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br> **Choices:** `op`, `op-connect`, `bws` |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider |
 | `--env-file` | `LOCKET_ENV_FILE` |  | Files containing environment variables which may contain secret references |
 | `--env` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
 | `<service>` |  |  | Service name from Docker Compose |
@@ -31,14 +31,14 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password token configuration Either provide the token directly or via a file with `file:` prefix |
-| `--op.config-dir` | `OP_CONFIG_DIR` |  | Optional: Path to 1Password config directory Defaults to standard op config locations if not provided, e.g. $XDG_CONFIG_HOME/op |
+| `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password Service Account Token<br><br>Either provide the token directly or via a file with `file:` prefix |
+| `--op.config-dir` | `OP_CONFIG_DIR` |  | Optional: Path to 1Password config directory<br><br>Defaults to standard op config locations if not provided, e.g. `$XDG_CONFIG_HOME/op` |
 ### 1Password Connect
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--connect.host` | `OP_CONNECT_HOST` |  | 1Password Connect Host HTTP(S) URL |
-| `--connect.token` | `OP_CONNECT_TOKEN` |  | 1Password Connect Token Either provide the token directly or via a file with `file:` prefix |
+| `--connect.token` | `OP_CONNECT_TOKEN` |  | 1Password Connect Token<br><br>Either provide the token directly or via a file with `file:` prefix |
 | `--connect.max-concurrent` | `OP_CONNECT_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Connect API |
 ### Bitwarden Secrets Provider
 
@@ -48,8 +48,8 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | `--bws.identity` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
 | `--bws.max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
 | `--bws.user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
-| `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Machine Token Either provide the token directly or via a file with `file:` prefix |
-| `--log-level` | `LOCKET_LOG_LEVEL` | `debug` | Log level <br> **Choices:** `trace`, `debug`, `info`, `warn`, `error` |
+| `--bws.token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Machine Token<br><br>Either provide the token directly or via a file with `file:` prefix |
+| `--log-level` | `LOCKET_LOG_LEVEL` | `debug` | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
 
 ---
 

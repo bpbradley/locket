@@ -1,3 +1,6 @@
+# syntax=docker/dockerfile:1
+# check=skip=SecretsUsedInArgOrEnv
+
 ARG RUST_TAG=1.92-alpine3.22
 FROM rust:${RUST_TAG} AS build
 WORKDIR /src
@@ -36,6 +39,9 @@ LABEL org.opencontainers.image.title="locket (base)"
 
 ARG DEFAULT_PROVIDER
 ENV SECRETS_PROVIDER=${DEFAULT_PROVIDER}
+ENV LOCKET_STATUS_FILE=/dev/shm/locket/ready
+ENV SECRET_MAP=/templates:/run/secrets/locket
+ENV LOCKET_INJECT_MODE=watch
 
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
@@ -59,7 +65,7 @@ USER nonroot:nonroot
 VOLUME ["/run/secrets/locket", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
   CMD ["locket","healthcheck"]
-ENTRYPOINT ["locket","run"]
+ENTRYPOINT ["locket","inject"]
 
 FROM alpine:3.23 AS opstage
 ARG OP_VERSION=2.32.0

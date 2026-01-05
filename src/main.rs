@@ -14,7 +14,7 @@ use exits::LocketExitCode;
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let result: Result<(), LocketError> = match cli.cmd {
-        Command::Run(args) => cmd::run(*args).await,
+        Command::Inject(args) => cmd::inject(*args).await,
         #[cfg(feature = "exec")]
         Command::Exec(args) => cmd::exec(*args).await,
         Command::Healthcheck(args) => cmd::healthcheck(args),

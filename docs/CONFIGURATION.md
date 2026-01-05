@@ -1,7 +1,7 @@
 # locket 0.15.0 -- Configuration Reference
 ## Commands
 
-- [`run`](./run.md) - Start the secret sidecar agent.
+- [`inject`](./inject.md) - Start the secret sidecar agent.
 All secrets will be collected and materialized according to configuration.
 - [`exec`](./exec.md) - Execute a command with secrets injected into the process environment.
 - [`healthcheck`](./healthcheck.md) - Checks the health of the sidecar agent, determined by the state of materialized secrets.

@@ -19,25 +19,39 @@ use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Args)]
 pub struct SecretFileOpts {
-    /// Mapping of source paths (holding secret templates)
-    /// to destination paths (where secrets are materialized and reflected)
-    /// in the form `SRC:DST` or `SRC=DST`. Multiple mappings can be
-    /// provided, separated by commas, or supplied multiple times as arguments.
-    /// e.g. `--map /templates:/run/secrets/locket/app --map /other_templates:/run/secrets/locket/other`
+    /// Mapping of source paths to destination paths.
+    ///
+    /// Maps sources (holding secret templates) to destination paths
+    /// (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.
+    ///
+    /// Multiple mappings can be provided, separated by commas, or supplied
+    /// multiple times as arguments.
+    ///
+    /// Example: `--map /templates:/run/secrets/app`
+    ///
+    /// **CLI Default:** No mappings
+    /// {n}**Docker Default:** `/templates:/run/secrets/locket`
     #[arg(
         long = "map",
         env = "SECRET_MAP",
         value_delimiter = ',',
-        default_value = "/templates:/run/secrets/locket",
         hide_env_values = true
     )]
     pub mapping: Vec<PathMapping>,
 
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
+    ///
     /// Multiple values can be provided, separated by commas.
     /// Or supplied multiple times as arguments.
+    ///
     /// Loading from file is supported via `LABEL=@/path/to/file`.
-    /// e.g. `--secret db_password={{op://..}} --secret api_key={{op://..}}`
+    ///
+    /// Example:
+    ///
+    /// ```sh
+    ///     --secret db_password={{op://..}}
+    ///     --secret api_key={{op://..}}
+    /// ```
     #[arg(
         long = "secret",
         env = "LOCKET_SECRETS",
@@ -51,20 +65,23 @@ pub struct SecretFileOpts {
     #[arg(
         long = "out",
         env = "DEFAULT_SECRET_DIR",
-        default_value = "/run/secrets/locket"
+        default_value = SecretFileOpts::default().secret_dir.to_string()
     )]
     pub secret_dir: AbsolutePath,
+
+    /// Policy for handling injection failures
     #[arg(
         long = "inject-policy",
         env = "INJECT_POLICY",
         value_enum,
         default_value_t = InjectFailurePolicy::CopyUnmodified
     )]
-    /// Policy for handling injection failures
     pub policy: InjectFailurePolicy,
+
     /// Maximum allowable size for a template file. Files larger than this will be rejected.
+    ///
     /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
-    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M")]
+    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = MemSize::default().to_string())]
     pub max_file_size: MemSize,
 
     /// File writing permissions
@@ -74,12 +91,12 @@ pub struct SecretFileOpts {
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum InjectFailurePolicy {
-    /// Injection failures are treated as errors and will abort the process
+    /// Failures are treated as errors and will abort the process
     Error,
-    /// On injection failure, copy the unmodified secret to destination
+    /// On failure, copy the unmodified secret to destination
     #[default]
     CopyUnmodified,
-    /// On injection failure, just log a warning and proceed with the secret ignored
+    /// On failure, ignore the secret and log a warning
     Ignore,
 }
 
@@ -143,7 +160,12 @@ impl Default for SecretFileOpts {
     fn default() -> Self {
         Self {
             mapping: Vec::new(),
-            secret_dir: AbsolutePath::new("./secrets"),
+            #[cfg(target_os = "linux")]
+            secret_dir: AbsolutePath::new("/run/secrets/locket"),
+            #[cfg(target_os = "macos")]
+            secret_dir: AbsolutePath::new("/private/tmp/locket"),
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            secret_dir: AbsolutePath::new("./secrets"), // Fallback
             secrets: Vec::new(),
             policy: InjectFailurePolicy::CopyUnmodified,
             max_file_size: MemSize::default(),

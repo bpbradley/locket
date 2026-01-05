@@ -1,6 +1,6 @@
 # locket
 
-> *A secrets management agent. Keeps your secrets safe, but out of sight.*
+> *A secrets management agent. Keeps your secrets safe and out of sight.*
 
 [![Build Status](https://github.com/bpbradley/locket/actions/workflows/ci.yml/badge.svg)](https://github.com/bpbradley/locket/actions)
 [![Crates.io](https://img.shields.io/crates/v/locket.svg)](https://crates.io/crates/locket)
@@ -15,11 +15,12 @@
 ## Overview
 locket is a small CLI tool, packaged as a tiny rootless and distroless Docker image, designed to orchestrate secrets for dependent applications and services. locket is designed to work with most secrets providers, and it will orchestrate the retrieval of secrets and injection of them into dependent services. locket can help keep sensitive files off disk completely in tmpfs, or just somewhere out of revision control.
 
-Currently, locket supports the following modes
+locket is a versatile tool which can be used in various ways
 
-1. [Sidecar](#sidecar-mode): Inject secrets into configuration files stored in a shared, ephemeral tmpfs volume. locket will render files with secret references replaced with actual secrets so that dependent services can use them.
+1. [Secrets Injection](./docs/inject.md) Materialize secrets from templates into files using `locket inject`
+1. [Container Sidecar](#sidecar-mode): Inject secrets into configuration files stored in a shared, ephemeral tmpfs volume. locket will render files with secret references replaced with actual secrets so that dependent services can use them.
 1. [Provider](#provider-mode): locket can be installed as a Docker CLI plugin, and it will inject secrets directly into the dependent process enviornment before it starts.
-1. [Orchestrator](#orchestration): locket can be installed on the host, and `locket exec` is able to manage a specified subcommand, injecting secrets into its process environment. It can also watch for changes to environment files, and restart the dependent service automatically.
+1. [Orchestrator](#orchestration): `locket exec` is able to manage a specified subcommand, injecting secrets into its process environment. It can also watch for changes to environment files, and restart the dependent service automatically.
 
 ## Providers
 
@@ -45,7 +46,7 @@ Your secrets will all be injected according to the provided configuration, and a
 > [!TIP] 
 > By default, locket will also *watch* for changes to your secret reference files, and will reflect those changes immediately to the configured output. So if you have an application which supports a dynamic config file with hot-reloading, you can manage this with locket directly without downtime. If you dont want files watched, simply use `--mode=park` to inject once and then hang out (to keep the process alive for healthchecks). Or use `--mode=one-shot` to do a single inject and exit.
 
-A full configuration reference for all available options is provided in [`docs/run.md`](./docs/run.md)
+A full configuration reference for all available options is provided in [`docs/inject.md`](./docs/inject.md)
 
 ```yaml
 services:
