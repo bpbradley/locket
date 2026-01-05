@@ -32,7 +32,7 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--op.token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password Service Account Token<br><br>Either provide the token directly or via a file with `file:` prefix |
-| `--op.config-dir` | `OP_CONFIG_DIR` |  | Optional: Path to 1Password config directory<br><br>Defaults to standard op config locations if not provided, e.g. `$XDG_CONFIG_HOME/op`` |
+| `--op.config-dir` | `OP_CONFIG_DIR` |  | Optional: Path to 1Password config directory<br><br>Defaults to standard op config locations if not provided, e.g. `$XDG_CONFIG_HOME/op` |
 ### 1Password Connect
 
 | Command | Env | Default | Description |
