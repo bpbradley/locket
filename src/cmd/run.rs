@@ -12,10 +12,10 @@ use tracing::{debug, error, info};
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
 pub enum RunMode {
+    #[default]
     /// Collect and materialize all secrets once and then exit
     OneShot,
     /// Continuously watch for changes on configured templates and update secrets as needed
-    #[default]
     Watch,
     /// Run once and then park to keep the process alive
     Park,
@@ -28,8 +28,11 @@ pub struct RunArgs {
     pub mode: RunMode,
 
     /// Status file path used for healthchecks
-    #[command(flatten)]
-    pub status_file: StatusFile,
+    #[arg(
+        long = "status-file",
+        env = "LOCKET_STATUS_FILE",
+    )]
+    pub status_file: Option<StatusFile>,
 
     /// Secret Management Configuration
     #[command(flatten)]
@@ -60,10 +63,12 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
     );
     debug!("effective config: {:#?}", args);
 
-    let status: &StatusFile = &args.status_file;
-    status.clear().unwrap_or_else(|e| {
-        error!(error=%e, "failed to clear status file on startup");
-    });
+    if let Some(status) = &args.status_file {
+        debug!("clearing existing status file at startup");
+        status.clear().unwrap_or_else(|e| {
+            error!(error=%e, "failed to clear status file on startup");
+        });
+    }
 
     let provider = Provider::from(args.provider).build().await?;
 
@@ -71,8 +76,10 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
 
     manager.inject_all().await?;
 
-    debug!("injection complete; creating status file");
-    status.mark_ready()?;
+    if let Some(status) = &args.status_file {
+        debug!("injection complete; creating status file");
+        status.mark_ready()?;
+    }
 
     match args.mode {
         RunMode::OneShot => Ok(()),

@@ -28,7 +28,6 @@ pub struct SecretFileOpts {
         long = "map",
         env = "SECRET_MAP",
         value_delimiter = ',',
-        default_value = "/templates:/run/secrets/locket",
         hide_env_values = true
     )]
     pub mapping: Vec<PathMapping>,
@@ -51,20 +50,22 @@ pub struct SecretFileOpts {
     #[arg(
         long = "out",
         env = "DEFAULT_SECRET_DIR",
-        default_value = "/run/secrets/locket"
+        default_value = SecretFileOpts::default().secret_dir.to_string()
     )]
     pub secret_dir: AbsolutePath,
+
+    /// Policy for handling injection failures
     #[arg(
         long = "inject-policy",
         env = "INJECT_POLICY",
         value_enum,
         default_value_t = InjectFailurePolicy::CopyUnmodified
     )]
-    /// Policy for handling injection failures
     pub policy: InjectFailurePolicy,
+
     /// Maximum allowable size for a template file. Files larger than this will be rejected.
     /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
-    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = "10M")]
+    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = MemSize::default().to_string())]
     pub max_file_size: MemSize,
 
     /// File writing permissions
@@ -143,7 +144,12 @@ impl Default for SecretFileOpts {
     fn default() -> Self {
         Self {
             mapping: Vec::new(),
-            secret_dir: AbsolutePath::new("./secrets"),
+            #[cfg(target_os = "linux")]
+            secret_dir: AbsolutePath::new("/run/secrets/locket"),
+            #[cfg(target_os = "macos")]
+            secret_dir: AbsolutePath::new("/private/tmp/locket"),
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            secret_dir: AbsolutePath::new("./secrets"), // Fallback
             secrets: Vec::new(),
             policy: InjectFailurePolicy::CopyUnmodified,
             max_file_size: MemSize::default(),
