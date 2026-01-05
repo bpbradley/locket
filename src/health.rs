@@ -1,4 +1,4 @@
-//! Healthcheck probe for the `locket run` sidecar service.
+//! Healthcheck probe for the `locket inject` sidecar service.
 //!
 //! The health is determined by the presence of a "ready" status file,
 //! which is created when all secrets have been successfully materialized.

@@ -22,7 +22,7 @@ If these issues are not satisfactory, the [1password connect provider](./connect
 
 [Full configuration reference](../run.md#1password-op)
 
-# Example `locket run` Configuration
+# Example `locket inject` Configuration
 
 ```yaml
 services:

@@ -3,7 +3,7 @@
 //! This module defines the top-level `locket` command-line interface.
 //! It dispatches execution to specific handlers:
 //!
-//! * **Run**: Sidecar mode (`locket run`).
+//! * **Inject**: Sidecar mode (`locket inject`).
 //! * **Exec**: Process injection wrapper (`locket exec`).
 //! * **Healthcheck**: Health probe for sidecar
 //! * **Compose**: Docker Compose provider integration.
@@ -14,14 +14,14 @@ mod compose;
 #[cfg(feature = "exec")]
 mod exec;
 mod healthcheck;
-mod run;
+mod inject;
 
 #[cfg(feature = "compose")]
 pub use compose::compose;
 #[cfg(feature = "exec")]
 pub use exec::exec;
 pub use healthcheck::healthcheck;
-pub use run::run;
+pub use inject::inject;
 
 #[derive(Parser, Debug)]
 #[command(name = "locket")]
@@ -39,13 +39,13 @@ pub enum Command {
     /// Example:
     ///
     /// ```sh
-    /// locket run --provider bws --bws-token=file:/path/to/token \
+    /// locket inject --provider bws --bws-token=file:/path/to/token \
     ///     --secret=/path/to/secrets.yaml \
     ///     --secret=key=@key.pem \
     ///     --map /templates=/run/secrets/locket
     /// ```
     #[clap(verbatim_doc_comment)]
-    Run(Box<run::RunArgs>),
+    Inject(Box<inject::InjectArgs>),
 
     /// Execute a command with secrets injected into the process environment.
     ///

@@ -22,7 +22,6 @@ services:
       - "--map=/templates/secret.txt:/run/secrets/locket/secret.txt"
       - "--secret=my_secret=op://Mordin/TestKey/private key?ssh-format=openssh"
       - "--secret=my_other_secret={{ op://Mordin/TestKey/private key?ssh-format=openssh }}"
-      - "--mode=park"
       - "--inject-policy=error"
   locket-connect:
     image: ghcr.io/bpbradley/locket:connect
@@ -45,7 +44,6 @@ services:
       - "--map=/templates/secret.txt:/run/secrets/locket/secret.txt"
       - "--secret=my_secret=op://Mordin/TestKey/private key?ssh-format=openssh"
       - "--secret=my_other_secret={{ op://Mordin/TestKey/private key?ssh-format=openssh }}"
-      - "--mode=park"
       - "--inject-policy=error"
   locket-op:
     image: ghcr.io/bpbradley/locket:op
@@ -69,7 +67,6 @@ services:
       - "--map=/templates/secret.txt:/run/secrets/locket/secret.txt"
       - "--secret=my_secret=op://Mordin/TestKey/private key?ssh-format=openssh"
       - "--secret=my_other_secret={{ op://Mordin/TestKey/private key?ssh-format=openssh }}"
-      - "--mode=park"
       - "--inject-policy=error"
   locket-bws:
     image: ghcr.io/bpbradley/locket:bws
@@ -91,7 +88,6 @@ services:
       - "--map=/templates/secret.txt:/run/secrets/locket/secret.txt"
       - "--secret=my_secret=3832b656-a93b-45ad-bdfa-b267016802c3"
       - "--secret=my_other_secret={{ 3832b656-a93b-45ad-bdfa-b267016802c3 }}"
-      - "--mode=park"
       - "--inject-policy=error"
   observer:
     image: alpine:latest

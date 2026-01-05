@@ -65,7 +65,7 @@ USER nonroot:nonroot
 VOLUME ["/run/secrets/locket", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
   CMD ["locket","healthcheck"]
-ENTRYPOINT ["locket","run"]
+ENTRYPOINT ["locket","inject"]
 
 FROM alpine:3.23 AS opstage
 ARG OP_VERSION=2.32.0

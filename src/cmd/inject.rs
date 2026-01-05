@@ -11,21 +11,21 @@ use clap::{Args, ValueEnum};
 use tracing::{debug, error, info};
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum)]
-pub enum RunMode {
+pub enum InjectMode {
     #[default]
     /// **CLI Default** Collect and materialize all secrets once and then exit
     OneShot,
     /// **Docker Default** Continuously watch for changes on configured templates and update secrets as needed
     Watch,
-    /// Run once and then park to keep the process alive
+    /// Inject once and then park to keep the process alive
     Park,
 }
 
 #[derive(Args, Debug)]
-pub struct RunArgs {
+pub struct InjectArgs {
     /// Mode of operation
     #[arg(long = "mode", env = "LOCKET_RUN_MODE", value_enum, default_value_t)]
-    pub mode: RunMode,
+    pub mode: InjectMode,
 
     /// Status file path used for healthchecks.
     ///
@@ -59,7 +59,7 @@ pub struct RunArgs {
     provider: ProviderArgs,
 }
 
-pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
+pub async fn inject(args: InjectArgs) -> Result<(), crate::error::LocketError> {
     args.logger.init()?;
     info!(
         "Starting locket v{} `run` service ",
@@ -86,15 +86,15 @@ pub async fn run(args: RunArgs) -> Result<(), crate::error::LocketError> {
     }
 
     match args.mode {
-        RunMode::OneShot => Ok(()),
-        RunMode::Park => {
+        InjectMode::OneShot => Ok(()),
+        InjectMode::Park => {
             tracing::info!("parking... (ctrl-c to exit)");
             events::wait_for_signal(false).await;
 
             info!("shutdown complete");
             Ok(())
         }
-        RunMode::Watch => {
+        InjectMode::Watch => {
             let watcher = FsWatcher::new(args.debounce, manager);
             watcher.run().await?;
             Ok(())
