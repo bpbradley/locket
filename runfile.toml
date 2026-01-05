@@ -5,20 +5,20 @@ description = "cargo build (release)"
 cmd = "cargo build --release"
 
 [once]
-description = "cargo run -- --mode one-shot"
-cmd = "cargo run -- run --mode one-shot"
+description = "run in one shot mode"
+cmd = "cargo run -- inject --mode one-shot"
 
 [help]
-description = "cargo run -- --help"
-cmd = "cargo run -- run --help"
+description = "get help string for inject"
+cmd = "cargo run -- inject --help"
 
 [health]
 description = "cargo run -- healthcheck"
 cmd = "cargo run -- healthcheck"
 
 [watch]
-description = "cargo run"
-cmd = "cargo run -- run"
+description = "run in watch mode"
+cmd = "cargo run -- inject --mode watch"
 
 [exec-watch]
 description = "Run exec in watch mode with python3"
