@@ -39,6 +39,7 @@ pub struct OpConnectConfig {
     host: Option<Url>,
 
     /// 1Password Connect Token
+    ///
     /// Either provide the token directly or via a file with `file:` prefix
     #[arg(
         long = "connect.token",

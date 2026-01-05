@@ -59,6 +59,7 @@ pub struct BwsConfig {
     bws_user_agent: String,
 
     /// Bitwarden Machine Token
+    ///
     /// Either provide the token directly or via a file with `file:` prefix
     #[arg(
         long = "bws.token",

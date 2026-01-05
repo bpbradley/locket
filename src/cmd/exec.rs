@@ -18,6 +18,7 @@ pub struct ExecArgs {
     pub watch: bool,
 
     /// Run the command in interactive mode, attaching stdin/stdout/stderr.
+    ///
     /// If not specified, defaults to true in non-watch mode and false in watch mode.
     #[arg(
         long,
@@ -65,9 +66,12 @@ pub struct ExecArgs {
     pub timeout: ProcessTimeout,
 
     /// Debounce duration for filesystem events in watch mode.
+    ///
     /// Events occurring within this duration will be coalesced into a single update
     /// so as to not overwhelm the secrets manager with rapid successive updates from
-    /// filesystem noise. Handles human-readable strings like "100ms", "2s", etc.
+    /// filesystem noise.
+    ///
+    /// Handles human-readable strings like "100ms", "2s", etc.
     /// Unitless numbers are interpreted as milliseconds.
     #[arg(long, env = "WATCH_DEBOUNCE", default_value_t = DebounceDuration::default())]
     debounce: DebounceDuration,
@@ -81,8 +85,10 @@ pub struct ExecArgs {
     provider: ProviderArgs,
 
     /// Command to execute with secrets injected into environment
+    ///
     /// Must be the last argument(s), following a `--` separator.
-    /// Example: locket exec -e locket.env -- docker compose up -d
+    ///
+    /// Example: `locket exec -e locket.env -- docker compose up -d`
     #[arg(required = true, trailing_var_arg = true, help_heading = None)]
     pub cmd: Vec<String>,
 }

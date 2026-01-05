@@ -24,7 +24,8 @@ use tokio::process::Command;
 
 #[derive(Args, Debug, Clone)]
 pub struct OpConfig {
-    /// 1Password token configuration
+    /// 1Password Service Account Token
+    ///
     /// Either provide the token directly or via a file with `file:` prefix
     #[arg(
         long = "op.token",
@@ -35,6 +36,7 @@ pub struct OpConfig {
     tok: Option<AuthToken>,
 
     /// Optional: Path to 1Password config directory
+    ///
     /// Defaults to standard op config locations if not provided,
     /// e.g. $XDG_CONFIG_HOME/op
     #[arg(long = "op.config-dir", env = "OP_CONFIG_DIR")]

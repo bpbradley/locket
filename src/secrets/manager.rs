@@ -46,10 +46,10 @@ pub struct SecretFileOpts {
     ///
     /// Loading from file is supported via `LABEL=@/path/to/file`.
     ///
-    /// Example: 
-    /// 
+    /// Example:
+    ///
     /// ```
-    ///     --secret db_password={{op://..}} 
+    ///     --secret db_password={{op://..}}
     ///     --secret api_key={{op://..}}
     /// ```
     #[arg(
