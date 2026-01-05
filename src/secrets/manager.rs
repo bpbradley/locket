@@ -48,7 +48,7 @@ pub struct SecretFileOpts {
     ///
     /// Example:
     ///
-    /// ```
+    /// ```sh
     ///     --secret db_password={{op://..}}
     ///     --secret api_key={{op://..}}
     /// ```
