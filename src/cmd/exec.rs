@@ -170,16 +170,19 @@ impl EventHandler for ExecOrchestrator {
     }
 
     async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
+        let proc_events: Vec<FsEvent> = events
+            .iter()
+            .filter(|e| e.affects(|p| self.process_paths.contains(p)))
+            .cloned()
+            .collect();
+
         // SecretFileManager will ignore paths it does not manage.
-        self.files.handle(events.clone()).await?;
+        // so it's best to just pass all events
+        self.files.handle(events).await?;
 
         // Handle Process Restarts
-        // filter events here to ensure we ONLY call it if a tracked .env file changed.
-        if events
-            .iter()
-            .any(|e| e.affects(|p| self.process_paths.contains(p)))
-        {
-            self.process.handle(events).await?;
+        if !proc_events.is_empty() {
+            self.process.handle(proc_events).await?;
         }
 
         Ok(())
