@@ -33,28 +33,29 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Start the secret sidecar agent.
-    /// All secrets will be collected and materialized according to configuration.
+    /// Inject secrets from secret references into files and directories.
     ///
     /// Example:
     ///
     /// ```sh
     /// locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS provider
-    ///     --out /run/secrets/locket \ # Output directory for materialized secrets
-    ///     --secret=/path/to/secrets.yaml \ # An anonymous secret file, will be placed in /run/secrets/locket/secrets.yaml
-    ///     --secret=key=@key.pem \ # A named secret file, will be placed in /run/secrets/locket/key.pem
+    ///     --out /run/secrets/locket \ # Default output directory
+    ///     --secret=/path/to/secrets.yaml \ # An anonymous secret file, placed in `/run/secrets/locket/secrets.yaml`
+    ///     --secret=auth_key=@key.pem \ # A named secret file, placed in `/run/secrets/locket/auth_key`
     ///     --map ./tpl:/run/secrets/locket/mapped \ # Maps all templates in `./tpl/` directory to secrets in `/run/secrets/locket/mapped`
     /// ```
     #[clap(verbatim_doc_comment)]
     Inject(Box<inject::InjectArgs>),
 
     /// Execute a command with secrets injected into the process environment.
+    /// and optionally materialize secrets from template files.
     ///
     /// Example:
     ///
     /// ```sh
     /// locket exec --provider bws --bws-token=file:/path/to/token \
-    ///     -e locket.env -e OVERRIDE={{ reference }} \
+    ///     -e locket.env -e OVERRIDE={{ reference }}
+    ///     --map ./tpl/config:/app/config \
     ///     -- docker compose up -d
     /// ```
     #[cfg(feature = "exec")]
@@ -62,6 +63,7 @@ pub enum Command {
     Exec(Box<exec::ExecArgs>),
 
     /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
+    ///
     /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.
     #[clap(verbatim_doc_comment)]
     Healthcheck(healthcheck::HealthArgs),

@@ -1,14 +1,17 @@
 use crate::{
     env::EnvManager,
     error::LocketError,
-    events::EventHandler,
+    events::{EventHandler, FsEvent, HandlerError},
     logging::Logger,
+    path::AbsolutePath,
     process::{ProcessManager, ProcessTimeout, ShellCommand},
     provider::{Provider, ProviderArgs},
-    secrets::Secret,
+    secrets::{Secret, SecretFileManager, SecretFileOpts},
     watch::{DebounceDuration, FsWatcher},
 };
 use clap::Args;
+use futures::future::BoxFuture;
+use std::collections::HashSet;
 use tracing::{debug, info};
 
 #[derive(Args, Debug)]
@@ -55,6 +58,9 @@ pub struct ExecArgs {
         action = clap::ArgAction::Append,
     )]
     pub env: Vec<Secret>,
+
+    #[command(flatten)]
+    pub files: SecretFileOpts,
 
     /// Timeout duration for process termination signals.
     /// Unitless numbers are interpreted as seconds.
@@ -104,20 +110,23 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
     // Initialize Provider
     let provider = Provider::from(args.provider).build().await?;
 
-    // Initialize EnvManager
+    // Initialize managers / secrets
     let mut env_secrets = args.env;
     env_secrets.extend(args.env_file);
-    let env_manager = EnvManager::new(env_secrets, provider);
+    let env_manager = EnvManager::new(env_secrets, provider.clone());
 
-    // Initialize ProcessManager
     let interactive = args.interactive.unwrap_or(!args.watch);
     let command = ShellCommand::try_from(args.cmd)?;
-    let mut handler = ProcessManager::new(env_manager, command, interactive, args.timeout);
+    let mut process = ProcessManager::new(env_manager, command, interactive, args.timeout);
+
+    let files = SecretFileManager::new(args.files, provider)?;
 
     // Initial Start
-    // We must start the process at least once regardless of mode.
     info!("resolving environment and starting process...");
-    handler.start().await?;
+    files.inject_all().await?;
+    process.start().await?;
+
+    let mut handler = ExecOrchestrator::new(process, files);
 
     // Execution Mode Branch
     if args.watch {
@@ -132,5 +141,59 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
         let result = handler.wait().await;
         handler.cleanup().await;
         result.map_err(LocketError::from)
+    }
+}
+
+struct ExecOrchestrator {
+    process: ProcessManager,
+    files: SecretFileManager,
+    process_paths: HashSet<AbsolutePath>,
+}
+
+impl ExecOrchestrator {
+    pub fn new(process: ProcessManager, files: SecretFileManager) -> Self {
+        let process_paths = process.paths().into_iter().collect();
+        Self {
+            process,
+            files,
+            process_paths,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl EventHandler for ExecOrchestrator {
+    fn paths(&self) -> Vec<AbsolutePath> {
+        let mut p = self.files.paths();
+        p.extend(self.process.paths());
+        p
+    }
+
+    async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
+        let proc_events: Vec<FsEvent> = events
+            .iter()
+            .filter(|e| e.affects(|p| self.process_paths.contains(p)))
+            .cloned()
+            .collect();
+
+        // SecretFileManager will ignore paths it does not manage.
+        // so it's best to just pass all events
+        self.files.handle(events).await?;
+
+        // Handle Process Restarts
+        if !proc_events.is_empty() {
+            self.process.handle(proc_events).await?;
+        }
+
+        Ok(())
+    }
+
+    fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
+        // Lifecycle is dictated by the child process, not the files.
+        self.process.wait()
+    }
+
+    async fn cleanup(&mut self) {
+        self.process.cleanup().await;
     }
 }
