@@ -5,16 +5,15 @@
 
 ## `locket inject`
 
-Start the secret sidecar agent.
-All secrets will be collected and materialized according to configuration.
+Inject secrets from secret references into files and directories.
 
 Example:
 
 ```sh
 locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS provider
-    --out /run/secrets/locket \ # Output directory for materialized secrets
-    --secret=/path/to/secrets.yaml \ # An anonymous secret file, will be placed in /run/secrets/locket/secrets.yaml
-    --secret=key=@key.pem \ # A named secret file, will be placed in /run/secrets/locket/key.pem
+    --out /run/secrets/locket \ # Default output directory
+    --secret=/path/to/secrets.yaml \ # An anonymous secret file, placed in `/run/secrets/locket/secrets.yaml`
+    --secret=auth_key=@key.pem \ # A named secret file, placed in `/run/secrets/locket/auth_key`
     --map ./tpl:/run/secrets/locket/mapped \ # Maps all templates in `./tpl/` directory to secrets in `/run/secrets/locket/mapped`
 ```
 

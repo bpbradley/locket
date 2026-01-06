@@ -6,12 +6,14 @@
 ## `locket exec`
 
 Execute a command with secrets injected into the process environment.
+and optionally materialize secrets from template files.
 
 Example:
 
 ```sh
 locket exec --provider bws --bws-token=file:/path/to/token \
-    -e locket.env -e OVERRIDE={{ reference }} \
+    -e locket.env -e OVERRIDE={{ reference }}
+    --map ./tpl/config:/app/config \
     -- docker compose up -d
 ```
 

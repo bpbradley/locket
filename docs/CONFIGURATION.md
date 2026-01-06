@@ -1,9 +1,8 @@
 # locket 0.15.0 -- Configuration Reference
 ## Commands
 
-- [`inject`](./inject.md) - Start the secret sidecar agent.
-All secrets will be collected and materialized according to configuration.
+- [`inject`](./inject.md) - Inject secrets from secret references into files and directories.
 - [`exec`](./exec.md) - Execute a command with secrets injected into the process environment.
+and optionally materialize secrets from template files.
 - [`healthcheck`](./healthcheck.md) - Checks the health of the sidecar agent, determined by the state of materialized secrets.
-Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.
 - [`compose`](./compose.md) - Docker Compose provider API

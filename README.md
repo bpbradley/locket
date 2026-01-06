@@ -17,7 +17,7 @@ locket is a small CLI tool, packaged as a tiny rootless and distroless Docker im
 
 locket is a versatile tool which can be used in various ways
 
-1. [Secrets Injection](./docs/inject.md) Materialize secrets from templates into files using `locket inject`
+1. [Secrets Injection](./docs/inject.md): Materialize secrets from templates into files using `locket inject`
 1. [Container Sidecar](#sidecar-mode): Inject secrets into configuration files stored in a shared, ephemeral tmpfs volume. locket will render files with secret references replaced with actual secrets so that dependent services can use them.
 1. [Provider](#provider-mode): locket can be installed as a Docker CLI plugin, and it will inject secrets directly into the dependent process enviornment before it starts.
 1. [Orchestrator](#orchestration): `locket exec` is able to manage a specified subcommand, injecting secrets into its process environment. It can also watch for changes to environment files, and restart the dependent service automatically.
