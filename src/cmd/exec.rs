@@ -147,11 +147,17 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
 struct ExecOrchestrator {
     process: ProcessManager,
     files: SecretFileManager,
+    process_paths: HashSet<AbsolutePath>,
 }
 
 impl ExecOrchestrator {
     pub fn new(process: ProcessManager, files: SecretFileManager) -> Self {
-        Self { process, files }
+        let process_paths = process.paths().into_iter().collect();
+        Self {
+            process,
+            files,
+            process_paths,
+        }
     }
 }
 
@@ -169,11 +175,9 @@ impl EventHandler for ExecOrchestrator {
 
         // Handle Process Restarts
         // filter events here to ensure we ONLY call it if a tracked .env file changed.
-        let process_paths: HashSet<_> = self.process.paths().into_iter().collect();
-
         if events
             .iter()
-            .any(|e| e.affects(|p| process_paths.contains(p)))
+            .any(|e| e.affects(|p| self.process_paths.contains(p)))
         {
             self.process.handle(events).await?;
         }
