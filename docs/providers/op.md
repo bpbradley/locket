@@ -20,7 +20,7 @@ If these issues are not satisfactory, the [1password connect provider](./connect
 1. If using provider mode, [install `op` cli](https://developer.1password.com/docs/cli/get-started/) dependency. 
 
 
-[Full configuration reference](../run.md#1password-op)
+[Full configuration reference](../inject.md#1password-op)
 
 # Example `locket inject` Configuration
 

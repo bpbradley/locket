@@ -7,7 +7,7 @@ This provider is based on a [1password Connect](https://developer.1password.com/
 
 1. [Deploy a 1password Connect Server](https://developer.1password.com/docs/connect/get-started#step-2-deploy-a-1password-connect-server)
 1. [Create an access token](https://developer.1password.com/docs/connect/manage-connect#create-a-token)
-1. Configure locket with your reachable connect host URL, and your authentication token. [Configuration Reference](../run.md#1password-connect)
+1. Configure locket with your reachable connect host URL, and your authentication token. [Configuration Reference](../inject.md#1password-connect)
 
 ## Example `locket inject` Configuration
 

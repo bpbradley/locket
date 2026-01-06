@@ -7,7 +7,7 @@ This provider is based on the [Bitwarden Secrets Manager](https://bitwarden.com/
 
 1. [Setup a Bitwarden Secrets Manager account](https://bitwarden.com/help/secrets-manager-quick-start/)
 1. [Add a machine account with access to desired secrets / projects](https://bitwarden.com/help/secrets-manager-quick-start/#add-a-machine-account)
-1. Configure locket with your machine token. [Configuration Reference](../run.md#bitwarden-secrets-provider)
+1. Configure locket with your machine token. [Configuration Reference](../inject.md#bitwarden-secrets-provider)
 
 ## Example `locket inject` Configuration
 
