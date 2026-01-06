@@ -114,7 +114,7 @@ pub trait EventHandler: Send + Sync {
 ///
 /// Currently focused on filesystem changes, as this is the only relevant event source.
 /// It is broadly a unit of work for the event loop.
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
 pub enum FsEvent {
     /// A resource has been modified or created and is ready for processing.
     Write(AbsolutePath),
@@ -125,6 +125,16 @@ pub enum FsEvent {
         from: AbsolutePath,
         to: AbsolutePath,
     },
+}
+
+impl FsEvent {
+    /// Checks if any path involved in this event satisfies the given predicate.
+    pub fn affects(&self, check: impl Fn(&AbsolutePath) -> bool) -> bool {
+        match self {
+            Self::Write(p) | Self::Remove(p) => check(p),
+            Self::Move { from, to } => check(from) || check(to),
+        }
+    }
 }
 
 /// Registry to collect and coalesce filesystem events.
