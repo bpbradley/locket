@@ -9,13 +9,14 @@
 use crate::path::CanonicalPath;
 use async_trait::async_trait;
 #[cfg(feature = "bws")]
-use bws::{BwsConfig, BwsProvider};
 use clap::{Args, ValueEnum};
-#[cfg(feature = "connect")]
-use connect::{OpConnectConfig, OpConnectProvider};
-#[cfg(feature = "op")]
-use op::{OpConfig, OpProvider};
+//#[cfg(feature = "connect")]
+//use connect::OpConnectConfig;
+use locket_derive::Overlay;
+//#[cfg(feature = "op")]
+//use op::OpConfig;
 use secrecy::{ExposeSecret, SecretString};
+use serde::Deserialize;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
@@ -25,6 +26,7 @@ compile_error!("At least one provider feature must be enabled (e.g. --features o
 
 #[cfg(feature = "bws")]
 mod bws;
+mod config;
 #[cfg(feature = "connect")]
 mod connect;
 #[cfg(feature = "op")]
@@ -97,62 +99,73 @@ pub trait SecretsProvider: ReferenceParser + Send + Sync {
 }
 
 /// Provider backend configuration
+#[derive(Debug, Clone)]
 pub enum Provider {
     #[cfg(feature = "op")]
-    Op(OpConfig),
+    Op(op::OpConfig),
     #[cfg(feature = "connect")]
-    Connect(OpConnectConfig),
+    Connect(connect::OpConnectConfig),
     #[cfg(feature = "bws")]
-    Bws(BwsConfig),
+    Bws(config::bws::BwsConfig),
 }
 
 impl Provider {
     pub async fn build(self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
         let provider: Arc<dyn SecretsProvider> = match self {
             #[cfg(feature = "op")]
-            Self::Op(c) => Arc::new(OpProvider::new(c).await?),
+            Self::Op(c) => Arc::new(op::OpProvider::new(c).await?),
             #[cfg(feature = "connect")]
-            Self::Connect(c) => Arc::new(OpConnectProvider::new(c).await?),
+            Self::Connect(c) => Arc::new(connect::OpConnectProvider::new(c).await?),
             #[cfg(feature = "bws")]
-            Self::Bws(c) => Arc::new(BwsProvider::new(c).await?),
+            Self::Bws(c) => Arc::new(bws::BwsProvider::new(c).await?),
         };
 
         Ok(provider)
     }
 }
 
-impl From<ProviderArgs> for Provider {
-    fn from(args: ProviderArgs) -> Self {
-        match args.kind {
-            #[cfg(feature = "op")]
-            ProviderKind::Op => Self::Op(args.config.op),
+#[derive(Args, Debug, Clone, Overlay, Deserialize, Default)]
+pub struct ProviderArgs {
+    /// Secrets provider backend to use.
+    #[arg(long = "provider", env = "SECRETS_PROVIDER")]
+    pub kind: Option<ProviderKind>,
 
-            #[cfg(feature = "connect")]
-            ProviderKind::OpConnect => Self::Connect(args.config.connect),
+    /// Provider-specific configuration
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub config: ProviderConfigs,
+}
 
+impl TryFrom<ProviderArgs> for Provider {
+    type Error = crate::config::ConfigError;
+
+    fn try_from(args: ProviderArgs) -> Result<Self, Self::Error> {
+        let kind = args.kind.ok_or_else(|| {
+            crate::config::ConfigError::Validation(
+                "Missing required argument: --provider <kind>".into(),
+            )
+        })?;
+
+        match kind {
             #[cfg(feature = "bws")]
-            ProviderKind::Bws => Self::Bws(args.config.bws),
+            ProviderKind::Bws => Ok(Provider::Bws(args.config.bws.try_into()?)),
+            #[cfg(feature = "op")]
+            ProviderKind::Op => {
+                // let config = args.config.op.try_into()?;
+                // Ok(Provider::Op(config))
+                todo!("Implement OpConfig migration")
+            }
+            #[cfg(feature = "connect")]
+            ProviderKind::OpConnect => {
+                // let config = args.config.connect.try_into()?;
+                // Ok(Provider::Connect(config))
+                todo!("Implement ConnectConfig migration")
+            }
         }
     }
 }
 
-#[derive(Args, Debug, Clone)]
-pub struct ProviderArgs {
-    /// Secrets provider backend to use.
-    #[arg(
-        long = "provider",
-        env = "SECRETS_PROVIDER",
-        value_enum,
-        id = "provider"
-    )]
-    kind: ProviderKind,
-
-    /// Provider-specific configuration
-    #[command(flatten, next_help_heading = "Provider Configuration")]
-    config: ProviderConfigs,
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
+#[derive(Copy, Clone, Debug, ValueEnum, Deserialize)]
 pub enum ProviderKind {
     /// 1Password Service Account
     #[cfg(feature = "op")]
@@ -175,21 +188,22 @@ impl From<ProviderKind> for clap::builder::OsStr {
     }
 }
 
-#[derive(Args, Debug, Clone)]
+#[derive(Args, Debug, Clone, Overlay, Deserialize, Default)]
 pub struct ProviderConfigs {
-    #[cfg(feature = "op")]
-    #[command(flatten, next_help_heading = "1Password (op)")]
-    pub op: OpConfig,
-    #[cfg(feature = "connect")]
-    #[command(flatten, next_help_heading = "1Password Connect")]
-    pub connect: OpConnectConfig,
+    //#[cfg(feature = "op")]
+    //#[command(flatten, next_help_heading = "1Password (op)")]
+    //pub op: OpConfig,
+    //#[cfg(feature = "connect")]
+    //#[command(flatten, next_help_heading = "1Password Connect")]
+    //pub connect: OpConnectConfig,
     #[cfg(feature = "bws")]
     #[command(flatten, next_help_heading = "Bitwarden Secrets Provider")]
-    pub bws: BwsConfig,
+    #[serde(flatten)]
+    pub bws: config::bws::BwsArgs,
 }
 
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AuthToken(SecretString);
 
 impl AuthToken {
@@ -253,8 +267,8 @@ impl ExposeSecret<str> for AuthToken {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ConcurrencyLimit(NonZeroUsize);
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ConcurrencyLimit(NonZeroUsize);
 
 impl ConcurrencyLimit {
     pub const fn new(limit: usize) -> Self {

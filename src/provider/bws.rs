@@ -6,8 +6,9 @@
 
 use super::ConcurrencyLimit;
 use super::references::{ReferenceParser, SecretReference};
+use crate::provider::config::bws::BwsConfig;
 use crate::provider::references::BwsReference;
-use crate::provider::{AuthToken, ProviderError, ProviderKind, SecretsProvider};
+use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
     Client,
@@ -15,66 +16,20 @@ use bitwarden::{
     client::client_settings::{ClientSettings, DeviceType},
     secrets_manager::{ClientSecretsExt, secrets::SecretGetRequest},
 };
-use clap::Args;
 use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
 
-#[derive(Args, Debug, Clone)]
-pub struct BwsConfig {
-    /// Bitwarden API URL
-    #[arg(
-        long = "bws.api",
-        env = "BWS_API_URL",
-        default_value = "https://api.bitwarden.com"
-    )]
-    api_url: BwsUrl,
-
-    /// Bitwarden Identity URL
-    #[arg(
-        long = "bws.identity",
-        env = "BWS_IDENTITY_URL",
-        default_value = "https://identity.bitwarden.com"
-    )]
-    identity_url: BwsUrl,
-
-    /// Maximum number of concurrent requests to Bitwarden Secrets Manager
-    #[arg(
-        long = "bws.max-concurrent",
-        env = "BWS_MAX_CONCURRENT",
-        default_value_t = ConcurrencyLimit::new(20)
-    )]
-    bws_max_concurrent: ConcurrencyLimit,
-
-    /// BWS User Agent
-    #[arg(
-        long = "bws.user-agent",
-        env = "BWS_USER_AGENT",
-        default_value = env!("CARGO_PKG_NAME"),
-    )]
-    bws_user_agent: String,
-
-    /// Bitwarden Machine Token
-    ///
-    /// Either provide the token directly or via a file with `file:` prefix
-    #[arg(
-        long = "bws.token",
-        env = "BWS_MACHINE_TOKEN",
-        hide_env_values = true,
-        required_if_eq("provider", ProviderKind::Bws)
-    )]
-    bws_token: Option<AuthToken>,
-}
-
 /// BWS SDK URL wrapper
 /// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
 /// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
-#[derive(Debug, Clone)]
-struct BwsUrl(Url);
+#[derive(Debug, Clone, Deserialize)]
+pub struct BwsUrl(Url);
 
 impl BwsUrl {
     /// Get the URL as a string, stripping any trailing slash
@@ -124,20 +79,17 @@ impl ReferenceParser for BwsProvider {
 
 impl BwsProvider {
     pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
-        let token = cfg.bws_token.ok_or_else(|| {
-            ProviderError::InvalidConfig("missing Bitwarden machine token (bws.token)".to_string())
-        })?;
         let settings = ClientSettings {
             identity_url: cfg.identity_url.to_string(),
             api_url: cfg.api_url.to_string(),
-            user_agent: cfg.bws_user_agent,
+            user_agent: cfg.user_agent,
             device_type: DeviceType::SDK,
         };
 
         let client = Client::new(Some(settings));
 
         let auth_req = AccessTokenLoginRequest {
-            access_token: token.expose_secret().to_string(),
+            access_token: cfg.token.expose_secret().to_string(),
             state_file: None, // We are stateless; no cache file
         };
 
@@ -149,7 +101,7 @@ impl BwsProvider {
 
         Ok(Self {
             client,
-            max_concurrent: cfg.bws_max_concurrent,
+            max_concurrent: cfg.max_concurrent,
         })
     }
 }

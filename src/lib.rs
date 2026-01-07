@@ -14,6 +14,7 @@
 pub mod cmd;
 #[cfg(feature = "compose")]
 pub mod compose;
+pub mod config;
 #[cfg(any(feature = "exec", feature = "compose"))]
 pub mod env;
 pub mod error;

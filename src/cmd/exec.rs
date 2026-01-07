@@ -108,7 +108,7 @@ pub async fn exec(args: ExecArgs) -> Result<(), LocketError> {
     debug!("effective config: {:#?}", args);
 
     // Initialize Provider
-    let provider = Provider::from(args.provider).build().await?;
+    let provider = Provider::try_from(args.provider)?.build().await?;
 
     // Initialize managers / secrets
     let mut env_secrets = args.env;

@@ -13,7 +13,7 @@ keywords = ["secrets", "docker"]
 categories = ["command-line-utilities", "config"]
 
 [workspace]
-members = [".", "xtask"]
+members = [".", "locket_derive", "xtask"]
 
 [features]
 default = ["op", "connect", "bws", "compose", "exec"]
@@ -25,6 +25,7 @@ exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
 testing = []
 
 [dependencies]
+locket_derive = { path = "./locket_derive" }
 clap = { version = "4", features = ["derive", "env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
@@ -42,7 +43,8 @@ sanitize-filename = "0.6"
 humantime = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal", "fs"] }
 futures = { version = "0.3"}
-url = { version = "2"}
+url = { version = "2", features = ["serde"]}
+toml = {version = "0.9"}
 percent-encoding = { version = "2.3", optional = true }
 bitwarden = { version = "1", features=["secrets"], optional = true }
 uuid = { version = "1", optional = true }

@@ -74,7 +74,7 @@ pub async fn inject(args: InjectArgs) -> Result<(), crate::error::LocketError> {
         });
     }
 
-    let provider = Provider::from(args.provider).build().await?;
+    let provider = Provider::try_from(args.provider)?.build().await?;
 
     let manager = SecretFileManager::new(args.manager, provider)?;
 

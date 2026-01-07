@@ -88,6 +88,7 @@ impl LocketExitCode {
 
             LocketError::Io(_) => sysexits::ExitCode::IoErr.into(),
             LocketError::Logging(_) => sysexits::ExitCode::Config.into(),
+            LocketError::Config(_) => sysexits::ExitCode::Config.into(),
         }
     }
 

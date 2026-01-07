@@ -1,0 +1,13 @@
+[package]
+name = "locket_derive"
+version = "0.16.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = { version = "1.0" }
+proc-macro2 = "1.0"
