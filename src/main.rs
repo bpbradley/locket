@@ -5,6 +5,7 @@
 use clap::Parser;
 use locket::cmd;
 use locket::cmd::{Cli, Command};
+use locket::config::Layered;
 use locket::error::LocketError;
 use std::process::{ExitCode, Termination};
 mod exits;
@@ -12,11 +13,26 @@ use exits::LocketExitCode;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    match run().await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => LocketExitCode(e).report(),
+    }
+}
+
+async fn run() -> Result<(), LocketError> {
     let cli = Cli::parse();
-    let result: Result<(), LocketError> = match cli.cmd {
-        Command::Inject(args) => cmd::inject(*args).await,
+    match cli.cmd {
+        Command::Inject(args) => {
+            let config_path = args.config.clone();
+            let config = (*args).resolve(config_path.as_deref())?;
+            cmd::inject(config).await
+        }
         #[cfg(feature = "exec")]
-        Command::Exec(args) => cmd::exec(*args).await,
+        Command::Exec(args) => {
+            let config_path = args.config.clone();
+            let config = (*args).resolve(config_path.as_deref())?;
+            cmd::exec(config).await
+        }
         Command::Healthcheck(args) => cmd::healthcheck(args),
         #[cfg(feature = "compose")]
         Command::Compose(args) => cmd::compose(*args).await,
@@ -32,9 +48,5 @@ async fn main() -> ExitCode {
             println!("{}", metadata);
             Ok(())
         }
-    };
-    match result {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(e) => LocketExitCode(e).report(),
     }
 }

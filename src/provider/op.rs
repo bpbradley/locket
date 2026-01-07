@@ -9,52 +9,25 @@
 //! and can be configured with an optional config directory.
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
-use crate::provider::ProviderKind;
+use crate::path::AbsolutePath;
+use crate::provider::config::op::OpConfig;
 use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, SecretsProvider};
 use async_trait::async_trait;
-use clap::Args;
 use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::str::FromStr;
 use tokio::process::Command;
 
-#[derive(Args, Debug, Clone)]
-pub struct OpConfig {
-    /// 1Password Service Account Token
-    ///
-    /// Either provide the token directly or via a file with `file:` prefix
-    #[arg(
-        long = "op.token",
-        env = "OP_SERVICE_ACCOUNT_TOKEN",
-        hide_env_values = true,
-        required_if_eq("provider", ProviderKind::Op)
-    )]
-    tok: Option<AuthToken>,
-
-    /// Optional: Path to 1Password config directory
-    ///
-    /// Defaults to standard op config locations if not provided,
-    /// e.g. `$XDG_CONFIG_HOME/op`
-    #[arg(long = "op.config-dir", env = "OP_CONFIG_DIR")]
-    config_dir: Option<PathBuf>,
-}
-
 pub struct OpProvider {
     token: AuthToken,
-    config: Option<PathBuf>,
+    config: Option<AbsolutePath>,
 }
 
 impl OpProvider {
     pub async fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
-        let token = cfg.tok.ok_or_else(|| {
-            ProviderError::InvalidConfig(
-                "missing 1Password service account token (op.token)".to_string(),
-            )
-        })?;
         // Try to authenticate with the provided token
         let mut cmd = Command::new("op");
         cmd.arg("whoami")
@@ -64,10 +37,14 @@ impl OpProvider {
                 "XDG_CONFIG_HOME",
                 std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
             )
-            .env("OP_SERVICE_ACCOUNT_TOKEN", token.expose_secret())
+            .env("OP_SERVICE_ACCOUNT_TOKEN", cfg.op_token.expose_secret())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        if let Some(path) = &cfg.op_config_dir {
+            cmd.env("OP_CONFIG_DIR", path.as_path());
+        }
 
         let output = cmd.output().await.map_err(ProviderError::Io)?;
 
@@ -80,8 +57,8 @@ impl OpProvider {
         }
 
         Ok(Self {
-            token,
-            config: cfg.config_dir,
+            token: cfg.op_token,
+            config: cfg.op_config_dir,
         })
     }
 }
@@ -135,7 +112,7 @@ impl SecretsProvider for OpProvider {
                         .stderr(Stdio::piped());
 
                     if let Some(path) = &self.config {
-                        cmd.env("OP_CONFIG_DIR", path);
+                        cmd.env("OP_CONFIG_DIR", path.as_path());
                     }
 
                     let output = cmd.output().await.map_err(ProviderError::Io)?;

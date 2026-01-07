@@ -4,7 +4,9 @@
 //! Uses `tracing` and `tracing-subscriber` for implementation.
 
 use clap::{Args, ValueEnum};
+use locket_derive::Overlay;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -59,14 +61,52 @@ impl LogLevel {
     }
 }
 
-#[derive(Default, Args, Debug, Clone)]
-pub struct Logger {
+impl FromStr for LogLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "trace" => Ok(LogLevel::Trace),
+            "debug" => Ok(LogLevel::Debug),
+            "info" => Ok(LogLevel::Info),
+            "warn" => Ok(LogLevel::Warn),
+            "error" => Ok(LogLevel::Error),
+            _ => Err(format!("Invalid log level: {}", s)),
+        }
+    }
+}
+
+impl FromStr for LogFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "text" => Ok(LogFormat::Text),
+            "json" => Ok(LogFormat::Json),
+            #[cfg(feature = "compose")]
+            "compose" => Ok(LogFormat::Compose),
+            _ => Err(format!("Invalid log format: {}", s)),
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone, Default, Deserialize, Overlay)]
+#[locket(try_into = "Logger")]
+pub struct LoggerArgs {
     /// Log format
-    #[arg(long, env = "LOCKET_LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
-    pub log_format: LogFormat,
+    #[arg(long, env = "LOCKET_LOG_FORMAT")]
+    #[locket(default = LogFormat::Text)]
+    pub log_format: Option<LogFormat>,
 
     /// Log level
-    #[arg(long, env = "LOCKET_LOG_LEVEL", value_enum, default_value_t = LogLevel::Info)]
+    #[arg(long, env = "LOCKET_LOG_LEVEL")]
+    #[locket(default = LogLevel::Info)]
+    pub log_level: Option<LogLevel>,
+}
+
+#[derive(Default, Args, Debug, Clone, Deserialize)]
+pub struct Logger {
+    pub log_format: LogFormat,
     pub log_level: LogLevel,
 }
 

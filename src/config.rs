@@ -3,6 +3,10 @@ use serde::de::DeserializeOwned;
 use std::path::Path;
 use thiserror::Error;
 
+#[cfg(feature = "exec")]
+pub mod exec;
+pub mod inject;
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to load configuration file: {0}")]
@@ -13,6 +17,10 @@ pub enum ConfigError {
 
     #[error("validation error: {0}")]
     Validation(String),
+
+    #[cfg(feature = "exec")]
+    #[error(transparent)]
+    Process(#[from] crate::process::ProcessError),
 }
 
 /// Trait for merging two partial structs.
@@ -25,6 +33,12 @@ pub trait Overlay {
 impl<T> Overlay for Option<T> {
     fn overlay(self, over: Self) -> Self {
         over.or(self)
+    }
+}
+
+impl<T> Overlay for Vec<T> {
+    fn overlay(self, over: Self) -> Self {
+        if over.is_empty() { self } else { over }
     }
 }
 

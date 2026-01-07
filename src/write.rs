@@ -6,6 +6,8 @@
 //! exist with the correct permissions before writing.
 use crate::path::{AbsolutePath, CanonicalPath};
 use clap::Args;
+use locket_derive::Overlay;
+use serde::Deserialize;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -42,13 +44,22 @@ pub enum FsModeError {
 }
 
 /// Utilities for writing files atomically with explicit permissions.
-#[derive(Clone, Args)]
-pub struct FileWriter {
+#[derive(Clone, Args, Deserialize, Overlay, Debug, Default)]
+#[locket(try_into = "FileWriter")]
+pub struct FileWriterArgs {
     /// File permission mode
-    #[clap(long, env = "LOCKET_FILE_MODE", default_value = "600")]
-    file_mode: FsMode,
+    #[clap(long, env = "LOCKET_FILE_MODE")]
+    #[locket(default = FsMode::new(0o600))]
+    file_mode: Option<FsMode>,
     /// Directory permission mode
-    #[clap(long, env = "LOCKET_DIR_MODE", default_value = "700")]
+    #[clap(long, env = "LOCKET_DIR_MODE")]
+    #[locket(default = FsMode::new(0o700))]
+    dir_mode: Option<FsMode>,
+}
+
+#[derive(Clone)]
+pub struct FileWriter {
+    file_mode: FsMode,
     dir_mode: FsMode,
 }
 
@@ -173,8 +184,17 @@ impl std::fmt::Debug for FileWriter {
 ///
 /// This ensures that permission values are validated (must be <= 0o7777)
 /// and correctly interpreted as octal.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[serde(try_from = "String")]
 pub struct FsMode(u32);
+
+impl TryFrom<String> for FsMode {
+    type Error = FsModeError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
 
 impl FsMode {
     /// Creates a new `FsMode` from a `u32` bitmask.

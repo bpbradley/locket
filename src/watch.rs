@@ -234,8 +234,18 @@ impl<H: EventHandler> FsWatcher<H> {
 }
 
 /// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(try_from = "String")]
 pub struct DebounceDuration(pub Duration);
+
+impl TryFrom<String> for DebounceDuration {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+            .map_err(|e: humantime::DurationError| e.to_string())
+    }
+}
 
 /// Defaults to milliseconds if no unit specified, otherwise uses humantime parsing.
 impl FromStr for DebounceDuration {

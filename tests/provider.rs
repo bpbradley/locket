@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use locket::{
     path::{AbsolutePath, CanonicalPath, PathMapping},
     provider::{ProviderError, ReferenceParser, SecretReference, SecretsProvider},
-    secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretFileOpts},
+    secrets::{InjectFailurePolicy, SecretError, SecretFileManager, SecretManagerConfig},
 };
 use secrecy::SecretString;
 use std::collections::HashMap;
@@ -67,7 +67,7 @@ impl SecretsProvider for MockProvider {
 fn setup(
     tpl_name: &str,
     tpl_content: &str,
-) -> (tempfile::TempDir, std::path::PathBuf, SecretFileOpts) {
+) -> (tempfile::TempDir, std::path::PathBuf, SecretManagerConfig) {
     let tmp = tempdir().unwrap();
     let tpl_dir = tmp.path().join("templates");
     let out_dir = tmp.path().join("secrets");
@@ -76,16 +76,18 @@ fn setup(
 
     std::fs::write(tpl_dir.join(tpl_name), tpl_content).unwrap();
 
-    let opts = SecretFileOpts::default()
-        .with_mapping(vec![make_mapping(&tpl_dir, &out_dir)])
-        .with_secret_dir(AbsolutePath::new(&out_dir));
+    let config = SecretManagerConfig {
+        map: vec![make_mapping(&tpl_dir, &out_dir)],
+        out: AbsolutePath::new(&out_dir),
+        ..Default::default()
+    };
 
-    (tmp, out_dir, opts)
+    (tmp, out_dir, config)
 }
 
 #[tokio::test]
 async fn test_happy_path_template_rendering() {
-    let (_tmp, out_dir, opts) = setup(
+    let (_tmp, out_dir, config) = setup(
         "config.yaml",
         "user: {{ test:user }}\npass: {{ test:pass }}",
     );
@@ -95,7 +97,7 @@ async fn test_happy_path_template_rendering() {
         ("test:pass", "secret123"),
     ]));
 
-    let manager = SecretFileManager::new(opts, provider).unwrap();
+    let manager = SecretFileManager::new(config, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 
@@ -105,11 +107,11 @@ async fn test_happy_path_template_rendering() {
 
 #[tokio::test]
 async fn test_whole_file_replacement() {
-    let (_tmp, out_dir, opts) = setup("id_rsa", "test:ssh/key");
+    let (_tmp, out_dir, config) = setup("id_rsa", "test:ssh/key");
 
     let key_content = "-----BEGIN RSA PRIVATE KEY-----...";
     let provider = Arc::new(MockProvider::new(vec![("test:ssh/key", key_content)]));
-    let manager = SecretFileManager::new(opts, provider).unwrap();
+    let manager = SecretFileManager::new(config, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 
@@ -120,12 +122,12 @@ async fn test_whole_file_replacement() {
 #[tokio::test]
 async fn test_policy_error_aborts() {
     // "test:missing" parses as valid, but is not in the provider's data map.
-    let (_tmp, _out, mut opts) = setup("config.yaml", "Key: {{ test:missing }}");
+    let (_tmp, _out, mut config) = setup("config.yaml", "Key: {{ test:missing }}");
 
-    opts.policy = InjectFailurePolicy::Error;
+    config.inject_policy = InjectFailurePolicy::Error;
 
     let provider = Arc::new(MockProvider::new(vec![]));
-    let manager = SecretFileManager::new(opts, provider).unwrap();
+    let manager = SecretFileManager::new(config, provider).unwrap();
 
     let result = manager.inject_all().await;
 
@@ -141,12 +143,12 @@ async fn test_policy_error_aborts() {
 
 #[tokio::test]
 async fn test_policy_copy_unmodified() {
-    let (_tmp, out_dir, mut opts) = setup("config.yaml", "Key: {{ test:missing }}");
+    let (_tmp, out_dir, mut config) = setup("config.yaml", "Key: {{ test:missing }}");
 
-    opts.policy = InjectFailurePolicy::CopyUnmodified;
+    config.inject_policy = InjectFailurePolicy::CopyUnmodified;
 
     let provider = Arc::new(MockProvider::new(vec![]));
-    let manager = SecretFileManager::new(opts, provider).unwrap();
+    let manager = SecretFileManager::new(config, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 
@@ -159,10 +161,10 @@ async fn test_ignore_unknown_providers() {
     // "test:valid" -> Parsed (starts with test:) -> Fetched
     // "op://real/secret" -> Not Parsed (MockProvider returns None) -> Ignored (Literal)
     let content = "A: {{ op://real/secret }}\nB: {{ test:valid }}";
-    let (_tmp, out_dir, opts) = setup("mixed.yaml", content);
+    let (_tmp, out_dir, config) = setup("mixed.yaml", content);
 
     let provider = Arc::new(MockProvider::new(vec![("test:valid", "value")]));
-    let manager = SecretFileManager::new(opts, provider).unwrap();
+    let manager = SecretFileManager::new(config, provider).unwrap();
 
     manager.inject_all().await.unwrap();
 

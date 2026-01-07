@@ -12,10 +12,10 @@
 //! and handles authentication via bearer tokens.
 
 use super::references::{OpReference, ReferenceParser, SecretReference};
+use crate::provider::ConcurrencyLimit;
+use crate::provider::config::connect::ConnectConfig;
 use crate::provider::{AuthToken, ProviderError, SecretsProvider};
-use crate::provider::{ConcurrencyLimit, ProviderKind};
 use async_trait::async_trait;
-use clap::Args;
 use futures::stream::{self, StreamExt};
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
@@ -27,36 +27,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use url::Url;
-
-#[derive(Args, Debug, Clone)]
-pub struct OpConnectConfig {
-    /// 1Password Connect Host HTTP(S) URL
-    #[arg(
-        long = "connect.host",
-        env = "OP_CONNECT_HOST",
-        required_if_eq("provider", ProviderKind::OpConnect)
-    )]
-    host: Option<Url>,
-
-    /// 1Password Connect Token
-    ///
-    /// Either provide the token directly or via a file with `file:` prefix
-    #[arg(
-        long = "connect.token",
-        env = "OP_CONNECT_TOKEN",
-        hide_env_values = true,
-        required_if_eq("provider", ProviderKind::OpConnect)
-    )]
-    connect_token: Option<AuthToken>,
-
-    /// Maximum allowed concurrent requests to Connect API
-    #[arg(
-        long = "connect.max-concurrent",
-        env = "OP_CONNECT_MAX_CONCURRENT",
-        default_value_t = ConcurrencyLimit::new(20)
-    )]
-    connect_max_concurrent: ConcurrencyLimit,
-}
 
 #[derive(Debug, Deserialize)]
 struct VaultResponse {
@@ -193,16 +163,10 @@ impl ReferenceParser for OpConnectProvider {
 }
 
 impl OpConnectProvider {
-    pub async fn new(cfg: OpConnectConfig) -> Result<Self, ProviderError> {
-        let token = cfg.connect_token.ok_or_else(|| {
-            ProviderError::InvalidConfig(
-                "missing 1Password service account token (connect.token)".to_string(),
-            )
-        })?;
+    pub async fn new(cfg: ConnectConfig) -> Result<Self, ProviderError> {
+        let token = cfg.connect_token;
 
-        let host = cfg
-            .host
-            .ok_or_else(|| ProviderError::InvalidConfig("missing OP_CONNECT_HOST".into()))?;
+        let host = cfg.connect_host;
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))

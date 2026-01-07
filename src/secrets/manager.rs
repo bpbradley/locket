@@ -4,175 +4,17 @@
 //! managing secret files based on file-backed templates containing secret references.
 
 use crate::events::{EventHandler, FsEvent, HandlerError};
-use crate::path::{AbsolutePath, CanonicalPath, PathMapping};
+use crate::path::{AbsolutePath, CanonicalPath};
 use crate::provider::SecretsProvider;
+use crate::secrets::config::{InjectFailurePolicy, SecretManagerConfig};
 use crate::secrets::registry::SecretFileRegistry;
-use crate::secrets::{MemSize, Secret, SecretError, SecretSource, file::SecretFile};
+use crate::secrets::{SecretError, SecretSource, file::SecretFile};
 use crate::template::Template;
-use crate::write::FileWriter;
 use async_trait::async_trait;
-use clap::{Args, ValueEnum};
 use secrecy::ExposeSecret;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-
-#[derive(Debug, Clone, Args)]
-pub struct SecretFileOpts {
-    /// Mapping of source paths to destination paths.
-    ///
-    /// Maps sources (holding secret templates) to destination paths
-    /// (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.
-    ///
-    /// Multiple mappings can be provided, separated by commas, or supplied
-    /// multiple times as arguments.
-    ///
-    /// Example: `--map /templates:/run/secrets/app`
-    ///
-    /// **CLI Default:** No mappings
-    /// {n}**Docker Default:** `/templates:/run/secrets/locket`
-    #[arg(
-        long = "map",
-        env = "SECRET_MAP",
-        value_delimiter = ',',
-        hide_env_values = true
-    )]
-    pub mapping: Vec<PathMapping>,
-
-    /// Additional secret values specified as LABEL=SECRET_TEMPLATE
-    ///
-    /// Multiple values can be provided, separated by commas.
-    /// Or supplied multiple times as arguments.
-    ///
-    /// Loading from file is supported via `LABEL=@/path/to/file`.
-    ///
-    /// Example:
-    ///
-    /// ```sh
-    ///     --secret db_password={{op://..}}
-    ///     --secret api_key={{op://..}}
-    /// ```
-    #[arg(
-        long = "secret",
-        env = "LOCKET_SECRETS",
-        value_name = "label={{template}}",
-        value_delimiter = ',',
-        hide_env_values = true
-    )]
-    pub secrets: Vec<Secret>,
-
-    /// Directory where secret values (literals) are materialized
-    #[arg(
-        long = "out",
-        env = "DEFAULT_SECRET_DIR",
-        default_value = SecretFileOpts::default().secret_dir.to_string()
-    )]
-    pub secret_dir: AbsolutePath,
-
-    /// Policy for handling injection failures
-    #[arg(
-        long = "inject-policy",
-        env = "INJECT_POLICY",
-        value_enum,
-        default_value_t = InjectFailurePolicy::CopyUnmodified
-    )]
-    pub policy: InjectFailurePolicy,
-
-    /// Maximum allowable size for a template file. Files larger than this will be rejected.
-    ///
-    /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
-    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE", default_value = MemSize::default().to_string())]
-    pub max_file_size: MemSize,
-
-    /// File writing permissions
-    #[command(flatten)]
-    pub writer: FileWriter,
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum, Default)]
-pub enum InjectFailurePolicy {
-    /// Failures are treated as errors and will abort the process
-    Error,
-    /// On failure, copy the unmodified secret to destination
-    #[default]
-    CopyUnmodified,
-    /// On failure, ignore the secret and log a warning
-    Ignore,
-}
-
-impl SecretFileOpts {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn with_mapping(mut self, mapping: Vec<PathMapping>) -> Self {
-        self.mapping = mapping;
-        self
-    }
-    pub fn with_secret_dir(mut self, dir: AbsolutePath) -> Self {
-        self.secret_dir = dir;
-        self
-    }
-    pub fn with_policy(mut self, policy: InjectFailurePolicy) -> Self {
-        self.policy = policy;
-        self
-    }
-    pub fn with_secrets(mut self, secrets: Vec<Secret>) -> Self {
-        self.secrets = secrets;
-        self
-    }
-    pub fn with_writer(mut self, writer: FileWriter) -> Self {
-        self.writer = writer;
-        self
-    }
-    fn resolve(&mut self) -> Result<(), SecretError> {
-        let mut sources = Vec::new();
-        let mut destinations = Vec::new();
-
-        for m in &self.mapping {
-            sources.push(m.src());
-            destinations.push(m.dst());
-        }
-        destinations.push(&self.secret_dir);
-
-        // Check for feedback loops and self-destruct scenarios
-        for src in &sources {
-            for dst in &destinations {
-                if dst.starts_with(src) {
-                    return Err(SecretError::Loop {
-                        src: src.to_path_buf(),
-                        dst: dst.to_path_buf(),
-                    });
-                }
-                if src.starts_with(dst) {
-                    return Err(SecretError::Destructive {
-                        src: src.to_path_buf(),
-                        dst: dst.to_path_buf(),
-                    });
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl Default for SecretFileOpts {
-    fn default() -> Self {
-        Self {
-            mapping: Vec::new(),
-            #[cfg(target_os = "linux")]
-            secret_dir: AbsolutePath::new("/run/secrets/locket"),
-            #[cfg(target_os = "macos")]
-            secret_dir: AbsolutePath::new("/private/tmp/locket"),
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            secret_dir: AbsolutePath::new("./secrets"), // Fallback
-            secrets: Vec::new(),
-            policy: InjectFailurePolicy::CopyUnmodified,
-            max_file_size: MemSize::default(),
-            writer: FileWriter::default(),
-        }
-    }
-}
 
 /// Manager for secret files, responsible for resolving and materializing secrets
 /// based on templates and secret references.
@@ -180,7 +22,7 @@ impl Default for SecretFileOpts {
 /// It maintains a registry of secret files, handles file system events,
 /// and interacts with a secrets provider to fetch secret values.
 pub struct SecretFileManager {
-    opts: SecretFileOpts,
+    config: SecretManagerConfig,
     registry: SecretFileRegistry,
     literals: Vec<SecretFile>,
     provider: Arc<dyn SecretsProvider>,
@@ -188,26 +30,26 @@ pub struct SecretFileManager {
 
 impl SecretFileManager {
     pub fn new(
-        mut opts: SecretFileOpts,
+        mut config: SecretManagerConfig,
         provider: Arc<dyn SecretsProvider>,
     ) -> Result<Self, SecretError> {
+        config.validate_structure()?;
+
         let mut pinned = Vec::new();
         let mut literals = Vec::new();
 
-        opts.resolve()?;
-
-        for s in &opts.secrets {
-            let f = SecretFile::from_secret(s.clone(), &opts.secret_dir, opts.max_file_size)?;
+        for s in &config.secrets {
+            let f = SecretFile::from_secret(s.clone(), &config.out, config.max_file_size)?;
             match f.source() {
                 SecretSource::File(_) => pinned.push(f),
                 SecretSource::Literal { .. } => literals.push(f),
             }
         }
 
-        let registry = SecretFileRegistry::new(opts.mapping.clone(), pinned, opts.max_file_size);
+        let registry = SecretFileRegistry::new(config.map.clone(), pinned, config.max_file_size);
 
         let manager = Self {
-            opts,
+            config,
             registry,
             literals,
             provider,
@@ -222,8 +64,8 @@ impl SecretFileManager {
         self.registry.iter().chain(self.literals.iter())
     }
 
-    pub fn options(&self) -> &SecretFileOpts {
-        &self.opts
+    pub fn config(&self) -> &SecretManagerConfig {
+        &self.config
     }
 
     pub fn sources(&self) -> Vec<AbsolutePath> {
@@ -232,8 +74,8 @@ impl SecretFileManager {
             .iter()
             .filter_map(|f| f.source().path().map(|p| AbsolutePath::from(p.clone())));
         let mapped = self
-            .opts
-            .mapping
+            .config
+            .map
             .iter()
             .map(|m| AbsolutePath::from(m.src().clone()));
 
@@ -281,7 +123,7 @@ impl SecretFileManager {
     }
 
     pub async fn materialize(&self, file: &SecretFile, content: String) -> Result<(), SecretError> {
-        let writer = self.opts.writer.clone();
+        let writer = self.config.writer.clone();
         let dest = file.dest().clone();
         let bytes = content.into_bytes();
 
@@ -334,11 +176,11 @@ impl SecretFileManager {
         match self.resolve(file).await {
             Ok(content) => {
                 if let Err(e) = self.materialize(file, content).await {
-                    return self.handle_policy(file, e, self.opts.policy).await;
+                    return self.handle_policy(file, e, self.config.inject_policy).await;
                 }
                 Ok(())
             }
-            Err(e) => self.handle_policy(file, e, self.opts.policy).await,
+            Err(e) => self.handle_policy(file, e, self.config.inject_policy).await,
         }
     }
 

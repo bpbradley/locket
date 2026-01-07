@@ -8,16 +8,19 @@
 
 use crate::path::CanonicalPath;
 use crate::provider::ProviderError;
+use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error;
 
+pub mod config;
 mod file;
 mod manager;
 mod registry;
-pub use crate::secrets::manager::{InjectFailurePolicy, SecretFileManager, SecretFileOpts};
+pub use crate::secrets::config::{InjectFailurePolicy, SecretManagerArgs, SecretManagerConfig};
+pub use crate::secrets::manager::SecretFileManager;
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -124,7 +127,8 @@ impl From<&SecretKey> for String {
 /// For example, in the SecretFileManager, anonymous secrets are treated the same as Named
 /// file backed secrets, except the key is derived from the file name.
 /// However in the EnvManager, anonymous secrets are treated as .env files.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "String")]
 pub enum Secret {
     /// An anonymous secret source (e.g., a file path or string literal)
     ///
@@ -177,6 +181,14 @@ impl Secret {
             Secret::Anonymous(s) => s,
             Secret::Named { source, .. } => source,
         }
+    }
+}
+
+impl TryFrom<String> for Secret {
+    type Error = SecretError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
     }
 }
 
@@ -303,9 +315,18 @@ impl<'a> SourceReader<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(try_from = "String")]
 pub struct MemSize {
     pub bytes: u64,
+}
+
+impl TryFrom<String> for MemSize {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
 }
 
 impl Default for MemSize {

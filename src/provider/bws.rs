@@ -31,6 +31,12 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Deserialize)]
 pub struct BwsUrl(Url);
 
+impl Default for BwsUrl {
+    fn default() -> Self {
+        Self(Url::parse("https://api.bitwarden.com").expect("valid url"))
+    }
+}
+
 impl BwsUrl {
     /// Get the URL as a string, stripping any trailing slash
     /// This is needed because the BWS SDK does not accept URLs with trailing slashes
@@ -80,16 +86,16 @@ impl ReferenceParser for BwsProvider {
 impl BwsProvider {
     pub async fn new(cfg: BwsConfig) -> Result<Self, ProviderError> {
         let settings = ClientSettings {
-            identity_url: cfg.identity_url.to_string(),
-            api_url: cfg.api_url.to_string(),
-            user_agent: cfg.user_agent,
+            identity_url: cfg.bws_identity_url.to_string(),
+            api_url: cfg.bws_api_url.to_string(),
+            user_agent: cfg.bws_user_agent,
             device_type: DeviceType::SDK,
         };
 
         let client = Client::new(Some(settings));
 
         let auth_req = AccessTokenLoginRequest {
-            access_token: cfg.token.expose_secret().to_string(),
+            access_token: cfg.bws_token.expose_secret().to_string(),
             state_file: None, // We are stateless; no cache file
         };
 
@@ -101,7 +107,7 @@ impl BwsProvider {
 
         Ok(Self {
             client,
-            max_concurrent: cfg.max_concurrent,
+            max_concurrent: cfg.bws_max_concurrent,
         })
     }
 }

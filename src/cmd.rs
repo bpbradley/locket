@@ -16,6 +16,8 @@ mod exec;
 mod healthcheck;
 mod inject;
 
+use crate::config;
+
 #[cfg(feature = "compose")]
 pub use compose::compose;
 #[cfg(feature = "exec")]
@@ -45,7 +47,7 @@ pub enum Command {
     ///     --map ./tpl:/run/secrets/locket/mapped \ # Maps all templates in `./tpl/` directory to secrets in `/run/secrets/locket/mapped`
     /// ```
     #[clap(verbatim_doc_comment)]
-    Inject(Box<inject::InjectArgs>),
+    Inject(Box<config::inject::InjectArgs>),
 
     /// Execute a command with secrets injected into the process environment.
     /// and optionally materialize secrets from template files.
@@ -60,7 +62,7 @@ pub enum Command {
     /// ```
     #[cfg(feature = "exec")]
     #[clap(verbatim_doc_comment)]
-    Exec(Box<exec::ExecArgs>),
+    Exec(Box<config::exec::ExecArgs>),
 
     /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
     ///

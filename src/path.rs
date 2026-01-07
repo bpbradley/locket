@@ -6,6 +6,7 @@
 //! Using these utilities prevents path traversal vulnerabilities when handling user inputs.
 
 use crate::secrets::SecretError;
+use serde::Deserialize;
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -16,8 +17,23 @@ use std::str::FromStr;
 /// and is free of relative components like `.` or `..` (lexically cleaned).
 ///
 /// This type does not verify existence on disk. Use [`CanonicalPath`] for that.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
+#[serde(try_from = "String")]
 pub struct AbsolutePath(PathBuf);
+
+impl Default for AbsolutePath {
+    fn default() -> Self {
+        Self::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")))
+    }
+}
+
+impl TryFrom<String> for AbsolutePath {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
 
 impl AbsolutePath {
     pub fn into_inner(self) -> PathBuf {
@@ -45,8 +61,17 @@ impl AbsolutePath {
 /// Constructing this type performs filesystem I/O to validate existence
 /// and resolve links. It therefore has a performance cost compared to [`AbsolutePath`].
 /// But this should be the preferred type for source paths which must exist.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
+#[serde(try_from = "String")]
 pub struct CanonicalPath(PathBuf);
+
+impl TryFrom<String> for CanonicalPath {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
 
 impl CanonicalPath {
     pub fn into_inner(self) -> PathBuf {
@@ -179,10 +204,19 @@ impl PathExt for Path {
 /// A validated mapping of a source path to a destination path.
 ///
 /// Used for mapping secret templates (input) to their materialized locations (output).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "String")]
 pub struct PathMapping {
     src: CanonicalPath,
     dst: AbsolutePath,
+}
+
+impl TryFrom<String> for PathMapping {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
 }
 
 impl PathMapping {

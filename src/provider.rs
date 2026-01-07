@@ -8,13 +8,8 @@
 //! and a selection mechanism to choose the provider at runtime
 use crate::path::CanonicalPath;
 use async_trait::async_trait;
-#[cfg(feature = "bws")]
 use clap::{Args, ValueEnum};
-//#[cfg(feature = "connect")]
-//use connect::OpConnectConfig;
 use locket_derive::Overlay;
-//#[cfg(feature = "op")]
-//use op::OpConfig;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::num::NonZeroUsize;
@@ -26,7 +21,7 @@ compile_error!("At least one provider feature must be enabled (e.g. --features o
 
 #[cfg(feature = "bws")]
 mod bws;
-mod config;
+pub mod config;
 #[cfg(feature = "connect")]
 mod connect;
 #[cfg(feature = "op")]
@@ -102,9 +97,9 @@ pub trait SecretsProvider: ReferenceParser + Send + Sync {
 #[derive(Debug, Clone)]
 pub enum Provider {
     #[cfg(feature = "op")]
-    Op(op::OpConfig),
+    Op(config::op::OpConfig),
     #[cfg(feature = "connect")]
-    Connect(connect::OpConnectConfig),
+    Connect(config::connect::ConnectConfig),
     #[cfg(feature = "bws")]
     Bws(config::bws::BwsConfig),
 }
@@ -137,7 +132,7 @@ pub struct ProviderArgs {
 }
 
 impl TryFrom<ProviderArgs> for Provider {
-    type Error = crate::config::ConfigError;
+    type Error = crate::error::LocketError;
 
     fn try_from(args: ProviderArgs) -> Result<Self, Self::Error> {
         let kind = args.kind.ok_or_else(|| {
@@ -150,17 +145,9 @@ impl TryFrom<ProviderArgs> for Provider {
             #[cfg(feature = "bws")]
             ProviderKind::Bws => Ok(Provider::Bws(args.config.bws.try_into()?)),
             #[cfg(feature = "op")]
-            ProviderKind::Op => {
-                // let config = args.config.op.try_into()?;
-                // Ok(Provider::Op(config))
-                todo!("Implement OpConfig migration")
-            }
+            ProviderKind::Op => Ok(Provider::Op(args.config.op.try_into()?)),
             #[cfg(feature = "connect")]
-            ProviderKind::OpConnect => {
-                // let config = args.config.connect.try_into()?;
-                // Ok(Provider::Connect(config))
-                todo!("Implement ConnectConfig migration")
-            }
+            ProviderKind::OpConnect => Ok(Provider::Connect(args.config.connect.try_into()?)),
         }
     }
 }
@@ -190,12 +177,16 @@ impl From<ProviderKind> for clap::builder::OsStr {
 
 #[derive(Args, Debug, Clone, Overlay, Deserialize, Default)]
 pub struct ProviderConfigs {
-    //#[cfg(feature = "op")]
-    //#[command(flatten, next_help_heading = "1Password (op)")]
-    //pub op: OpConfig,
-    //#[cfg(feature = "connect")]
-    //#[command(flatten, next_help_heading = "1Password Connect")]
-    //pub connect: OpConnectConfig,
+    #[cfg(feature = "op")]
+    #[command(flatten, next_help_heading = "1Password (op)")]
+    #[serde(flatten)]
+    pub op: config::op::OpArgs,
+
+    #[cfg(feature = "connect")]
+    #[command(flatten, next_help_heading = "1Password Connect")]
+    #[serde(flatten)]
+    pub connect: config::connect::ConnectArgs,
+
     #[cfg(feature = "bws")]
     #[command(flatten, next_help_heading = "Bitwarden Secrets Provider")]
     #[serde(flatten)]
@@ -203,7 +194,7 @@ pub struct ProviderConfigs {
 }
 
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct AuthToken(SecretString);
 
 impl AuthToken {

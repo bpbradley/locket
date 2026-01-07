@@ -19,6 +19,7 @@ use nix::sys::{
 };
 use nix::unistd::Pid;
 use secrecy::ExposeSecret;
+use serde::Deserialize;
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::process::ExitStatus;
@@ -109,8 +110,18 @@ impl std::fmt::Display for ShellCommand {
 }
 
 /// Default timeout for waiting for a child process to exit gracefully after SIGTERM.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(try_from = "String")]
 pub struct ProcessTimeout(pub Duration);
+
+impl TryFrom<String> for ProcessTimeout {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+            .map_err(|e: humantime::DurationError| e.to_string())
+    }
+}
 
 /// Defaults to seconds if no unit specified, otherwise uses humantime parsing.
 impl FromStr for ProcessTimeout {
