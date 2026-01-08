@@ -1,6 +1,6 @@
 use crate::provider::{AuthToken, ConcurrencyLimit};
 use clap::Args;
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::Deserialize;
 use url::Url;
 
@@ -11,7 +11,7 @@ pub struct ConnectConfig {
     pub connect_max_concurrent: ConcurrencyLimit,
 }
 
-#[derive(Args, Debug, Clone, Overlay, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
 #[locket(try_into = "ConnectConfig")]
 pub struct ConnectArgs {
     /// 1Password Connect Host HTTP(S) URL

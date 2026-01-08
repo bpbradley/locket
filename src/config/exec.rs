@@ -1,11 +1,10 @@
 use crate::logging::{Logger, LoggerArgs};
-use crate::path::AbsolutePath;
 use crate::process::{ProcessTimeout, ShellCommand};
 use crate::provider::{Provider, ProviderArgs};
 use crate::secrets::{Secret, SecretManagerArgs, SecretManagerConfig};
 use crate::watch::DebounceDuration;
 use clap::Args;
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -22,15 +21,9 @@ pub struct ExecConfig {
     pub logger: Logger,
 }
 
-#[derive(Args, Debug, Clone, Default, Deserialize, Overlay)]
+#[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
 #[locket(try_into = "ExecConfig")]
 pub struct ExecArgs {
-    /// Path to configuration file
-    #[arg(long, env = "LOCKET_CONFIG")]
-    #[serde(skip)]
-    #[locket(skip)]
-    pub config: Option<AbsolutePath>,
-
     /// Watch mode will monitor for changes to .env files and restart the command if changes are detected.
     #[arg(long, env = "LOCKET_EXEC_WATCH")]
     #[locket(default = false)]

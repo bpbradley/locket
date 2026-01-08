@@ -1,7 +1,7 @@
 use crate::path::AbsolutePath;
 use crate::provider::AuthToken;
 use clap::Args;
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default)]
@@ -10,7 +10,7 @@ pub struct OpConfig {
     pub op_config_dir: Option<AbsolutePath>,
 }
 
-#[derive(Args, Debug, Clone, Default, Overlay, Deserialize)]
+#[derive(Args, Debug, Clone, Default, LayeredConfig, Deserialize)]
 #[locket(try_into = "OpConfig")]
 pub struct OpArgs {
     /// 1Password Service Account Token

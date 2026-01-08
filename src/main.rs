@@ -5,7 +5,6 @@
 use clap::Parser;
 use locket::cmd;
 use locket::cmd::{Cli, Command};
-use locket::config::Layered;
 use locket::error::LocketError;
 use locket::logging::{LogFormat, LogLevel, Logger};
 use std::process::{ExitCode, Termination};
@@ -30,14 +29,12 @@ async fn run() -> Result<(), LocketError> {
     let cli = Cli::parse();
     match cli.cmd {
         Command::Inject(args) => {
-            let config_path = args.config.clone();
-            let config = (*args).resolve(config_path.as_deref())?;
+            let config = args.load()?;
             cmd::inject(config).await
         }
         #[cfg(feature = "exec")]
         Command::Exec(args) => {
-            let config_path = args.config.clone();
-            let config = (*args).resolve(config_path.as_deref())?;
+            let config = args.load()?;
             cmd::exec(config).await
         }
         Command::Healthcheck(args) => cmd::healthcheck(args),

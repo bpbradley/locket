@@ -1,5 +1,8 @@
 use crate::error::LocketError;
+use crate::path::AbsolutePath;
+use clap::Args;
 use serde::de::DeserializeOwned;
+use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 
@@ -42,6 +45,28 @@ impl<T> Overlay for Vec<T> {
     }
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct LayeredArgs<T: Args> {
+    /// Path to configuration file
+    #[arg(long, env = "LOCKET_CONFIG")]
+    pub config: Option<AbsolutePath>,
+
+    #[command(flatten)]
+    pub inner: T,
+}
+
+impl<T> LayeredArgs<T>
+where
+    T: Args,
+{
+    pub fn load<C>(self) -> Result<C, crate::error::LocketError>
+    where
+        T: Layered<C>,
+    {
+        self.inner.resolve(self.config.as_deref())
+    }
+}
+
 pub trait Layered<C>: Overlay + DeserializeOwned + Default + Sized {
     fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError>;
 }
@@ -74,4 +99,16 @@ where
 /// Trait for applying configured default values to optional fields.
 pub trait ApplyDefaults {
     fn apply_defaults(self) -> Self;
+}
+
+/// Trait to expose defaults defined in #[locket(default = ...)] for documentation generation.
+pub trait LocketDocDefaults {
+    fn register_defaults(map: &mut HashMap<String, String>);
+
+    /// Helper to get all defaults as a map
+    fn get_defaults() -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        Self::register_defaults(&mut map);
+        map
+    }
 }

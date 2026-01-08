@@ -1,11 +1,10 @@
 use crate::health::StatusFile;
 use crate::logging::{Logger, LoggerArgs};
-use crate::path::AbsolutePath;
 use crate::provider::{Provider, ProviderArgs};
 use crate::secrets::{SecretManagerArgs, SecretManagerConfig};
 use crate::watch::DebounceDuration;
 use clap::{Args, ValueEnum};
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::Deserialize;
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum, Deserialize, PartialEq, Eq)]
@@ -29,15 +28,9 @@ pub struct InjectConfig {
     pub logger: Logger,
 }
 
-#[derive(Args, Debug, Clone, Default, Deserialize, Overlay)]
+#[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
 #[locket(try_into = "InjectConfig")]
 pub struct InjectArgs {
-    /// Path to configuration file
-    #[arg(long, env = "LOCKET_CONFIG")]
-    #[serde(skip)]
-    #[locket(skip)]
-    pub config: Option<AbsolutePath>,
-
     /// Mode of operation
     #[arg(long = "mode", env = "LOCKET_INJECT_MODE", value_enum)]
     #[locket(default = InjectMode::OneShot)]

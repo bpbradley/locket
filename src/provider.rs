@@ -9,7 +9,7 @@
 use crate::path::CanonicalPath;
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::num::NonZeroUsize;
@@ -119,7 +119,7 @@ impl Provider {
     }
 }
 
-#[derive(Args, Debug, Clone, Overlay, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
 pub struct ProviderArgs {
     /// Secrets provider backend to use.
     #[arg(long = "provider", env = "SECRETS_PROVIDER")]
@@ -175,7 +175,7 @@ impl From<ProviderKind> for clap::builder::OsStr {
     }
 }
 
-#[derive(Args, Debug, Clone, Overlay, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
 pub struct ProviderConfigs {
     #[cfg(feature = "op")]
     #[command(flatten, next_help_heading = "1Password (op)")]

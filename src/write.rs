@@ -6,7 +6,7 @@
 //! exist with the correct permissions before writing.
 use crate::path::{AbsolutePath, CanonicalPath};
 use clap::Args;
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::Deserialize;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -44,7 +44,7 @@ pub enum FsModeError {
 }
 
 /// Utilities for writing files atomically with explicit permissions.
-#[derive(Clone, Args, Deserialize, Overlay, Debug, Default)]
+#[derive(Clone, Args, Deserialize, LayeredConfig, Debug, Default)]
 #[locket(try_into = "FileWriter")]
 pub struct FileWriterArgs {
     /// File permission mode

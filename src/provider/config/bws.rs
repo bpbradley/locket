@@ -1,6 +1,6 @@
 use crate::provider::{AuthToken, ConcurrencyLimit, bws::BwsUrl};
 use clap::Args;
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -12,7 +12,7 @@ pub struct BwsConfig {
     pub bws_token: AuthToken,
 }
 
-#[derive(Args, Debug, Clone, Overlay, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
 #[locket(try_into = "BwsConfig")]
 pub struct BwsArgs {
     /// Bitwarden API URL

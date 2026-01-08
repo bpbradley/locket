@@ -4,7 +4,7 @@
 //! Uses `tracing` and `tracing-subscriber` for implementation.
 
 use clap::{Args, ValueEnum};
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
@@ -90,7 +90,7 @@ impl FromStr for LogFormat {
     }
 }
 
-#[derive(Args, Debug, Clone, Default, Deserialize, Overlay)]
+#[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
 #[locket(try_into = "Logger")]
 pub struct LoggerArgs {
     /// Log format

@@ -6,8 +6,8 @@ use syn::{
     parse_macro_input,
 };
 
-#[proc_macro_derive(Overlay, attributes(locket))]
-pub fn derive_overlay(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(LayeredConfig, attributes(locket))]
+pub fn derive_layered_config(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     // Fail fast if attributes are invalid
@@ -16,8 +16,11 @@ pub fn derive_overlay(input: TokenStream) -> TokenStream {
     }
 
     let struct_name = input.ident;
+
+    // Generate all implementations
     let overlay_logic = generate_overlay_body(&input.data);
     let defaults_logic = generate_defaults_body(&input.data);
+    let doc_defaults_logic = generate_doc_defaults_impl(&input.data, &struct_name);
 
     // Check for #[locket(try_into = "Path::To::Target")]
     let config_target = input.attrs.iter().find_map(|attr| {
@@ -72,6 +75,8 @@ pub fn derive_overlay(input: TokenStream) -> TokenStream {
             }
         }
 
+        #doc_defaults_logic
+
         #try_from_impl
     };
 
@@ -101,7 +106,7 @@ fn generate_overlay_body(data: &Data) -> proc_macro2::TokenStream {
             }
             Fields::Unit => quote! { Self },
         },
-        _ => panic!("#[derive(Overlay)] only works on structs"),
+        _ => panic!("#[derive(LayeredConfig)] only works on structs"),
     }
 }
 
@@ -149,9 +154,80 @@ fn generate_defaults_body(data: &Data) -> proc_macro2::TokenStream {
                 });
                 quote! { Self { #(#recurse),* } }
             }
-            _ => quote! { self }, // No defaults support for Tuple/Unit structs currently
+            _ => quote! { self },
         },
         _ => quote! { self },
+    }
+}
+
+fn generate_doc_defaults_impl(data: &Data, struct_name: &syn::Ident) -> proc_macro2::TokenStream {
+    let body = match data {
+        Data::Struct(struct_data) => match &struct_data.fields {
+            Fields::Named(fields) => {
+                let statements = fields.named.iter().map(|f| {
+                    let is_flattened = ["command", "clap", "arg", "serde"]
+                        .iter()
+                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
+
+                    if is_flattened {
+                        let ty = &f.ty;
+                        return quote! {
+                            <#ty as crate::config::LocketDocDefaults>::register_defaults(map);
+                        };
+                    }
+
+                    let is_skipped = f.attrs.iter().any(|a| {
+                        a.path().is_ident("locket")
+                            && a.parse_args::<Meta>()
+                                .is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("skip")))
+                    });
+                    if is_skipped {
+                        return quote! {};
+                    }
+
+                    let default_val = f.attrs.iter().find_map(|attr| {
+                        if !attr.path().is_ident("locket") {
+                            return None;
+                        }
+                        match attr.parse_args::<Meta>().ok()? {
+                            Meta::NameValue(nv) if nv.path.is_ident("default") => Some(nv.value),
+                            _ => None,
+                        }
+                    });
+
+                    if let Some(expr) = default_val {
+                        let flag_name = get_clap_long_name(f);
+
+                        // Convert expression to string for documentation
+                        let default_str = match expr {
+                            Expr::Lit(ExprLit {
+                                lit: Lit::Str(s), ..
+                            }) => s.value(),
+                            // For complex expressions, fallback to stringifying the code tokens
+                            _ => quote!(#expr).to_string().replace(" ", ""),
+                        };
+
+                        quote! {
+                            map.insert(#flag_name.to_string(), #default_str.to_string());
+                        }
+                    } else {
+                        quote! {}
+                    }
+                });
+                quote! { #(#statements)* }
+            }
+            _ => quote! {},
+        },
+        _ => quote! {},
+    };
+
+    quote! {
+        #[automatically_derived]
+        impl crate::config::LocketDocDefaults for #struct_name {
+            fn register_defaults(map: &mut std::collections::HashMap<String, String>) {
+                #body
+            }
+        }
     }
 }
 
@@ -205,12 +281,10 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                     }
 
                     if is_explicit_optional {
-                        // Pass through Option::None if missing
                         Some(quote_spanned! {f.span()=>
                             #name: args.#name
                         })
                     } else if has_default {
-                        // Safe Unwrap (guaranteed by apply_defaults)
                         Some(quote_spanned! {f.span()=>
                             #name: args.#name.expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
                         })
@@ -219,6 +293,7 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                         let flag_name = get_clap_long_name(f);
                         let flag_literal = format!("--{}", flag_name);
                         let err_msg = format!("Missing required configuration field: {}", flag_literal);
+
                         Some(quote_spanned! {f.span()=>
                             #name: args.#name.ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
                         })
@@ -241,7 +316,6 @@ fn validate_attributes(data: &Data) -> syn::Result<()> {
     };
 
     for field in &fields.named {
-        // Mismatched Flattening
         let has_clap_flatten = ["command", "clap", "arg"]
             .iter()
             .any(|k| has_attribute(&field.attrs, k, "flatten"));
@@ -262,8 +336,6 @@ fn validate_attributes(data: &Data) -> syn::Result<()> {
             ));
         }
 
-        // Clap shadowing
-        // check if 'arg' or 'clap' has 'default_value' or 'default_value_t'
         let has_clap_default = ["clap", "arg"].iter().any(|k| {
             has_attribute(&field.attrs, k, "default_value")
                 || has_attribute(&field.attrs, k, "default_value_t")
@@ -281,13 +353,11 @@ fn validate_attributes(data: &Data) -> syn::Result<()> {
     Ok(())
 }
 
-/// Helper to parse attributes
 fn has_attribute(attrs: &[Attribute], path_ident: &str, nested_ident: &str) -> bool {
     attrs.iter().any(|attr| {
         if !attr.path().is_ident(path_ident) {
             return false;
         }
-
         let mut found = false;
         let _ = attr.parse_nested_meta(|meta| {
             if meta.path.is_ident(nested_ident) {
@@ -300,24 +370,21 @@ fn has_attribute(attrs: &[Attribute], path_ident: &str, nested_ident: &str) -> b
 }
 
 fn get_clap_long_name(field: &Field) -> String {
-    // Default is field_name -> field-name
     let default_name = field.ident.as_ref().unwrap().to_string().replace('_', "-");
 
     for attr in &field.attrs {
         if !attr.path().is_ident("arg") && !attr.path().is_ident("clap") {
             continue;
         }
-
-        // search for `long = "value"`
         let mut explicit_name = None;
         let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("long") {
-                // #[arg(long = "something")]
-                if let Ok(value) = meta.value()
-                    && let Ok(lit) = value.parse::<LitStr>() {
-                        explicit_name = Some(lit.value());
-                    }
+            if meta.path.is_ident("long")
+                && let Ok(value) = meta.value()
+                && let Ok(lit) = value.parse::<LitStr>()
+            {
+                explicit_name = Some(lit.value());
             }
+
             Ok(())
         });
 
@@ -325,6 +392,5 @@ fn get_clap_long_name(field: &Field) -> String {
             return name;
         }
     }
-
     default_name
 }

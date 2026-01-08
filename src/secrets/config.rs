@@ -2,7 +2,7 @@ use crate::path::{AbsolutePath, PathMapping};
 use crate::secrets::{MemSize, Secret, SecretError};
 use crate::write::{FileWriter, FileWriterArgs};
 use clap::{Args, ValueEnum};
-use locket_derive::Overlay;
+use locket_derive::LayeredConfig;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default)]
@@ -58,7 +58,7 @@ pub enum InjectFailurePolicy {
     Ignore,
 }
 
-#[derive(Debug, Clone, Args, Deserialize, Overlay, Default)]
+#[derive(Debug, Clone, Args, Deserialize, LayeredConfig, Default)]
 #[locket(try_into = "SecretManagerConfig")]
 pub struct SecretManagerArgs {
     /// Mapping of source paths to destination paths.
