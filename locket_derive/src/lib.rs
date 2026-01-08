@@ -2,7 +2,8 @@ use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Lit, Meta, Type, parse_macro_input,
+    Attribute, Data, DeriveInput, Expr, ExprLit, Field, Fields, Lit, LitStr, Meta, Type,
+    parse_macro_input,
 };
 
 #[proc_macro_derive(Overlay, attributes(locket))]
@@ -215,7 +216,9 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                         })
                     } else {
                         // Required Field Validation
-                        let err_msg = format!("Missing required configuration field: {}", name.as_ref().unwrap());
+                        let flag_name = get_clap_long_name(f);
+                        let flag_literal = format!("--{}", flag_name);
+                        let err_msg = format!("Missing required configuration field: {}", flag_literal);
                         Some(quote_spanned! {f.span()=>
                             #name: args.#name.ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
                         })
@@ -294,4 +297,34 @@ fn has_attribute(attrs: &[Attribute], path_ident: &str, nested_ident: &str) -> b
         });
         found
     })
+}
+
+fn get_clap_long_name(field: &Field) -> String {
+    // Default is field_name -> field-name
+    let default_name = field.ident.as_ref().unwrap().to_string().replace('_', "-");
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("arg") && !attr.path().is_ident("clap") {
+            continue;
+        }
+
+        // search for `long = "value"`
+        let mut explicit_name = None;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("long") {
+                // #[arg(long = "something")]
+                if let Ok(value) = meta.value()
+                    && let Ok(lit) = value.parse::<LitStr>() {
+                        explicit_name = Some(lit.value());
+                    }
+            }
+            Ok(())
+        });
+
+        if let Some(name) = explicit_name {
+            return name;
+        }
+    }
+
+    default_name
 }

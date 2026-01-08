@@ -15,7 +15,7 @@ pub enum ConfigError {
     #[error("failed to parse TOML configuration: {0}")]
     Parse(#[from] toml::de::Error),
 
-    #[error("validation error: {0}")]
+    #[error("{0}")]
     Validation(String),
 
     #[cfg(feature = "exec")]

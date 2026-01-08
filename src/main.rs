@@ -7,6 +7,7 @@ use locket::cmd;
 use locket::cmd::{Cli, Command};
 use locket::config::Layered;
 use locket::error::LocketError;
+use locket::logging::{LogFormat, LogLevel, Logger};
 use std::process::{ExitCode, Termination};
 mod exits;
 use exits::LocketExitCode;
@@ -15,7 +16,13 @@ use exits::LocketExitCode;
 async fn main() -> ExitCode {
     match run().await {
         Ok(_) => ExitCode::SUCCESS,
-        Err(e) => LocketExitCode(e).report(),
+        Err(e) => {
+            // Fallback Logger
+            // This should fail if a logger has already been initialized
+            // allowing the already configured logger to handle the error reporting.
+            let _ = Logger::new(LogFormat::Text, LogLevel::Info).init();
+            LocketExitCode(e).report()
+        }
     }
 }
 
