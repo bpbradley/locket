@@ -29,6 +29,7 @@ use uuid::Uuid;
 /// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
 /// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct BwsUrl(Url);
 
 impl BwsUrl {

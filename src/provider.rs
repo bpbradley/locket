@@ -120,10 +120,11 @@ impl Provider {
 }
 
 #[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 pub struct ProviderArgs {
     /// Secrets provider backend to use.
-    #[arg(long = "provider", env = "SECRETS_PROVIDER")]
-    pub kind: Option<ProviderKind>,
+    #[arg(long, env = "SECRETS_PROVIDER")]
+    pub provider: Option<ProviderKind>,
 
     /// Provider-specific configuration
     #[command(flatten)]
@@ -135,7 +136,7 @@ impl TryFrom<ProviderArgs> for Provider {
     type Error = crate::error::LocketError;
 
     fn try_from(args: ProviderArgs) -> Result<Self, Self::Error> {
-        let kind = args.kind.ok_or_else(|| {
+        let kind = args.provider.ok_or_else(|| {
             crate::config::ConfigError::Validation(
                 "Missing required argument: --provider <kind>".into(),
             )
@@ -153,6 +154,7 @@ impl TryFrom<ProviderArgs> for Provider {
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
     /// 1Password Service Account
     #[cfg(feature = "op")]
@@ -176,6 +178,7 @@ impl From<ProviderKind> for clap::builder::OsStr {
 }
 
 #[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 pub struct ProviderConfigs {
     #[cfg(feature = "op")]
     #[command(flatten, next_help_heading = "1Password (op)")]
@@ -195,6 +198,8 @@ pub struct ProviderConfigs {
 
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub struct AuthToken(SecretString);
 
 impl AuthToken {
@@ -223,6 +228,13 @@ impl AuthToken {
 impl AsRef<SecretString> for AuthToken {
     fn as_ref(&self) -> &SecretString {
         &self.0
+    }
+}
+
+impl TryFrom<String> for AuthToken {
+    type Error = ProviderError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
     }
 }
 
@@ -259,6 +271,7 @@ impl ExposeSecret<str> for AuthToken {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct ConcurrencyLimit(NonZeroUsize);
 
 impl ConcurrencyLimit {

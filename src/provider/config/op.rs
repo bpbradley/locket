@@ -11,6 +11,7 @@ pub struct OpConfig {
 }
 
 #[derive(Args, Debug, Clone, Default, LayeredConfig, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[locket(try_into = "OpConfig")]
 pub struct OpArgs {
     /// 1Password Service Account Token

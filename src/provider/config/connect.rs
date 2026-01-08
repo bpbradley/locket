@@ -13,6 +13,7 @@ pub struct ConnectConfig {
 
 #[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
 #[locket(try_into = "ConnectConfig")]
+#[serde(rename_all = "kebab-case")]
 pub struct ConnectArgs {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long, env = "OP_CONNECT_HOST")]

@@ -18,6 +18,7 @@ pub enum LoggingError {
 }
 
 #[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 pub enum LogFormat {
     #[default]
     /// Plain text log format
@@ -56,6 +57,7 @@ impl std::fmt::Display for LogLevel {
 }
 
 #[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -106,6 +108,7 @@ impl FromStr for LogFormat {
 }
 
 #[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
+#[serde(rename_all = "kebab-case")]
 #[locket(try_into = "Logger")]
 pub struct LoggerArgs {
     /// Log format
@@ -120,6 +123,7 @@ pub struct LoggerArgs {
 }
 
 #[derive(Default, Args, Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct Logger {
     pub log_format: LogFormat,
     pub log_level: LogLevel,

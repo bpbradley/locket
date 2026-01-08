@@ -235,6 +235,7 @@ impl<H: EventHandler> FsWatcher<H> {
 
 /// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct DebounceDuration(pub Duration);
 

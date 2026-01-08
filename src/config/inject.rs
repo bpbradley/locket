@@ -8,6 +8,7 @@ use locket_derive::LayeredConfig;
 use serde::Deserialize;
 
 #[derive(Default, Copy, Clone, Debug, ValueEnum, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub enum InjectMode {
     #[default]
     /// **Default** Materialize all secrets once and exit
@@ -38,6 +39,7 @@ pub struct InjectConfig {
 }
 
 #[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
+#[serde(rename_all = "kebab-case")]
 #[locket(try_into = "InjectConfig")]
 pub struct InjectArgs {
     /// Mode of operation

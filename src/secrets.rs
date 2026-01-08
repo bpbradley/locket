@@ -128,6 +128,7 @@ impl From<&SecretKey> for String {
 /// file backed secrets, except the key is derived from the file name.
 /// However in the EnvManager, anonymous secrets are treated as .env files.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub enum Secret {
     /// An anonymous secret source (e.g., a file path or string literal)
@@ -316,6 +317,7 @@ impl<'a> SourceReader<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct MemSize {
     pub bytes: u64,

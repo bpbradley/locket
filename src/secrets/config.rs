@@ -3,7 +3,7 @@ use crate::secrets::{MemSize, Secret, SecretError};
 use crate::write::{FileWriter, FileWriterArgs};
 use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Clone)]
 pub struct SecretManagerConfig {
@@ -66,6 +66,7 @@ impl SecretManagerConfig {
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub enum InjectFailurePolicy {
     /// Failures are treated as errors and will abort the process
     Error,
@@ -86,6 +87,7 @@ impl std::fmt::Display for InjectFailurePolicy {
 }
 
 #[derive(Debug, Clone, Args, Deserialize, LayeredConfig, Default)]
+#[serde(rename_all = "kebab-case")]
 #[locket(try_into = "SecretManagerConfig")]
 pub struct SecretManagerArgs {
     /// Mapping of source paths to destination paths.
@@ -106,6 +108,7 @@ pub struct SecretManagerArgs {
         value_delimiter = ',',
         hide_env_values = true
     )]
+    #[serde(alias = "secret_map", default)]
     pub map: Vec<PathMapping>,
 
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
@@ -128,6 +131,7 @@ pub struct SecretManagerArgs {
         value_delimiter = ',',
         hide_env_values = true
     )]
+    #[serde(deserialize_with = "deserialize_secrets_vec", default)]
     pub secrets: Vec<Secret>,
 
     /// Directory where secret values (literals) are materialized
@@ -151,4 +155,21 @@ pub struct SecretManagerArgs {
     #[command(flatten)]
     #[serde(flatten)]
     pub writer: FileWriterArgs,
+}
+
+fn deserialize_secrets_vec<'de, D>(deserializer: D) -> Result<Vec<Secret>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Helper {
+        List(Vec<Secret>),
+        Map(std::collections::HashMap<String, String>),
+    }
+
+    match Helper::deserialize(deserializer)? {
+        Helper::List(list) => Ok(list),
+        Helper::Map(map) => Secret::try_from_map(map).map_err(serde::de::Error::custom),
+    }
 }

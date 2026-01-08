@@ -13,6 +13,7 @@ pub struct BwsConfig {
 }
 
 #[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 #[locket(try_into = "BwsConfig")]
 pub struct BwsArgs {
     /// Bitwarden API URL

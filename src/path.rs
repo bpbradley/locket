@@ -6,7 +6,7 @@
 //! Using these utilities prevents path traversal vulnerabilities when handling user inputs.
 
 use crate::secrets::SecretError;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -19,6 +19,7 @@ use std::str::FromStr;
 /// This type does not verify existence on disk. Use [`CanonicalPath`] for that.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
 #[serde(try_from = "String")]
+#[serde(rename_all = "kebab-case")]
 pub struct AbsolutePath(PathBuf);
 
 impl TryFrom<String> for AbsolutePath {
@@ -56,6 +57,7 @@ impl AbsolutePath {
 /// and resolve links. It therefore has a performance cost compared to [`AbsolutePath`].
 /// But this should be the preferred type for source paths which must exist.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct CanonicalPath(PathBuf);
 
@@ -198,18 +200,35 @@ impl PathExt for Path {
 /// A validated mapping of a source path to a destination path.
 ///
 /// Used for mapping secret templates (input) to their materialized locations (output).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(try_from = "String")]
+#[derive(Debug, Clone)]
 pub struct PathMapping {
     src: CanonicalPath,
     dst: AbsolutePath,
 }
 
-impl TryFrom<String> for PathMapping {
-    type Error = String;
+impl<'de> Deserialize<'de> for PathMapping {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Helper {
+            Str(String),
+            Map {
+                #[serde(alias = "source")]
+                src: CanonicalPath,
+                #[serde(alias = "dest")]
+                dst: AbsolutePath,
+            },
+        }
 
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse()
+        match Helper::deserialize(deserializer)? {
+            Helper::Str(s) => s.parse().map_err(serde::de::Error::custom),
+            Helper::Map { src, dst } => {
+                PathMapping::try_new(src, dst).map_err(serde::de::Error::custom)
+            }
+        }
     }
 }
 

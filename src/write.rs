@@ -45,6 +45,7 @@ pub enum FsModeError {
 
 /// Utilities for writing files atomically with explicit permissions.
 #[derive(Clone, Args, Deserialize, LayeredConfig, Debug, Default)]
+#[serde(rename_all = "kebab-case")]
 #[locket(try_into = "FileWriter")]
 pub struct FileWriterArgs {
     /// File permission mode
@@ -185,6 +186,7 @@ impl std::fmt::Debug for FileWriter {
 /// This ensures that permission values are validated (must be <= 0o7777)
 /// and correctly interpreted as octal.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct FsMode(u32);
 

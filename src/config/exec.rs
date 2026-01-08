@@ -22,6 +22,7 @@ pub struct ExecConfig {
 }
 
 #[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
+#[serde(rename_all = "kebab-case")]
 #[locket(try_into = "ExecConfig")]
 pub struct ExecArgs {
     /// Watch mode will monitor for changes to .env files and restart the command if changes are detected.

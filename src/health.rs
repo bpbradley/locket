@@ -18,6 +18,7 @@ pub enum HealthError {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct StatusFile(AbsolutePath);
 
