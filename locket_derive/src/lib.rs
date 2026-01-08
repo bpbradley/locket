@@ -198,17 +198,23 @@ fn generate_doc_defaults_impl(data: &Data, struct_name: &syn::Ident) -> proc_mac
                     if let Some(expr) = default_val {
                         let flag_name = get_clap_long_name(f);
 
-                        // Convert expression to string for documentation
-                        let default_str = match expr {
+                        match expr {
+                            // String Literal
                             Expr::Lit(ExprLit {
                                 lit: Lit::Str(s), ..
-                            }) => s.value(),
-                            // For complex expressions, fallback to stringifying the code tokens
-                            _ => quote!(#expr).to_string().replace(" ", ""),
-                        };
-
-                        quote! {
-                            map.insert(#flag_name.to_string(), #default_str.to_string());
+                            }) => {
+                                let val = s.value();
+                                quote! {
+                                    map.insert(#flag_name.to_string(), #val.to_string());
+                                }
+                            }
+                            // emit the expression directly.
+                            // assume the result implements ToString or Display.
+                            _ => {
+                                quote! {
+                                    map.insert(#flag_name.to_string(), (#expr).to_string());
+                                }
+                            }
                         }
                     } else {
                         quote! {}

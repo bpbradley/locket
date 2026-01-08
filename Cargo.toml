@@ -24,6 +24,8 @@ compose = ["dep:dotenvy"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
 testing = []
 
+full = ["op", "connect", "bws", "compose", "exec"]
+
 [dependencies]
 locket_derive = { path = "./locket_derive" }
 clap = { version = "4", features = ["derive", "env", "string"] }

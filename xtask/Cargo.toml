@@ -8,4 +8,4 @@ publish = false
 anyhow = "1"
 clap = { version = "4", features = ["derive", "cargo"] }
 indexmap = "2"
-locket = { path = ".." }
+locket = { path = "..", features = ["full"]}

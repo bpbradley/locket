@@ -21,12 +21,6 @@ use std::str::FromStr;
 #[serde(try_from = "String")]
 pub struct AbsolutePath(PathBuf);
 
-impl Default for AbsolutePath {
-    fn default() -> Self {
-        Self::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")))
-    }
-}
-
 impl TryFrom<String> for AbsolutePath {
     type Error = String;
 

@@ -29,6 +29,15 @@ pub enum LogFormat {
     Compose,
 }
 
+impl std::fmt::Display for LogFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
+    }
+}
+
 impl LogFormat {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -37,6 +46,12 @@ impl LogFormat {
             #[cfg(feature = "compose")]
             LogFormat::Compose => "compose",
         }
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 

@@ -5,7 +5,7 @@ use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SecretManagerConfig {
     pub map: Vec<PathMapping>,
     pub secrets: Vec<Secret>,
@@ -13,6 +13,24 @@ pub struct SecretManagerConfig {
     pub inject_policy: InjectFailurePolicy,
     pub max_file_size: MemSize,
     pub writer: FileWriter,
+}
+
+impl Default for SecretManagerConfig {
+    fn default() -> Self {
+        SecretManagerConfig {
+            map: Vec::new(),
+            secrets: Vec::new(),
+            #[cfg(target_os = "linux")]
+            out: AbsolutePath::new("/run/secrets/locket"),
+            #[cfg(target_os = "macos")]
+            out: AbsolutePath::new("/private/tmp/locket"),
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            out: AbsolutePath::new("./secrets"), // Fallback
+            inject_policy: InjectFailurePolicy::default(),
+            max_file_size: MemSize::default(),
+            writer: FileWriter::default(),
+        }
+    }
 }
 
 impl SecretManagerConfig {
@@ -56,6 +74,15 @@ pub enum InjectFailurePolicy {
     CopyUnmodified,
     /// On failure, ignore the secret and log a warning
     Ignore,
+}
+
+impl std::fmt::Display for InjectFailurePolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
+    }
 }
 
 #[derive(Debug, Clone, Args, Deserialize, LayeredConfig, Default)]
@@ -105,7 +132,7 @@ pub struct SecretManagerArgs {
 
     /// Directory where secret values (literals) are materialized
     #[arg(long = "out", env = "DEFAULT_SECRET_DIR")]
-    #[locket(default = default_secret_dir())]
+    #[locket(default = SecretManagerConfig::default().out)]
     pub out: Option<AbsolutePath>,
 
     /// Policy for handling injection failures
@@ -124,13 +151,4 @@ pub struct SecretManagerArgs {
     #[command(flatten)]
     #[serde(flatten)]
     pub writer: FileWriterArgs,
-}
-
-fn default_secret_dir() -> AbsolutePath {
-    #[cfg(target_os = "linux")]
-    return AbsolutePath::new("/run/secrets/locket");
-    #[cfg(target_os = "macos")]
-    return AbsolutePath::new("/private/tmp/locket");
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    return AbsolutePath::new("./secrets");
 }

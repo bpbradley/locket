@@ -18,6 +18,15 @@ pub enum InjectMode {
     Park,
 }
 
+impl std::fmt::Display for InjectMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InjectConfig {
     pub mode: InjectMode,

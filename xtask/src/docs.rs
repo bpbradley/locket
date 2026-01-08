@@ -1,6 +1,10 @@
 use clap::{Arg, Args, Command, CommandFactory};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
+use locket::config::LocketDocDefaults;
+use locket::config::exec::ExecArgs;
+use locket::config::inject::InjectArgs;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -33,7 +37,20 @@ impl DocGenerator {
         Self { check, dir, file }
     }
     pub fn generate(self) -> anyhow::Result<()> {
-        let cmd = Cli::command();
+        let mut cmd = Cli::command();
+
+        clean_environment(&cmd);
+
+        if let Some(sub) = cmd.find_subcommand_mut("inject") {
+            let defaults = InjectArgs::get_defaults();
+            patch_defaults(sub, &defaults);
+        }
+
+        if let Some(sub) = cmd.find_subcommand_mut("exec") {
+            let defaults = ExecArgs::get_defaults();
+            patch_defaults(sub, &defaults);
+        }
+
         let app_name = cmd.get_name().to_string();
         let version = cmd.get_version().unwrap_or("0.0.0");
 
@@ -119,6 +136,39 @@ impl DocGenerator {
 
         Ok(())
     }
+}
+
+fn clean_environment(cmd: &Command) {
+    for arg in cmd.get_arguments() {
+        if let Some(env_os) = arg.get_env() {
+            // Unset this variable for the current process
+            // so Clap doesn't think it's active.
+            unsafe { std::env::remove_var(env_os) };
+        }
+    }
+
+    // Recurse into subcommands (inject, exec, etc.)
+    for sub in cmd.get_subcommands() {
+        clean_environment(sub);
+    }
+}
+
+fn patch_defaults(cmd: &mut Command, defaults: &HashMap<String, String>) {
+    let mut updates = Vec::new();
+
+    for arg in cmd.get_arguments() {
+        if let Some(long) = arg.get_long() {
+            if let Some(def) = defaults.get(long) {
+                updates.push((arg.get_id().clone(), def.clone()));
+            }
+        }
+    }
+    let mut owned_cmd = std::mem::take(cmd);
+
+    for (id, val) in updates {
+        owned_cmd = owned_cmd.mut_arg(id, |arg| arg.default_value(val));
+    }
+    *cmd = owned_cmd;
 }
 
 fn has_visible_subcommands(cmd: &Command) -> bool {
