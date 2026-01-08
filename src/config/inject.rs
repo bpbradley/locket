@@ -43,7 +43,7 @@ pub struct InjectConfig {
 #[locket(try_into = "InjectConfig")]
 pub struct InjectArgs {
     /// Mode of operation
-    #[arg(long = "mode", env = "LOCKET_INJECT_MODE", value_enum)]
+    #[arg(long, env = "LOCKET_INJECT_MODE", value_enum)]
     #[locket(default = InjectMode::OneShot)]
     pub mode: Option<InjectMode>,
 
@@ -52,7 +52,7 @@ pub struct InjectArgs {
     /// If not provided, no status file is created.
     ///
     /// **Docker Default:** `/dev/shm/locket/ready`
-    #[arg(long = "status-file", env = "LOCKET_STATUS_FILE")]
+    #[arg(long, env = "LOCKET_STATUS_FILE")]
     #[locket(optional)]
     pub status_file: Option<StatusFile>,
 

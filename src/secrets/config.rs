@@ -103,7 +103,8 @@ pub struct SecretManagerArgs {
     /// **CLI Default:** No mappings
     /// {n}**Docker Default:** `/templates:/run/secrets/locket`
     #[arg(
-        long = "map",
+        long,
+        alias = "secret_map",
         env = "SECRET_MAP",
         value_delimiter = ',',
         hide_env_values = true
@@ -125,29 +126,34 @@ pub struct SecretManagerArgs {
     ///     --secret api_key={{op://..}}
     /// ```
     #[arg(
-        long = "secret",
+        long,
+        alias = "secret",
         env = "LOCKET_SECRETS",
         value_name = "label={{template}}",
         value_delimiter = ',',
         hide_env_values = true
     )]
-    #[serde(deserialize_with = "deserialize_secrets_vec", default)]
+    #[serde(
+        alias = "secret",
+        deserialize_with = "deserialize_secrets_vec",
+        default
+    )]
     pub secrets: Vec<Secret>,
 
     /// Directory where secret values (literals) are materialized
-    #[arg(long = "out", env = "DEFAULT_SECRET_DIR")]
+    #[arg(long, env = "DEFAULT_SECRET_DIR")]
     #[locket(default = SecretManagerConfig::default().out)]
     pub out: Option<AbsolutePath>,
 
     /// Policy for handling injection failures
-    #[arg(long = "inject-policy", env = "INJECT_POLICY", value_enum)]
+    #[arg(long, env = "INJECT_POLICY", value_enum)]
     #[locket(default = InjectFailurePolicy::CopyUnmodified)]
     pub inject_policy: Option<InjectFailurePolicy>,
 
     /// Maximum allowable size for a template file. Files larger than this will be rejected.
     ///
     /// Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes).
-    #[arg(long = "max-file-size", env = "MAX_FILE_SIZE")]
+    #[arg(long, env = "MAX_FILE_SIZE")]
     #[locket(default = MemSize::default())]
     pub max_file_size: Option<MemSize>,
 
