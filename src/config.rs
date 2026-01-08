@@ -112,3 +112,140 @@ pub trait LocketDocDefaults {
         map
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{ApplyDefaults, LayeredArgs, Overlay};
+    use crate::path::AbsolutePath;
+    use clap::{Args, Parser};
+    use locket_derive::LayeredConfig;
+    use serde::Deserialize;
+    use std::io::Write;
+
+    #[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig, PartialEq)]
+    #[locket(try_into = "TestConfig")]
+    struct TestArgs {
+        #[arg(long)]
+        #[locket(default = TestConfig::default().name)]
+        pub name: Option<String>,
+
+        #[arg(long)]
+        #[locket(default = TestConfig::default().port)]
+        pub port: Option<u16>,
+    }
+
+    struct TestConfig {
+        pub name: String,
+        pub port: u16,
+    }
+
+    impl Default for TestConfig {
+        fn default() -> Self {
+            Self {
+                name: "base".into(),
+                port: 8080,
+            }
+        }
+    }
+
+    #[derive(Parser, Debug)]
+    struct TestCli {
+        #[command(flatten)]
+        args: LayeredArgs<TestArgs>,
+    }
+
+    #[test]
+    fn test_overlay_precedence() {
+        let base = TestArgs {
+            name: Some("base_name".into()),
+            port: Some(1000),
+        };
+        let top = TestArgs {
+            name: Some("top_name".into()),
+            port: None,
+        };
+
+        let result = base.overlay(top);
+
+        assert_eq!(result.name.unwrap(), "top_name");
+        assert_eq!(result.port.unwrap(), 1000);
+    }
+
+    #[test]
+    fn test_layered_precedence() {
+        let defaults = TestArgs::default().apply_defaults();
+        assert_eq!(defaults.name.as_deref(), Some("base"));
+
+        let config_file = TestArgs {
+            name: Some("config_file_name".into()),
+            port: Some(9000),
+        };
+
+        let after_file = defaults.overlay(config_file.clone());
+        assert_eq!(after_file.name.as_deref(), Some("config_file_name"));
+
+        let cli_args = TestArgs {
+            name: Some("cli_override".into()),
+            port: None,
+        };
+        let final_cfg = after_file.clone().overlay(cli_args);
+        assert_eq!(final_cfg.name.as_deref(), Some("cli_override"));
+        assert_eq!(final_cfg.port, Some(9000)); // Kept config file value
+
+        let empty_cli = TestArgs::default();
+        let final_cfg_empty = after_file.overlay(empty_cli);
+        assert_eq!(final_cfg_empty.name.as_deref(), Some("config_file_name"));
+    }
+
+    #[test]
+    fn test_file_backed_loading() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            tmp,
+            r#"
+            name = "from_toml"
+            port = 5555
+        "#
+        )
+        .unwrap();
+
+        let config_path = AbsolutePath::new(tmp.path());
+
+        let args = TestArgs {
+            name: None,
+            port: Some(1111),
+        };
+
+        let config = LayeredArgs {
+            config: Some(config_path),
+            inner: args,
+        };
+
+        let resolved: TestConfig = config.load().unwrap();
+
+        assert_eq!(resolved.name, "from_toml");
+        assert_eq!(resolved.port, 1111);
+    }
+
+    #[test]
+    fn test_cli_parsing_and_layering() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            tmp,
+            r#"
+                name = "file_name"
+                port = 5555
+            "#
+        )
+        .unwrap();
+        let config_path = tmp.path().to_str().unwrap();
+
+        let cli = TestCli::try_parse_from(["test_bin", "--config", config_path, "--port", "1111"])
+            .unwrap();
+
+        let resolved: TestConfig = cli.args.load().unwrap();
+
+        assert_eq!(resolved.name, "file_name"); // From File
+        assert_eq!(resolved.port, 1111); // From CLI (Override)
+    }
+}
