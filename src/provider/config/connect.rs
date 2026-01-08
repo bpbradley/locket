@@ -1,7 +1,7 @@
 use crate::provider::{AuthToken, ConcurrencyLimit};
 use clap::Args;
 use locket_derive::LayeredConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -11,7 +11,7 @@ pub struct ConnectConfig {
     pub connect_max_concurrent: ConcurrencyLimit,
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
 #[locket(try_into = "ConnectConfig")]
 #[serde(rename_all = "kebab-case")]
 pub struct ConnectArgs {

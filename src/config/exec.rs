@@ -5,7 +5,7 @@ use crate::secrets::{Secret, SecretManagerArgs, SecretManagerConfig};
 use crate::watch::DebounceDuration;
 use clap::Args;
 use locket_derive::LayeredConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct ExecConfig {
@@ -21,7 +21,7 @@ pub struct ExecConfig {
     pub logger: Logger,
 }
 
-#[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
+#[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "ExecConfig")]
 pub struct ExecArgs {

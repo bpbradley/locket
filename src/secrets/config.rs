@@ -3,7 +3,7 @@ use crate::secrets::{MemSize, Secret, SecretError};
 use crate::write::{FileWriter, FileWriterArgs};
 use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct SecretManagerConfig {
@@ -65,7 +65,7 @@ impl SecretManagerConfig {
     }
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum, Default, Deserialize, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, ValueEnum, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum InjectFailurePolicy {
     /// Failures are treated as errors and will abort the process
@@ -86,7 +86,7 @@ impl std::fmt::Display for InjectFailurePolicy {
     }
 }
 
-#[derive(Debug, Clone, Args, Deserialize, LayeredConfig, Default)]
+#[derive(Debug, Clone, Args, Deserialize, Serialize, LayeredConfig, Default)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "SecretManagerConfig")]
 pub struct SecretManagerArgs {

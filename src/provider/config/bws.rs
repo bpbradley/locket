@@ -1,7 +1,7 @@
 use crate::provider::{AuthToken, ConcurrencyLimit, bws::BwsUrl};
 use clap::Args;
 use locket_derive::LayeredConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct BwsConfig {
@@ -12,7 +12,7 @@ pub struct BwsConfig {
     pub bws_token: AuthToken,
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "BwsConfig")]
 pub struct BwsArgs {

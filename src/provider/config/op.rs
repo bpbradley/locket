@@ -2,7 +2,7 @@ use crate::path::AbsolutePath;
 use crate::provider::AuthToken;
 use clap::Args;
 use locket_derive::LayeredConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default)]
 pub struct OpConfig {
@@ -10,7 +10,7 @@ pub struct OpConfig {
     pub op_config_dir: Option<AbsolutePath>,
 }
 
-#[derive(Args, Debug, Clone, Default, LayeredConfig, Deserialize)]
+#[derive(Args, Debug, Clone, Default, LayeredConfig, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "OpConfig")]
 pub struct OpArgs {

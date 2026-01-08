@@ -119,10 +119,10 @@ mod tests {
     use crate::path::AbsolutePath;
     use clap::{Args, Parser};
     use locket_derive::LayeredConfig;
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use std::io::Write;
 
-    #[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig, PartialEq)]
+    #[derive(Args, Debug, Clone, Default, Deserialize, Serialize, LayeredConfig, PartialEq)]
     #[locket(try_into = "TestConfig")]
     struct TestArgs {
         #[arg(long)]

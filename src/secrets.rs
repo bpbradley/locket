@@ -8,7 +8,7 @@
 
 use crate::path::CanonicalPath;
 use crate::provider::ProviderError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -69,7 +69,7 @@ pub enum SecretError {
     Write(#[from] crate::write::WriterError),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct SecretKey(String);
 
 impl TryFrom<String> for SecretKey {
@@ -127,7 +127,7 @@ impl From<&SecretKey> for String {
 /// For example, in the SecretFileManager, anonymous secrets are treated the same as Named
 /// file backed secrets, except the key is derived from the file name.
 /// However in the EnvManager, anonymous secrets are treated as .env files.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub enum Secret {
@@ -220,7 +220,7 @@ impl FromStr for Secret {
 }
 
 /// The origin of the secret template content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SecretSource {
     /// Template loaded from a file path on disk.
     File(CanonicalPath),
@@ -316,7 +316,7 @@ impl<'a> SourceReader<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct MemSize {

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
@@ -119,7 +119,7 @@ impl Provider {
     }
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProviderArgs {
     /// Secrets provider backend to use.
@@ -153,7 +153,7 @@ impl TryFrom<ProviderArgs> for Provider {
     }
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum, Deserialize)]
+#[derive(Copy, Clone, Debug, ValueEnum, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
     /// 1Password Service Account
@@ -177,7 +177,7 @@ impl From<ProviderKind> for clap::builder::OsStr {
     }
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Default)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProviderConfigs {
     #[cfg(feature = "op")]
@@ -222,6 +222,16 @@ impl AuthToken {
         }
 
         Ok(Self(SecretString::new(trimmed.to_owned().into())))
+    }
+}
+
+impl Serialize for AuthToken {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Do not expose the actual token.
+        serializer.serialize_str("[REDACTED]")
     }
 }
 
@@ -270,7 +280,7 @@ impl ExposeSecret<str> for AuthToken {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ConcurrencyLimit(NonZeroUsize);
 

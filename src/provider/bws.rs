@@ -19,7 +19,7 @@ use bitwarden::{
 use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 use url::Url;
@@ -28,7 +28,7 @@ use uuid::Uuid;
 /// BWS SDK URL wrapper
 /// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
 /// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct BwsUrl(Url);
 

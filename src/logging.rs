@@ -107,7 +107,7 @@ impl FromStr for LogFormat {
     }
 }
 
-#[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
+#[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "Logger")]
 pub struct LoggerArgs {
@@ -122,7 +122,7 @@ pub struct LoggerArgs {
     pub log_level: Option<LogLevel>,
 }
 
-#[derive(Default, Args, Debug, Clone, Deserialize)]
+#[derive(Default, Args, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Logger {
     pub log_format: LogFormat,

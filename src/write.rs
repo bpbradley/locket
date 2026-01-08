@@ -7,7 +7,7 @@
 use crate::path::{AbsolutePath, CanonicalPath};
 use clap::Args;
 use locket_derive::LayeredConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -44,7 +44,7 @@ pub enum FsModeError {
 }
 
 /// Utilities for writing files atomically with explicit permissions.
-#[derive(Clone, Args, Deserialize, LayeredConfig, Debug, Default)]
+#[derive(Clone, Args, Serialize, Deserialize, LayeredConfig, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "FileWriter")]
 pub struct FileWriterArgs {
@@ -185,7 +185,7 @@ impl std::fmt::Debug for FileWriter {
 ///
 /// This ensures that permission values are validated (must be <= 0o7777)
 /// and correctly interpreted as octal.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct FsMode(u32);

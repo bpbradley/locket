@@ -13,6 +13,7 @@ use notify::{
     event::{EventKind, ModifyKind, RenameMode},
     recommended_watcher,
 };
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{path::PathBuf, str::FromStr};
 use thiserror::Error;
@@ -234,7 +235,7 @@ impl<H: EventHandler> FsWatcher<H> {
 }
 
 /// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct DebounceDuration(pub Duration);

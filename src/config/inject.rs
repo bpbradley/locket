@@ -5,9 +5,9 @@ use crate::secrets::{SecretManagerArgs, SecretManagerConfig};
 use crate::watch::DebounceDuration;
 use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Default, Copy, Clone, Debug, ValueEnum, Deserialize, PartialEq, Eq)]
+#[derive(Default, Copy, Clone, Debug, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum InjectMode {
     #[default]
@@ -38,7 +38,7 @@ pub struct InjectConfig {
     pub logger: Logger,
 }
 
-#[derive(Args, Debug, Clone, Default, Deserialize, LayeredConfig)]
+#[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "InjectConfig")]
 pub struct InjectArgs {
@@ -76,7 +76,6 @@ pub struct InjectArgs {
     /// Logging configuration
     #[command(flatten)]
     #[serde(flatten)]
-    #[locket(default)]
     pub logger: LoggerArgs,
 
     /// Secrets provider selection

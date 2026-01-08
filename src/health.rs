@@ -4,7 +4,7 @@
 //! which is created when all secrets have been successfully materialized.
 //! If the file is absent, the sidecar is considered unhealthy.
 use crate::path::AbsolutePath;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -17,7 +17,7 @@ pub enum HealthError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct StatusFile(AbsolutePath);

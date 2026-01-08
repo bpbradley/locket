@@ -19,7 +19,7 @@ use nix::sys::{
 };
 use nix::unistd::Pid;
 use secrecy::ExposeSecret;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::process::ExitStatus;
@@ -110,7 +110,7 @@ impl std::fmt::Display for ShellCommand {
 }
 
 /// Default timeout for waiting for a child process to exit gracefully after SIGTERM.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub struct ProcessTimeout(pub Duration);
 
