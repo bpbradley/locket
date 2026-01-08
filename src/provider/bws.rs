@@ -31,12 +31,6 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Deserialize)]
 pub struct BwsUrl(Url);
 
-impl Default for BwsUrl {
-    fn default() -> Self {
-        Self(Url::parse("https://api.bitwarden.com").expect("valid url"))
-    }
-}
-
 impl BwsUrl {
     /// Get the URL as a string, stripping any trailing slash
     /// This is needed because the BWS SDK does not accept URLs with trailing slashes

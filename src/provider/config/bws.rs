@@ -3,7 +3,7 @@ use clap::Args;
 use locket_derive::Overlay;
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BwsConfig {
     pub bws_api_url: BwsUrl,
     pub bws_identity_url: BwsUrl,
