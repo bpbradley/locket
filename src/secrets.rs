@@ -6,6 +6,7 @@
 //! It also handles the low-level "reading" mechanics via `SecretSource` and `SourceReader`,
 //! ensuring that file reads are memory-limited.
 
+use crate::config::utils::TryFromKv;
 use crate::path::CanonicalPath;
 use crate::provider::ProviderError;
 use serde::{Deserialize, Serialize};
@@ -182,6 +183,13 @@ impl Secret {
             Secret::Anonymous(s) => s,
             Secret::Named { source, .. } => source,
         }
+    }
+}
+
+impl TryFromKv for Secret {
+    type Err = SecretError;
+    fn try_from_kv(key: String, val: String) -> Result<Self, SecretError> {
+        Self::from_kv(key, val)
     }
 }
 

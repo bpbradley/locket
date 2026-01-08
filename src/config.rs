@@ -9,6 +9,7 @@ use thiserror::Error;
 #[cfg(feature = "exec")]
 pub mod exec;
 pub mod inject;
+pub mod utils;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {

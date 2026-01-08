@@ -5,8 +5,9 @@
 //!
 //! Using these utilities prevents path traversal vulnerabilities when handling user inputs.
 
+use crate::config::utils::TryFromKv;
 use crate::secrets::SecretError;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -200,35 +201,18 @@ impl PathExt for Path {
 /// A validated mapping of a source path to a destination path.
 ///
 /// Used for mapping secret templates (input) to their materialized locations (output).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathMapping {
+    #[serde(alias = "source")]
     src: CanonicalPath,
+    #[serde(alias = "dest")]
     dst: AbsolutePath,
 }
 
-impl<'de> Deserialize<'de> for PathMapping {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Helper {
-            Str(String),
-            Map {
-                #[serde(alias = "source")]
-                src: CanonicalPath,
-                #[serde(alias = "dest")]
-                dst: AbsolutePath,
-            },
-        }
-
-        match Helper::deserialize(deserializer)? {
-            Helper::Str(s) => s.parse().map_err(serde::de::Error::custom),
-            Helper::Map { src, dst } => {
-                PathMapping::try_new(src, dst).map_err(serde::de::Error::custom)
-            }
-        }
+impl TryFromKv for PathMapping {
+    type Err = SecretError;
+    fn try_from_kv(key: String, val: String) -> Result<Self, SecretError> {
+        PathMapping::try_new(CanonicalPath::try_new(key)?, AbsolutePath::new(val))
     }
 }
 
@@ -392,6 +376,12 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    #[derive(Deserialize)]
+    struct Config {
+        #[serde(deserialize_with = "crate::config::utils::polymorphic_vec")]
+        map: Vec<PathMapping>,
+    }
+
     #[test]
     fn test_basic_clean() {
         assert_eq!(Path::new("a/b/c").clean(), PathBuf::from("a/b/c"));
@@ -485,5 +475,28 @@ mod tests {
         // Missing source file
         let s_missing = format!("{}_missing:/dst", src_str);
         assert!(PathMapping::from_str(&s_missing).is_err());
+    }
+
+    #[test]
+    fn test_path_mapping_polymorphism() {
+        let source_file = tempfile::NamedTempFile::new().unwrap();
+        let src_path = source_file.path().to_str().unwrap();
+
+        let toml_input = format!(
+            r#"
+                map = [
+                    "{src}:/tmp/dst1",                         # String syntax
+                    {{ src = "{src}", dst = "/tmp/dst2" }}     # Map syntax
+                ]
+                "#,
+            src = src_path
+        );
+
+        let config: Config = toml::from_str(&toml_input).expect("Parsing failed");
+
+        assert_eq!(config.map.len(), 2);
+
+        assert_eq!(config.map[0].src().as_path(), source_file.path());
+        assert_eq!(config.map[1].src().as_path(), source_file.path());
     }
 }

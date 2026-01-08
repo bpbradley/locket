@@ -3,7 +3,7 @@ use crate::secrets::{MemSize, Secret, SecretError};
 use crate::write::{FileWriter, FileWriterArgs};
 use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct SecretManagerConfig {
@@ -109,7 +109,11 @@ pub struct SecretManagerArgs {
         value_delimiter = ',',
         hide_env_values = true
     )]
-    #[serde(alias = "secret_map", default)]
+    #[serde(
+        alias = "secret_map",
+        default,
+        deserialize_with = "crate::config::utils::polymorphic_vec"
+    )]
     pub map: Vec<PathMapping>,
 
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
@@ -135,7 +139,7 @@ pub struct SecretManagerArgs {
     )]
     #[serde(
         alias = "secret",
-        deserialize_with = "deserialize_secrets_vec",
+        deserialize_with = "crate::config::utils::polymorphic_vec",
         default
     )]
     pub secrets: Vec<Secret>,
@@ -163,19 +167,57 @@ pub struct SecretManagerArgs {
     pub writer: FileWriterArgs,
 }
 
-fn deserialize_secrets_vec<'de, D>(deserializer: D) -> Result<Vec<Secret>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Helper {
-        List(Vec<Secret>),
-        Map(std::collections::HashMap<String, String>),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Debug)]
+    struct TestWrapper {
+        #[serde(deserialize_with = "crate::config::utils::polymorphic_vec")]
+        secrets: Vec<Secret>,
     }
 
-    match Helper::deserialize(deserializer)? {
-        Helper::List(list) => Ok(list),
-        Helper::Map(map) => Secret::try_from_map(map).map_err(serde::de::Error::custom),
+    #[test]
+    fn test_list_syntax_named_and_anonymous() {
+        let toml_input = r#"
+            secrets = [
+                "name=template",
+                "."
+            ]
+        "#;
+
+        let parsed: TestWrapper = toml::from_str(toml_input).expect("Should parse list");
+        assert_eq!(parsed.secrets.len(), 2);
+
+        let named = &parsed.secrets[0];
+        let anonymous = &parsed.secrets[1];
+        if let Secret::Named {
+            key: label,
+            source: _value,
+        } = named
+        {
+            assert_eq!(label.as_ref(), "name");
+        } else {
+            panic!("Expected first secret to be Named, but got: {:?}", named);
+        }
+        assert!(matches!(anonymous, Secret::Anonymous(_)));
+    }
+
+    #[test]
+    fn test_map_syntax_converts_to_named() {
+        let toml_input = r#"
+            [secrets]
+            key = "val"
+            "custom" = "val"
+        "#;
+
+        let parsed: TestWrapper = toml::from_str(toml_input).expect("Should parse map");
+
+        assert_eq!(parsed.secrets.len(), 2);
+
+        let debug_out = format!("{:?}", parsed.secrets);
+        assert!(debug_out.contains("key"));
+        assert!(debug_out.contains("custom"));
     }
 }
