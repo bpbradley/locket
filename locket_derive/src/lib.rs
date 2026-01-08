@@ -22,7 +22,7 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
     let defaults_logic = generate_defaults_body(&input.data);
     let doc_defaults_logic = generate_doc_defaults_impl(&input.data, &struct_name);
 
-    // Check for #[locket(try_into = "Path::To::Target")]
+    // Check for #[locket(try_into = "Path::To::Target")] on the struct
     let config_target = input.attrs.iter().find_map(|attr| {
         if !attr.path().is_ident("locket") {
             return None;
@@ -81,6 +81,109 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
+    match data {
+        Data::Struct(struct_data) => match &struct_data.fields {
+            Fields::Named(fields) => {
+                let recurse = fields.named.iter().filter_map(|f| {
+                    let name = &f.ident;
+
+                    let should_skip = f.attrs.iter().any(|a|
+                        a.path().is_ident("locket") &&
+                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("skip")))
+                    );
+                    if should_skip { return None; }
+
+                    // Check for #[locket(try_into)] or #[command(flatten)]
+                    let force_try = f.attrs.iter().any(|attr| {
+                        attr.path().is_ident("locket") &&
+                        attr.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("try_into") { Ok(()) } else { Err(meta.error("unsupported")) }
+                        }).is_ok()
+                    });
+
+                    let is_flattened = ["command", "clap", "arg", "serde"]
+                        .iter()
+                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
+
+                    let needs_conversion = force_try || is_flattened;
+
+                    // Identify field type metadata
+                    let is_option_type = if let Type::Path(tp) = &f.ty {
+                        tp.path.segments.last().map(|s| s.ident == "Option").unwrap_or(false)
+                    } else { false };
+
+                    let has_default = f.attrs.iter().any(|a|
+                        a.path().is_ident("locket") &&
+                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::NameValue(nv) if nv.path.is_ident("default")))
+                    );
+
+                    let is_explicit_optional = f.attrs.iter().any(|a|
+                        a.path().is_ident("locket") &&
+                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("optional")))
+                    );
+
+                    if is_option_type {
+                        if is_explicit_optional {
+                            // Option -> Option
+                            if needs_conversion {
+                                Some(quote_spanned! {f.span()=>
+                                    #name: args.#name.map(|v| v.try_into()).transpose()?
+                                })
+                            } else {
+                                Some(quote_spanned! {f.span()=>
+                                    #name: args.#name
+                                })
+                            }
+                        } else if has_default {
+                            if needs_conversion {
+                                Some(quote_spanned! {f.span()=>
+                                    #name: args.#name
+                                        .expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
+                                        .try_into()?
+                                })
+                            } else {
+                                Some(quote_spanned! {f.span()=>
+                                    #name: args.#name.expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
+                                })
+                            }
+                        } else {
+                            let flag_name = get_clap_long_name(f);
+                            let flag_literal = format!("--{}", flag_name);
+                            let err_msg = format!("Missing required configuration field: {}", flag_literal);
+
+                            if needs_conversion {
+                                Some(quote_spanned! {f.span()=>
+                                    #name: args.#name
+                                        .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
+                                        .try_into()?
+                                })
+                            } else {
+                                Some(quote_spanned! {f.span()=>
+                                    #name: args.#name
+                                        .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
+                                })
+                            }
+                        }
+                    }
+                    else if needs_conversion {
+                        Some(quote_spanned! {f.span()=>
+                            #name: args.#name.try_into()?
+                        })
+                    } else {
+                        Some(quote_spanned! {f.span()=>
+                            #name: args.#name
+                        })
+                    }
+                });
+                quote! { #(#recurse),* }
+            }
+            _ => quote! {},
+        },
+        _ => quote! {},
+    }
 }
 
 fn generate_overlay_body(data: &Data) -> proc_macro2::TokenStream {
@@ -234,82 +337,6 @@ fn generate_doc_defaults_impl(data: &Data, struct_name: &syn::Ident) -> proc_mac
                 #body
             }
         }
-    }
-}
-
-fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
-    match data {
-        Data::Struct(struct_data) => match &struct_data.fields {
-            Fields::Named(fields) => {
-                let recurse = fields.named.iter().filter_map(|f| {
-                    let name = &f.ident;
-
-                    let should_skip = f.attrs.iter().any(|a|
-                        a.path().is_ident("locket") &&
-                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("skip")))
-                    );
-                    if should_skip { return None; }
-
-                    let has_default = f.attrs.iter().any(|a|
-                        a.path().is_ident("locket") &&
-                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::NameValue(nv) if nv.path.is_ident("default")))
-                    );
-                    let is_explicit_optional = f.attrs.iter().any(|a|
-                        a.path().is_ident("locket") &&
-                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("optional")))
-                    );
-
-                    let is_option_type = if let Type::Path(tp) = &f.ty {
-                        tp.path.segments.last().map(|s| s.ident == "Option").unwrap_or(false)
-                    } else { false };
-
-                    if !is_option_type {
-                        let is_flattened = ["command", "clap", "arg", "serde"]
-                            .iter()
-                            .any(|key| has_attribute(&f.attrs, key, "flatten"));
-
-                        let force_try = f.attrs.iter().any(|attr| {
-                            attr.path().is_ident("locket") &&
-                            attr.parse_nested_meta(|meta| {
-                                if meta.path.is_ident("try_into") { Ok(()) } else { Err(meta.error("unsupported")) }
-                            }).is_ok()
-                        });
-
-                        let conversion = if is_flattened || force_try {
-                            quote!(.try_into()?)
-                        } else {
-                            quote!()
-                        };
-
-                        return Some(quote_spanned! {f.span()=>
-                            #name: args.#name #conversion
-                        });
-                    }
-
-                    if is_explicit_optional {
-                        Some(quote_spanned! {f.span()=>
-                            #name: args.#name
-                        })
-                    } else if has_default {
-                        Some(quote_spanned! {f.span()=>
-                            #name: args.#name.expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
-                        })
-                    } else {
-                        // Required Field Validation
-                        let flag_name = get_clap_long_name(f);
-                        let flag_literal = format!("--{}", flag_name);
-                        let err_msg = format!("Missing required configuration field: {}", flag_literal);
-
-                        Some(quote_spanned! {f.span()=>
-                            #name: args.#name.ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
-                        })
-                    }
-                });
-                quote! { #(#recurse),* }
-            }
-            _ => quote! {},
-        },
-        _ => quote! {},
     }
 }
 
