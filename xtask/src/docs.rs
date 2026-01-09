@@ -163,16 +163,16 @@ where
     let mut simple_keys = Vec::new();
     let mut table_keys = Vec::new();
 
-    for key in all_keys {
+    for (key, docs) in all_keys {
         if let Some(val) = active_map.get(&key) {
             if is_toml_table_section(val) {
-                table_keys.push(key);
+                table_keys.push((key, docs));
             } else {
-                simple_keys.push(key);
+                simple_keys.push((key, docs));
             }
         } else {
             // Missing keys (None) are treated as simple comments
-            simple_keys.push(key);
+            simple_keys.push((key, docs));
         }
     }
 
@@ -189,12 +189,20 @@ where
     writeln!(writer, "```toml")?;
 
     // Helper to write keys
-    let mut write_keys = |keys: Vec<String>| -> io::Result<()> {
-        for key in keys {
+    let mut write_keys = |keys: Vec<(String, Option<String>)>| -> io::Result<()> {
+        for (key, docs) in keys {
             // Try to find the corresponding argument help in the Clap Command
             if let Some(arg) = cmd.get_arguments().find(|a| a.get_long() == Some(&key)) {
                 if let Some(help) = arg.get_help() {
                     writeln!(writer, "# {}", help)?;
+                }
+            }
+
+            // Inject docsif present
+            if let Some(doc) = docs {
+                // Split each line, trim, and add comment prefix
+                for line in doc.lines() {
+                    writeln!(writer, "# {}", line.trim())?;
                 }
             }
 

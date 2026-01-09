@@ -76,9 +76,32 @@ mode = "one-shot"
 # status-file = ...
 
 # Mapping of source paths to destination paths
+# 
+# TOML syntax supports list of strings or map form:
+# List form:
+# map = ["/templates:/run/secrets/app", "/config:/run/secrets/config"]
+# 
+# Map form:
+# [map]
+# source = "/templates"
+# destination = "/run/secrets/app"
+# [map]
+# source = "/config"
+# destination = "/run/secrets/config"
+# 
 map = []
 
 # Additional secret values specified as LABEL=SECRET_TEMPLATE
+# 
+# TOML syntax supports list of strings or map form:
+# List form:
+# secrets = ["db_password={{..}}", "api_key={{..}}"]
+# 
+# Map form:
+# [secrets]
+# db_password = "{{..}}"
+# api_key = "{{..}}"
+# 
 secrets = []
 
 # Directory where secret values (literals) are materialized

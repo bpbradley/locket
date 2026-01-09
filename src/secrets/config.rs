@@ -114,6 +114,19 @@ pub struct SecretManagerArgs {
         default,
         deserialize_with = "crate::config::utils::polymorphic_vec"
     )]
+    #[locket(docs = "
+        TOML syntax supports list of strings or map form:
+        List form:
+        map = [\"/templates:/run/secrets/app\", \"/config:/run/secrets/config\"]
+
+        Map form:
+        [map]
+        source = \"/templates\"
+        destination = \"/run/secrets/app\"
+        [map]
+        source = \"/config\"
+        destination = \"/run/secrets/config\"
+    ")]
     pub map: Vec<PathMapping>,
 
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
@@ -142,6 +155,16 @@ pub struct SecretManagerArgs {
         deserialize_with = "crate::config::utils::polymorphic_vec",
         default
     )]
+    #[locket(docs = "
+        TOML syntax supports list of strings or map form:
+        List form:
+        secrets = [\"db_password={{..}}\", \"api_key={{..}}\"]
+
+        Map form:
+        [secrets]
+        db_password = \"{{..}}\"
+        api_key = \"{{..}}\"
+    ")]
     pub secrets: Vec<Secret>,
 
     /// Directory where secret values (literals) are materialized

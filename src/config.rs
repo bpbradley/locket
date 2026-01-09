@@ -117,7 +117,7 @@ pub trait LocketDocDefaults {
 /// Trait to expose the structural keys of a configuration struct for documentation.
 #[cfg(feature = "locket-docs")]
 pub trait ConfigStructure {
-    fn get_structure() -> Vec<String>;
+    fn get_structure() -> Vec<(String, Option<String>)>;
 }
 
 #[cfg(test)]

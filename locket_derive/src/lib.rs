@@ -83,7 +83,7 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
         #[cfg(feature = "locket-docs")]
         #[automatically_derived]
         impl crate::config::ConfigStructure for #struct_name {
-            fn get_structure() -> Vec<String> {
+            fn get_structure() -> Vec<(String, Option<String>)> {
                 #structure_logic
             }
         }
@@ -422,10 +422,29 @@ fn generate_structure_body(data: &Data) -> proc_macro2::TokenStream {
                     } else {
                         // kebab case
                         let key = name.as_ref().unwrap().to_string().replace('_', "-");
-                        quote! {
-                            #(#cfgs)*
-                            keys.push(#key.to_string());
+                        let docs_expr = f.attrs.iter().find_map(|attr| {
+                        if !attr.path().is_ident("locket") { return None; }
+                        match attr.parse_args::<Meta>().ok()? {
+                            Meta::NameValue(nv) if nv.path.is_ident("docs") => {
+                                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = nv.value {
+                                    Some(s.value())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
                         }
+                    });
+
+                    let docs_code = match docs_expr {
+                        Some(s) => quote! { Some(#s.to_string()) },
+                        None => quote! { None },
+                    };
+
+                    quote! {
+                        #(#cfgs)*
+                        keys.push((#key.to_string(), #docs_code));
+                    }
                     }
                 });
                     quote! {
