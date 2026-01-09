@@ -23,8 +23,10 @@ bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
 testing = []
+locket-docs = []
 
 full = ["op", "connect", "bws", "compose", "exec"]
+dev = ["locket-docs", "testing", "full"]
 
 [dependencies]
 locket_derive = { path = "./locket_derive" }

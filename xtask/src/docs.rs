@@ -1,9 +1,10 @@
 use clap::{Arg, Args, Command, CommandFactory};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
-use locket::config::LocketDocDefaults;
 use locket::config::exec::ExecArgs;
 use locket::config::inject::InjectArgs;
+use locket::config::{ApplyDefaults, LocketDocDefaults};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
@@ -114,6 +115,12 @@ impl DocGenerator {
 
             write_command_section(&mut sub_buffer, sub, &app_name)?;
 
+            if name == "inject" {
+                write_toml_section::<InjectArgs>(&mut sub_buffer, sub)?;
+            } else if name == "exec" {
+                write_toml_section::<ExecArgs>(&mut sub_buffer, sub)?;
+            }
+
             if has_visible_subcommands(sub) {
                 for child in sub.get_subcommands() {
                     if !child.is_hide_set() {
@@ -135,6 +142,95 @@ impl DocGenerator {
         }
 
         Ok(())
+    }
+}
+
+fn write_toml_section<T>(writer: &mut impl Write, cmd: &Command) -> io::Result<()>
+where
+    T: Default + ApplyDefaults + Serialize + locket::config::ConfigStructure,
+{
+    let config = T::default().apply_defaults();
+
+    let value =
+        toml::Value::try_from(&config).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let active_map = value
+        .as_table()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Config is not a table"))?;
+
+    // iterates fields in definition order
+    let all_keys = T::get_structure();
+
+    let mut simple_keys = Vec::new();
+    let mut table_keys = Vec::new();
+
+    for key in all_keys {
+        if let Some(val) = active_map.get(&key) {
+            if is_toml_table_section(val) {
+                table_keys.push(key);
+            } else {
+                simple_keys.push(key);
+            }
+        } else {
+            // Missing keys (None) are treated as simple comments
+            simple_keys.push(key);
+        }
+    }
+
+    writeln!(writer, "\n## TOML Reference\n")?;
+    writeln!(writer, "> [!TIP]")?;
+    writeln!(
+        writer,
+        "> Settings can be provided via config.toml as well, using the --config option."
+    )?;
+    writeln!(
+        writer,
+        "> Provided is the reference configuration in TOML format\n"
+    )?;
+    writeln!(writer, "```toml")?;
+
+    // Helper to write keys
+    let mut write_keys = |keys: Vec<String>| -> io::Result<()> {
+        for key in keys {
+            // Try to find the corresponding argument help in the Clap Command
+            if let Some(arg) = cmd.get_arguments().find(|a| a.get_long() == Some(&key)) {
+                if let Some(help) = arg.get_help() {
+                    writeln!(writer, "# {}", help)?;
+                }
+            }
+
+            if let Some(val) = active_map.get(&key) {
+                let mut mini_map = toml::map::Map::new();
+                mini_map.insert(key.clone(), val.clone());
+                let line = toml::to_string(&mini_map).unwrap();
+                write!(writer, "{}", line)?;
+            } else {
+                writeln!(writer, "# {} = ...", key)?;
+            }
+            writeln!(writer)?;
+        }
+        Ok(())
+    };
+
+    write_keys(simple_keys)?;
+    write_keys(table_keys)?;
+
+    writeln!(writer, "```")?;
+
+    Ok(())
+}
+
+/// Determines if a TOML will be rendered as section or inline value
+fn is_toml_table_section(val: &toml::Value) -> bool {
+    match val {
+        toml::Value::Table(_) => true,
+        toml::Value::Array(arr) => {
+            if let Some(first) = arr.first() {
+                first.is_table()
+            } else {
+                false
+            }
+        }
+        _ => false,
     }
 }
 

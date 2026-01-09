@@ -29,8 +29,8 @@ locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS 
 | `--out` | `DEFAULT_SECRET_DIR` | `/run/secrets/locket` | Directory where secret values (literals) are materialized |
 | `--inject-policy` | `INJECT_POLICY` | `copy-unmodified` | Policy for handling injection failures <br><br> **Choices:**<br>- `error`: Failures are treated as errors and will abort the process<br>- `copy-unmodified`: On failure, copy the unmodified secret to destination<br>- `ignore`: On failure, ignore the secret and log a warning |
 | `--max-file-size` | `MAX_FILE_SIZE` | `10M` | Maximum allowable size for a template file. Files larger than this will be rejected.<br><br>Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes). |
-| `--file-mode` | `LOCKET_FILE_MODE` | `0o600` | File permission mode |
-| `--dir-mode` | `LOCKET_DIR_MODE` | `0o700` | Directory permission mode |
+| `--file-mode` | `LOCKET_FILE_MODE` | `0600` | File permission mode |
+| `--dir-mode` | `LOCKET_DIR_MODE` | `0700` | Directory permission mode |
 | `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode.<br><br>Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise.<br><br>Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds. |
 | `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br><br> **Choices:**<br>- `text`: Plain text log format<br>- `json`: JSON log format<br>- `compose`: Special format for Docker Compose Provider specification |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
@@ -61,3 +61,81 @@ locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS 
 | `--bws-identity-url` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
 | `--bws-max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
 | `--bws-user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
+
+## TOML Reference
+
+> [!TIP]
+> Settings can be provided via config.toml as well, using the --config option.
+> Provided is the reference configuration in TOML format
+
+```toml
+# Mode of operation
+mode = "one-shot"
+
+# Status file path used for healthchecks
+# status-file = ...
+
+# Mapping of source paths to destination paths
+map = []
+
+# Additional secret values specified as LABEL=SECRET_TEMPLATE
+secrets = []
+
+# Directory where secret values (literals) are materialized
+out = "/run/secrets/locket"
+
+# Policy for handling injection failures
+inject-policy = "copy-unmodified"
+
+# Maximum allowable size for a template file. Files larger than this will be rejected
+max-file-size = "10M"
+
+# File permission mode
+file-mode = "0600"
+
+# Directory permission mode
+dir-mode = "0700"
+
+# Debounce duration for filesystem events in watch mode
+debounce = "500ms"
+
+# Log format
+log-format = "text"
+
+# Log level
+log-level = "info"
+
+# Secrets provider backend to use
+# provider = ...
+
+# 1Password Service Account Token
+# op-token = ...
+
+# Optional: Path to 1Password config directory
+# op-config-dir = ...
+
+# 1Password Connect Host HTTP(S) URL
+# connect-host = ...
+
+# 1Password Connect Token
+# connect-token = ...
+
+# Maximum allowed concurrent requests to Connect API
+connect-max-concurrent = 20
+
+# Bitwarden API URL
+bws-api-url = "https://api.bitwarden.com/"
+
+# Bitwarden Identity URL
+bws-identity-url = "https://identity.bitwarden.com/"
+
+# Maximum number of concurrent requests to Bitwarden Secrets Manager
+bws-max-concurrent = 20
+
+# BWS User Agent
+bws-user-agent = "locket"
+
+# Bitwarden Machine Token
+# bws-token = ...
+
+```

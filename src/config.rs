@@ -2,7 +2,6 @@ use crate::error::LocketError;
 use crate::path::AbsolutePath;
 use clap::Args;
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 
@@ -102,16 +101,23 @@ pub trait ApplyDefaults {
     fn apply_defaults(self) -> Self;
 }
 
-/// Trait to expose defaults defined in #[locket(default = ...)] for documentation generation.
+/// Trait to expose defaults defined in #[locket(default = ...)] for documentation.
+#[cfg(feature = "locket-docs")]
 pub trait LocketDocDefaults {
-    fn register_defaults(map: &mut HashMap<String, String>);
+    fn register_defaults(map: &mut std::collections::HashMap<String, String>);
 
     /// Helper to get all defaults as a map
-    fn get_defaults() -> HashMap<String, String> {
-        let mut map = HashMap::new();
+    fn get_defaults() -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
         Self::register_defaults(&mut map);
         map
     }
+}
+
+/// Trait to expose the structural keys of a configuration struct for documentation.
+#[cfg(feature = "locket-docs")]
+pub trait ConfigStructure {
+    fn get_structure() -> Vec<String>;
 }
 
 #[cfg(test)]

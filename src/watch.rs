@@ -235,7 +235,7 @@ impl<H: EventHandler> FsWatcher<H> {
 }
 
 /// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct DebounceDuration(pub Duration);
@@ -260,6 +260,15 @@ impl FromStr for DebounceDuration {
         }
         let duration = humantime::parse_duration(s)?;
         Ok(DebounceDuration(duration))
+    }
+}
+
+impl Serialize for DebounceDuration {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
     }
 }
 

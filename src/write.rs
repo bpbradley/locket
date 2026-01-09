@@ -185,7 +185,7 @@ impl std::fmt::Debug for FileWriter {
 ///
 /// This ensures that permission values are validated (must be <= 0o7777)
 /// and correctly interpreted as octal.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
 pub struct FsMode(u32);
@@ -256,6 +256,15 @@ impl FsMode {
     }
 }
 
+impl Serialize for FsMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
 impl std::str::FromStr for FsMode {
     type Err = FsModeError;
 
@@ -277,13 +286,13 @@ impl std::str::FromStr for FsMode {
 
 impl std::fmt::Debug for FsMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0o{:o}", self.0)
+        write!(f, "0{:o}", self.0)
     }
 }
 
 impl std::fmt::Display for FsMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0o{:o}", self.0)
+        write!(f, "0{:o}", self.0)
     }
 }
 

@@ -110,9 +110,18 @@ impl std::fmt::Display for ShellCommand {
 }
 
 /// Default timeout for waiting for a child process to exit gracefully after SIGTERM.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(try_from = "String")]
 pub struct ProcessTimeout(pub Duration);
+
+impl Serialize for ProcessTimeout {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
 
 impl TryFrom<String> for ProcessTimeout {
     type Error = String;

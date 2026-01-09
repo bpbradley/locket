@@ -3469,6 +3469,8 @@ dependencies = [
  "clap",
  "indexmap 2.12.1",
  "locket",
+ "serde",
+ "toml",
 ]
 
 [[package]]

@@ -21,6 +21,7 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
     let overlay_logic = generate_overlay_body(&input.data);
     let defaults_logic = generate_defaults_body(&input.data);
     let doc_defaults_logic = generate_doc_defaults_impl(&input.data, &struct_name);
+    let structure_logic = generate_structure_body(&input.data);
 
     // Check for #[locket(try_into = "Path::To::Target")] on the struct
     let config_target = input.attrs.iter().find_map(|attr| {
@@ -75,7 +76,17 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
             }
         }
 
+        // Only generate introspection traits if locket-docs feature is enabled
+        #[cfg(feature = "locket-docs")]
         #doc_defaults_logic
+
+        #[cfg(feature = "locket-docs")]
+        #[automatically_derived]
+        impl crate::config::ConfigStructure for #struct_name {
+            fn get_structure() -> Vec<String> {
+                #structure_logic
+            }
+        }
 
         #try_from_impl
     };
@@ -125,27 +136,36 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                         a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("optional")))
                     );
 
+                    // Forward cfgs
+                    let cfgs: Vec<&Attribute> = f.attrs.iter()
+                        .filter(|a| a.path().is_ident("cfg"))
+                        .collect();
+
                     if is_option_type {
                         if is_explicit_optional {
                             // Option -> Option
                             if needs_conversion {
                                 Some(quote_spanned! {f.span()=>
+                                    #(#cfgs)*
                                     #name: args.#name.map(|v| v.try_into()).transpose()?
                                 })
                             } else {
                                 Some(quote_spanned! {f.span()=>
+                                    #(#cfgs)*
                                     #name: args.#name
                                 })
                             }
                         } else if has_default {
                             if needs_conversion {
                                 Some(quote_spanned! {f.span()=>
+                                    #(#cfgs)*
                                     #name: args.#name
                                         .expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
                                         .try_into()?
                                 })
                             } else {
                                 Some(quote_spanned! {f.span()=>
+                                    #(#cfgs)*
                                     #name: args.#name.expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
                                 })
                             }
@@ -156,12 +176,14 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
 
                             if needs_conversion {
                                 Some(quote_spanned! {f.span()=>
+                                    #(#cfgs)*
                                     #name: args.#name
                                         .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
                                         .try_into()?
                                 })
                             } else {
                                 Some(quote_spanned! {f.span()=>
+                                    #(#cfgs)*
                                     #name: args.#name
                                         .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
                                 })
@@ -170,10 +192,12 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                     }
                     else if needs_conversion {
                         Some(quote_spanned! {f.span()=>
+                            #(#cfgs)*
                             #name: args.#name.try_into()?
                         })
                     } else {
                         Some(quote_spanned! {f.span()=>
+                            #(#cfgs)*
                             #name: args.#name
                         })
                     }
@@ -192,7 +216,14 @@ fn generate_overlay_body(data: &Data) -> proc_macro2::TokenStream {
             Fields::Named(fields) => {
                 let recurse = fields.named.iter().map(|f| {
                     let name = &f.ident;
+                    let cfgs: Vec<&Attribute> = f
+                        .attrs
+                        .iter()
+                        .filter(|a| a.path().is_ident("cfg"))
+                        .collect();
+
                     quote_spanned! {f.span()=>
+                        #(#cfgs)*
                         #name: self.#name.overlay(top.#name)
                     }
                 });
@@ -201,7 +232,13 @@ fn generate_overlay_body(data: &Data) -> proc_macro2::TokenStream {
             Fields::Unnamed(fields) => {
                 let recurse = fields.unnamed.iter().enumerate().map(|(i, f)| {
                     let index = syn::Index::from(i);
+                    let cfgs: Vec<&Attribute> = f
+                        .attrs
+                        .iter()
+                        .filter(|a| a.path().is_ident("cfg"))
+                        .collect();
                     quote_spanned! {f.span()=>
+                        #(#cfgs)*
                         self.#index.overlay(top.#index)
                     }
                 });
@@ -219,6 +256,22 @@ fn generate_defaults_body(data: &Data) -> proc_macro2::TokenStream {
             Fields::Named(fields) => {
                 let recurse = fields.named.iter().map(|f| {
                     let name = &f.ident;
+
+                    let cfgs: Vec<&Attribute> = f.attrs.iter()
+                        .filter(|a| a.path().is_ident("cfg"))
+                        .collect();
+
+                    // if flattened, recurse apply_defautls
+                    let is_flattened = ["command", "clap", "arg", "serde"]
+                        .iter()
+                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
+
+                    if is_flattened {
+                        return quote_spanned! {f.span()=>
+                            #(#cfgs)*
+                            #name: self.#name.apply_defaults()
+                        };
+                    }
 
                     // Parse attributes for #[locket(default = ...)]
                     let default_expr = f.attrs.iter().find_map(|attr| {
@@ -238,13 +291,15 @@ fn generate_defaults_body(data: &Data) -> proc_macro2::TokenStream {
 
                         if is_string_lit {
                             quote_spanned! {f.span()=>
+                                #(#cfgs)*
                                 #name: self.#name.or_else(|| Some(
                                     #expr.parse().expect(concat!("Locket: Invalid default value for field '", stringify!(#name), "'"))
                                 ))
                             }
                         } else {
-                            // Handle numbers/bools/consts
+
                             quote_spanned! {f.span()=>
+                                #(#cfgs)*
                                 #name: self.#name.or_else(|| {
                                     #[allow(clippy::useless_conversion)]
                                     Some((#expr).into())
@@ -252,7 +307,10 @@ fn generate_defaults_body(data: &Data) -> proc_macro2::TokenStream {
                             }
                         }
                     } else {
-                        quote_spanned! {f.span()=> #name: self.#name }
+                        quote_spanned! {f.span()=>
+                            #(#cfgs)*
+                            #name: self.#name
+                        }
                     }
                 });
                 quote! { Self { #(#recurse),* } }
@@ -337,6 +395,49 @@ fn generate_doc_defaults_impl(data: &Data, struct_name: &syn::Ident) -> proc_mac
                 #body
             }
         }
+    }
+}
+
+fn generate_structure_body(data: &Data) -> proc_macro2::TokenStream {
+    match data {
+        Data::Struct(struct_data) => {
+            match &struct_data.fields {
+                Fields::Named(fields) => {
+                    let recurse = fields.named.iter().map(|f| {
+                    let name = &f.ident;
+                    let is_flattened = ["command", "clap", "arg", "serde"]
+                        .iter()
+                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
+
+                    let cfgs: Vec<&Attribute> = f.attrs.iter()
+                        .filter(|a| a.path().is_ident("cfg"))
+                        .collect();
+
+                    if is_flattened {
+                        let ty = &f.ty;
+                        quote! {
+                            #(#cfgs)*
+                            keys.extend(<#ty as crate::config::ConfigStructure>::get_structure());
+                        }
+                    } else {
+                        // kebab case
+                        let key = name.as_ref().unwrap().to_string().replace('_', "-");
+                        quote! {
+                            #(#cfgs)*
+                            keys.push(#key.to_string());
+                        }
+                    }
+                });
+                    quote! {
+                        let mut keys = Vec::new();
+                        #(#recurse)*
+                        keys
+                    }
+                }
+                _ => quote! { Vec::new() },
+            }
+        }
+        _ => quote! { Vec::new() },
     }
 }
 
