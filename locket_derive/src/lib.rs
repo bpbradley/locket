@@ -50,7 +50,6 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
                 type Error = crate::error::LocketError;
 
                 fn try_from(args: #struct_name) -> Result<Self, Self::Error> {
-                    let args = <#struct_name as crate::config::ApplyDefaults>::apply_defaults(args);
                     Ok(Self {
                         #mapping_logic
                     })

@@ -67,13 +67,13 @@ where
     }
 }
 
-pub trait Layered<C>: Overlay + DeserializeOwned + Default + Sized {
+pub trait Layered<C>: Overlay + DeserializeOwned + Default + ApplyDefaults + Sized {
     fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError>;
 }
 
 impl<T, C> Layered<C> for T
 where
-    T: Overlay + DeserializeOwned + Default,
+    T: Overlay + DeserializeOwned + Default + ApplyDefaults,
     T: TryInto<C>,
     <T as TryInto<C>>::Error: Into<LocketError>,
 {
@@ -90,9 +90,10 @@ where
             Self::default()
         };
 
-        let merged = base.overlay(self);
-
-        merged.try_into().map_err(Into::into)
+        base.overlay(self)
+            .apply_defaults()
+            .try_into()
+            .map_err(Into::into)
     }
 }
 
