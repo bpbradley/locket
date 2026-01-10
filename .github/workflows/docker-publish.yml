@@ -46,4 +46,4 @@ jobs:
 
             - name: Build / Push
               run: |
-                  docker buildx bake -f docker/docker-bake.hcl release --push
+                  docker buildx bake --allow=fs.read=.. -f docker/docker-bake.hcl release --push

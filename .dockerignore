@@ -6,10 +6,10 @@
 **/*.log
 .git
 .gitignore
-docker/
-docs/
-tests/
-xtask/
+docker/tests
+docker/compose.*
+docs
+tests
 .github
 .vscode
-tests/
+tests
