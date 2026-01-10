@@ -77,6 +77,7 @@ jobs:
               uses: docker/setup-buildx-action@v3
 
             - name: Build images
+              working-directory: docker
               run: |
-                  docker buildx bake --allow=fs.read=.. -f docker/docker-bake.hcl release \
+                  docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release \
                     --load

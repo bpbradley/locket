@@ -45,5 +45,6 @@ jobs:
                   password: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Build / Push
+              working-directory: docker
               run: |
-                  docker buildx bake --allow=fs.read=.. -f docker/docker-bake.hcl release --push
+                  docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release --push
