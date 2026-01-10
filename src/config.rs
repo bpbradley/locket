@@ -17,7 +17,6 @@ use crate::error::LocketError;
 use crate::path::CanonicalPath;
 use clap::Args;
 use serde::de::DeserializeOwned;
-use std::path::Path;
 use thiserror::Error;
 
 #[cfg(feature = "exec")]
@@ -87,7 +86,7 @@ pub trait Layered<C>:
     Overlay + DeserializeOwned + Default + ApplyDefaults + ConfigSection + Sized
 {
     /// Resolves the layered configuration into the target domain type `C`.
-    fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError>;
+    fn resolve(self, configs: &[CanonicalPath]) -> Result<C, LocketError>;
 }
 
 impl<T, C> Layered<C> for T
@@ -96,24 +95,23 @@ where
     T: TryInto<C>,
     <T as TryInto<C>>::Error: Into<LocketError>,
 {
-    fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError> {
-        let base = if let Some(path) = config_path {
+    fn resolve(self, configs: &[CanonicalPath]) -> Result<C, LocketError> {
+        let mut base = Self::default();
+        for path in configs {
             let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
-
-            if let Some(section) = Self::section_name() {
+            let layer = if let Some(section) = Self::section_name() {
                 let root: toml::Value = toml::from_str(&content).map_err(ConfigError::Parse)?;
-
                 if let Some(table) = root.get(section) {
                     table.clone().try_into().map_err(ConfigError::Parse)?
                 } else {
                     root.try_into().map_err(ConfigError::Parse)?
                 }
             } else {
+                // No section name specified, parse entire file into the config struct
                 toml::from_str::<Self>(&content).map_err(ConfigError::Parse)?
-            }
-        } else {
-            Self::default()
-        };
+            };
+            base = base.overlay(layer);
+        }
 
         base.overlay(self)
             .apply_defaults()
@@ -128,9 +126,13 @@ where
 /// from the actual application arguments `inner` (the top layer).
 #[derive(Args, Debug, Clone)]
 pub struct LayeredArgs<T: Args> {
-    /// Path to configuration file
-    #[arg(long, env = "LOCKET_CONFIG")]
-    pub config: Option<CanonicalPath>,
+    /// Path to configuration files
+    ///
+    /// Can be specified multiple times to layer multiple files.
+    /// Each file is loaded in the order specified, with later files
+    /// overriding earlier ones.
+    #[arg(long, env = "LOCKET_CONFIG", action = clap::ArgAction::Append)]
+    pub config: Vec<CanonicalPath>,
 
     #[command(flatten)]
     pub inner: T,
@@ -144,7 +146,7 @@ where
     where
         T: Layered<C>,
     {
-        self.inner.resolve(self.config.as_deref())
+        self.inner.resolve(self.config.as_slice())
     }
 }
 
@@ -283,7 +285,7 @@ mod tests {
         };
 
         let config = LayeredArgs {
-            config: Some(config_path),
+            config: vec![config_path],
             inner: args,
         };
 
