@@ -1,0 +1,11 @@
+
+# Mode of operation
+mode = "watch"
+
+# Status file path used for healthchecks
+status-file = "/dev/shm/locket/ready"
+
+# Mapping of source paths to destination paths
+[[map]]
+source = "/templates"
+dest = "/run/secrets/locket"

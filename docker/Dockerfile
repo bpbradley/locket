@@ -29,8 +29,15 @@ RUN install -d -m 1777 /tmp \
     && install -d -m 0755 /home/nonroot && chown nonroot:nonroot /home/nonroot \
     && install -d -m 0755 /templates && chown nonroot:nonroot /templates \
     && install -d -m 0755 /run/secrets && chown nonroot:nonroot /run/secrets \
+    && install -d -m 0755 /etc/locket && chown nonroot:nonroot /etc/locket \
     && install -d -m 0700 /config/op && chown nonroot:nonroot /config/op \
     && apk add --no-cache ca-certificates
+
+COPY docker/locket.toml /tmp/locket.toml
+
+RUN mv /tmp/locket.toml /etc/locket/locket.toml \
+    && chown nonroot:nonroot /etc/locket/locket.toml \
+    && chmod 644 /etc/locket/locket.toml
 
 RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
 
@@ -39,9 +46,6 @@ LABEL org.opencontainers.image.title="locket (base)"
 
 ARG DEFAULT_PROVIDER
 ENV SECRETS_PROVIDER=${DEFAULT_PROVIDER}
-ENV LOCKET_STATUS_FILE=/dev/shm/locket/ready
-ENV SECRET_MAP=/templates:/run/secrets/locket
-ENV LOCKET_INJECT_MODE=watch
 
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
@@ -58,6 +62,7 @@ COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
 COPY --from=rootfs --chmod=1777 /tmp /tmp
 COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
+COPY --from=rootfs --chown=nonroot:nonroot /etc/locket /etc/locket
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 
 WORKDIR /
@@ -65,7 +70,7 @@ USER nonroot:nonroot
 VOLUME ["/run/secrets/locket", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
     CMD ["locket","healthcheck"]
-ENTRYPOINT ["locket","inject"]
+ENTRYPOINT ["locket","inject", "--config", "/etc/locket/locket.toml"]
 
 FROM alpine:3.23 AS opstage
 ARG OP_VERSION=2.32.0

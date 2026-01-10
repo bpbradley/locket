@@ -150,7 +150,7 @@ impl SecretFileManager {
                     src = ?file.source().label(),
                     dst = ?file.dest(),
                     error = ?err,
-                    "injection failed; policy=copy-unmodified. Reverting to raw copy."
+                    "injection failed; policy=passthrough. Reverting to raw copy."
                 );
                 let f = file.clone();
                 let raw = tokio::task::spawn_blocking(move || {
