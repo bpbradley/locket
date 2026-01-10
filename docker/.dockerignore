@@ -6,8 +6,10 @@
 **/*.log
 .git
 .gitignore
-.dockerignore
-docker-bake.hcl
-Dockerfile
+docker/
+docs/
+tests/
+xtask/
 .github
 .vscode
+tests/

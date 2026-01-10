@@ -1,81 +1,84 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [ main ]
-  push:
-    branches: [ main ]
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
 
 permissions:
-  contents: read
-  pull-requests: read
+    contents: read
+    pull-requests: read
 
 jobs:
-  filter:
-    name: Filter changed files
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-      contents: read
-    outputs:
-      rust:   ${{ steps.filter.outputs.rust }}
-      docker: ${{ steps.filter.outputs.docker }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            rust:
-              - 'src/**'
-              - 'tests/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain.*'
-            docker:
-              - 'Dockerfile'
-              - 'docker-bake.hcl'
-              - 'compose*.yml'
-              - 'compose*.yaml'
-  locket:
-    name: Build, clippy, test
-    needs: filter
-    if: needs.filter.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: -D warnings
-      CARGO_TERM_COLOR: always
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
-      - uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-      - run: cargo fmt -- --check
-      - run: cargo build --locked
-      - run: cargo test --locked
-      - run: cargo clippy --all-targets
-      - run: cargo xtask docs --check
+    filter:
+        name: Filter changed files
+        runs-on: ubuntu-latest
+        permissions:
+            pull-requests: read
+            contents: read
+        outputs:
+            rust: ${{ steps.filter.outputs.rust }}
+            docker: ${{ steps.filter.outputs.docker }}
+        steps:
+            - uses: actions/checkout@v6
+            - uses: dorny/paths-filter@v3
+              id: filter
+              with:
+                  filters: |
+                      rust:
+                        - 'src/**'
+                        - 'tests/**'
+                        - 'xtask/**'
+                        - 'locket_derive/**'
+                        - 'Cargo.toml'
+                        - 'Cargo.lock'
+                        - 'rust-toolchain.*'
+                      docker:
+                        - 'docker/**'
+                        - 'compose*.yml'
+                        - 'compose*.yaml'
+    locket:
+        name: Build, clippy, test
+        needs: filter
+        if: needs.filter.outputs.rust == 'true'
+        runs-on: ubuntu-latest
+        env:
+            RUSTFLAGS: -D warnings
+            CARGO_TERM_COLOR: always
+        steps:
+            - uses: actions/checkout@v6
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy,rustfmt
+            - uses: actions/cache@v5
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                      target
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+                  restore-keys: ${{ runner.os }}-cargo-
+            - run: cargo fmt -- --check
+            - run: cargo build --locked
+            - run: cargo test --locked
+            - run: cargo clippy --all-targets
+            - run: cargo xtask docs --check
 
-  docker:
-    name: Docker build
-    needs: filter
-    if: needs.filter.outputs.docker == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
+    docker:
+        name: Docker build
+        needs: filter
+        if: needs.filter.outputs.docker == 'true'
+        runs-on: ubuntu-latest
+        env:
+            BUILDX_BAKE_ENTITLEMENTS_FS: 0
+        steps:
+            - uses: actions/checkout@v6
 
-      - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
+            - name: Setup Buildx
+              uses: docker/setup-buildx-action@v3
 
-      - name: Build images
-        run: |
-          docker buildx bake -f docker-bake.hcl release \
-            --load
+            - name: Build images
+              run: |
+                  docker buildx bake -f docker/docker-bake.hcl release \
+                    --load

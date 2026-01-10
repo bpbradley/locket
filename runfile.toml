@@ -38,7 +38,8 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 
 [docker-build]
 description = "docker build dev image"
-cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake -f docker-bake.hcl all --load"
+path = "docker"
+cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake --allow=fs.read=.. -f docker-bake.hcl all --load"
 
 [docker-test-dbg]
 description = "Run test of docker image"
@@ -46,12 +47,12 @@ cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoi
 
 [docker-test]
 description = "Run test of docker image"
-path = "tests/docker/sidecar"
+path = "docker/tests/sidecar"
 cmd = "docker compose -f compose.tests.yaml -p tests up"
 
 [docker-provider]
 description = "Run test of docker provider"
-path = "tests/docker/provider"
+path = "docker/tests/provider"
 cmd = "docker compose --verbose -p provider up"
 
 [release-rc]
