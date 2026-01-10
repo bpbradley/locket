@@ -145,7 +145,7 @@ impl SecretFileManager {
 
         match policy {
             InjectFailurePolicy::Error => Err(err),
-            InjectFailurePolicy::CopyUnmodified => {
+            InjectFailurePolicy::Passthrough => {
                 warn!(
                     src = ?file.source().label(),
                     dst = ?file.dest(),
@@ -176,11 +176,16 @@ impl SecretFileManager {
         match self.resolve(file).await {
             Ok(content) => {
                 if let Err(e) = self.materialize(file, content).await {
-                    return self.handle_policy(file, e, self.config.inject_policy).await;
+                    return self
+                        .handle_policy(file, e, self.config.inject_failure_policy)
+                        .await;
                 }
                 Ok(())
             }
-            Err(e) => self.handle_policy(file, e, self.config.inject_policy).await,
+            Err(e) => {
+                self.handle_policy(file, e, self.config.inject_failure_policy)
+                    .await
+            }
         }
     }
 

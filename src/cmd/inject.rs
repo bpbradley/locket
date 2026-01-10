@@ -1,5 +1,5 @@
 use crate::{
-    config::inject::{InjectConfig, InjectMode},
+    cmd::config::inject::{InjectConfig, InjectMode},
     events,
     secrets::SecretFileManager,
     watch::FsWatcher,

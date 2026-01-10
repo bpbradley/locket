@@ -1,7 +1,5 @@
 use clap::CommandFactory;
-use locket::cmd::Cli;
-use locket::config::exec::ExecArgs;
-use locket::config::inject::InjectArgs;
+use locket::cmd::{Cli, ExecArgs, InjectArgs};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fmt::Debug;

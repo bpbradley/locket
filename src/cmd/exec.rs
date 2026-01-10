@@ -1,5 +1,5 @@
+use crate::cmd::config::exec::ExecConfig;
 use crate::{
-    config::exec::ExecConfig,
     env::EnvManager,
     error::LocketError,
     events::{EventHandler, FsEvent, HandlerError},

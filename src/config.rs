@@ -18,11 +18,7 @@ use crate::path::CanonicalPath;
 use clap::Args;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
-
-#[cfg(feature = "exec")]
-pub mod exec;
-pub mod inject;
-pub mod utils;
+pub mod de;
 
 /// Represents all errors that can occur during the configuration resolution lifecycl
 #[derive(Debug, Error)]

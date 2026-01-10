@@ -1,8 +1,7 @@
 use clap::{Arg, Args, Command, CommandFactory};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
-use locket::config::exec::ExecArgs;
-use locket::config::inject::InjectArgs;
+use locket::cmd::{ExecArgs, InjectArgs};
 use locket::config::{ApplyDefaults, LocketDocDefaults};
 use serde::Serialize;
 use std::collections::HashMap;

@@ -21,13 +21,13 @@ locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS 
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--config` | `LOCKET_CONFIG` |  | Path to configuration file |
+| `--config` | `LOCKET_CONFIG` |  | Path to configuration files<br><br>Can be specified multiple times to layer multiple files. Each file is loaded in the order specified, with later files overriding earlier ones. |
 | `--status-file` | `LOCKET_STATUS_FILE` |  | Status file path used for healthchecks.<br><br>If not provided, no status file is created.<br><br>**Docker Default:** `/dev/shm/locket/ready` |
 | `--map` | `SECRET_MAP` |  | Mapping of source paths to destination paths.<br><br>Maps sources (holding secret templates) to destination paths (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.<br><br>Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments.<br><br>Example: `--map /templates:/run/secrets/app`<br><br>**CLI Default:** No mappings <br>**Docker Default:** `/templates:/run/secrets/locket` |
 | `--secrets` | `LOCKET_SECRETS` |  | Additional secret values specified as LABEL=SECRET_TEMPLATE<br><br>Multiple values can be provided, separated by commas. Or supplied multiple times as arguments.<br><br>Loading from file is supported via `LABEL=@/path/to/file`.<br><br>Example:<br><br>```sh --secret db_password={{op://..}} --secret api_key={{op://..}} ``` |
 | `--mode` | `LOCKET_INJECT_MODE` | `one-shot` | Mode of operation <br><br> **Choices:**<br>- `one-shot`: **Default** Materialize all secrets once and exit<br>- `watch`: **Docker Default** Watch for changes on templates and reinject<br>- `park`: Inject once and then park to keep the process alive |
 | `--out` | `DEFAULT_SECRET_DIR` | `/run/secrets/locket` | Directory where secret values (literals) are materialized |
-| `--inject-policy` | `INJECT_POLICY` | `copy-unmodified` | Policy for handling injection failures <br><br> **Choices:**<br>- `error`: Failures are treated as errors and will abort the process<br>- `copy-unmodified`: On failure, copy the unmodified secret to destination<br>- `ignore`: On failure, ignore the secret and log a warning |
+| `--inject-failure-policy` | `INJECT_POLICY` | `passthrough` | Policy for handling injection failures <br><br> **Choices:**<br>- `error`: Failures are treated as errors and will abort the process<br>- `passthrough`: On failure, copy the unmodified secret to destination<br>- `ignore`: On failure, ignore the secret and log a warning |
 | `--max-file-size` | `MAX_FILE_SIZE` | `10M` | Maximum allowable size for a template file. Files larger than this will be rejected.<br><br>Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes). |
 | `--file-mode` | `LOCKET_FILE_MODE` | `0600` | File permission mode |
 | `--dir-mode` | `LOCKET_DIR_MODE` | `0700` | Directory permission mode |
@@ -108,7 +108,7 @@ secrets = []
 out = "/run/secrets/locket"
 
 # Policy for handling injection failures
-inject-policy = "copy-unmodified"
+inject-failure-policy = "passthrough"
 
 # Maximum allowable size for a template file. Files larger than this will be rejected
 max-file-size = "10M"

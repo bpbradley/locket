@@ -5,7 +5,7 @@
 //!
 //! Using these utilities prevents path traversal vulnerabilities when handling user inputs.
 
-use crate::config::utils::TryFromKv;
+use crate::config::de::TryFromKv;
 use crate::secrets::SecretError;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -378,7 +378,7 @@ mod tests {
 
     #[derive(Deserialize)]
     struct Config {
-        #[serde(deserialize_with = "crate::config::utils::polymorphic_vec")]
+        #[serde(deserialize_with = "crate::config::de::polymorphic_vec")]
         map: Vec<PathMapping>,
     }
 

@@ -124,7 +124,7 @@ async fn test_policy_error_aborts() {
     // "test:missing" parses as valid, but is not in the provider's data map.
     let (_tmp, _out, mut config) = setup("config.yaml", "Key: {{ test:missing }}");
 
-    config.inject_policy = InjectFailurePolicy::Error;
+    config.inject_failure_policy = InjectFailurePolicy::Error;
 
     let provider = Arc::new(MockProvider::new(vec![]));
     let manager = SecretFileManager::new(config, provider).unwrap();
@@ -145,7 +145,7 @@ async fn test_policy_error_aborts() {
 async fn test_policy_copy_unmodified() {
     let (_tmp, out_dir, mut config) = setup("config.yaml", "Key: {{ test:missing }}");
 
-    config.inject_policy = InjectFailurePolicy::CopyUnmodified;
+    config.inject_failure_policy = InjectFailurePolicy::Passthrough;
 
     let provider = Arc::new(MockProvider::new(vec![]));
     let manager = SecretFileManager::new(config, provider).unwrap();

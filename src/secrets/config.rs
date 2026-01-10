@@ -10,7 +10,7 @@ pub struct SecretManagerConfig {
     pub map: Vec<PathMapping>,
     pub secrets: Vec<Secret>,
     pub out: AbsolutePath,
-    pub inject_policy: InjectFailurePolicy,
+    pub inject_failure_policy: InjectFailurePolicy,
     pub max_file_size: MemSize,
     pub writer: FileWriter,
 }
@@ -26,7 +26,7 @@ impl Default for SecretManagerConfig {
             out: AbsolutePath::new("/private/tmp/locket"),
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             out: AbsolutePath::new("./secrets"), // Fallback
-            inject_policy: InjectFailurePolicy::default(),
+            inject_failure_policy: InjectFailurePolicy::default(),
             max_file_size: MemSize::default(),
             writer: FileWriter::default(),
         }
@@ -72,7 +72,7 @@ pub enum InjectFailurePolicy {
     Error,
     /// On failure, copy the unmodified secret to destination
     #[default]
-    CopyUnmodified,
+    Passthrough,
     /// On failure, ignore the secret and log a warning
     Ignore,
 }
@@ -112,7 +112,7 @@ pub struct SecretManagerArgs {
     #[serde(
         alias = "secret_map",
         default,
-        deserialize_with = "crate::config::utils::polymorphic_vec"
+        deserialize_with = "crate::config::de::polymorphic_vec"
     )]
     #[locket(docs = "
         TOML syntax supports list of strings or map form:
@@ -152,7 +152,7 @@ pub struct SecretManagerArgs {
     )]
     #[serde(
         alias = "secret",
-        deserialize_with = "crate::config::utils::polymorphic_vec",
+        deserialize_with = "crate::config::de::polymorphic_vec",
         default
     )]
     #[locket(docs = "
@@ -174,8 +174,8 @@ pub struct SecretManagerArgs {
 
     /// Policy for handling injection failures
     #[arg(long, env = "INJECT_POLICY", value_enum)]
-    #[locket(default = InjectFailurePolicy::CopyUnmodified)]
-    pub inject_policy: Option<InjectFailurePolicy>,
+    #[locket(default = InjectFailurePolicy::Passthrough)]
+    pub inject_failure_policy: Option<InjectFailurePolicy>,
 
     /// Maximum allowable size for a template file. Files larger than this will be rejected.
     ///
@@ -197,7 +197,7 @@ mod tests {
 
     #[derive(Deserialize, Debug)]
     struct TestWrapper {
-        #[serde(deserialize_with = "crate::config::utils::polymorphic_vec")]
+        #[serde(deserialize_with = "crate::config::de::polymorphic_vec")]
         secrets: Vec<Secret>,
     }
 
