@@ -5,7 +5,9 @@
 //!
 //! Using these utilities prevents path traversal vulnerabilities when handling user inputs.
 
+use crate::config::de::TryFromKv;
 use crate::secrets::SecretError;
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -16,8 +18,18 @@ use std::str::FromStr;
 /// and is free of relative components like `.` or `..` (lexically cleaned).
 ///
 /// This type does not verify existence on disk. Use [`CanonicalPath`] for that.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+#[serde(rename_all = "kebab-case")]
 pub struct AbsolutePath(PathBuf);
+
+impl TryFrom<String> for AbsolutePath {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
 
 impl AbsolutePath {
     pub fn into_inner(self) -> PathBuf {
@@ -45,8 +57,18 @@ impl AbsolutePath {
 /// Constructing this type performs filesystem I/O to validate existence
 /// and resolve links. It therefore has a performance cost compared to [`AbsolutePath`].
 /// But this should be the preferred type for source paths which must exist.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub struct CanonicalPath(PathBuf);
+
+impl TryFrom<String> for CanonicalPath {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
 
 impl CanonicalPath {
     pub fn into_inner(self) -> PathBuf {
@@ -179,10 +201,19 @@ impl PathExt for Path {
 /// A validated mapping of a source path to a destination path.
 ///
 /// Used for mapping secret templates (input) to their materialized locations (output).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathMapping {
+    #[serde(alias = "source")]
     src: CanonicalPath,
+    #[serde(alias = "dest")]
     dst: AbsolutePath,
+}
+
+impl TryFromKv for PathMapping {
+    type Err = SecretError;
+    fn try_from_kv(key: String, val: String) -> Result<Self, SecretError> {
+        PathMapping::try_new(CanonicalPath::try_new(key)?, AbsolutePath::new(val))
+    }
 }
 
 impl PathMapping {
@@ -345,6 +376,12 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    #[derive(Deserialize)]
+    struct Config {
+        #[serde(deserialize_with = "crate::config::de::polymorphic_vec")]
+        map: Vec<PathMapping>,
+    }
+
     #[test]
     fn test_basic_clean() {
         assert_eq!(Path::new("a/b/c").clean(), PathBuf::from("a/b/c"));
@@ -438,5 +475,28 @@ mod tests {
         // Missing source file
         let s_missing = format!("{}_missing:/dst", src_str);
         assert!(PathMapping::from_str(&s_missing).is_err());
+    }
+
+    #[test]
+    fn test_path_mapping_polymorphism() {
+        let source_file = tempfile::NamedTempFile::new().unwrap();
+        let src_path = source_file.path().to_str().unwrap();
+
+        let toml_input = format!(
+            r#"
+                map = [
+                    "{src}:/tmp/dst1",                         # String syntax
+                    {{ src = "{src}", dst = "/tmp/dst2" }}     # Map syntax
+                ]
+                "#,
+            src = src_path
+        );
+
+        let config: Config = toml::from_str(&toml_input).expect("Parsing failed");
+
+        assert_eq!(config.map.len(), 2);
+
+        assert_eq!(config.map[0].src().as_path(), source_file.path());
+        assert_eq!(config.map[1].src().as_path(), source_file.path());
     }
 }

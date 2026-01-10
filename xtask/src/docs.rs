@@ -1,6 +1,10 @@
 use clap::{Arg, Args, Command, CommandFactory};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
+use locket::cmd::{ExecArgs, InjectArgs};
+use locket::config::{ApplyDefaults, LocketDocDefaults};
+use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -33,7 +37,20 @@ impl DocGenerator {
         Self { check, dir, file }
     }
     pub fn generate(self) -> anyhow::Result<()> {
-        let cmd = Cli::command();
+        let mut cmd = Cli::command();
+
+        clean_environment(&cmd);
+
+        if let Some(sub) = cmd.find_subcommand_mut("inject") {
+            let defaults = InjectArgs::get_defaults();
+            patch_defaults(sub, &defaults);
+        }
+
+        if let Some(sub) = cmd.find_subcommand_mut("exec") {
+            let defaults = ExecArgs::get_defaults();
+            patch_defaults(sub, &defaults);
+        }
+
         let app_name = cmd.get_name().to_string();
         let version = cmd.get_version().unwrap_or("0.0.0");
 
@@ -97,6 +114,12 @@ impl DocGenerator {
 
             write_command_section(&mut sub_buffer, sub, &app_name)?;
 
+            if name == "inject" {
+                write_toml_section::<InjectArgs>(&mut sub_buffer, sub)?;
+            } else if name == "exec" {
+                write_toml_section::<ExecArgs>(&mut sub_buffer, sub)?;
+            }
+
             if has_visible_subcommands(sub) {
                 for child in sub.get_subcommands() {
                     if !child.is_hide_set() {
@@ -119,6 +142,136 @@ impl DocGenerator {
 
         Ok(())
     }
+}
+
+fn write_toml_section<T>(writer: &mut impl Write, cmd: &Command) -> io::Result<()>
+where
+    T: Default + ApplyDefaults + Serialize + locket::config::ConfigStructure,
+{
+    let config = T::default().apply_defaults();
+
+    let value =
+        toml::Value::try_from(&config).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let active_map = value
+        .as_table()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Config is not a table"))?;
+
+    // iterates fields in definition order
+    let all_keys = T::get_structure();
+
+    let mut simple_keys = Vec::new();
+    let mut table_keys = Vec::new();
+
+    for (key, docs) in all_keys {
+        if let Some(val) = active_map.get(&key) {
+            if is_toml_table_section(val) {
+                table_keys.push((key, docs));
+            } else {
+                simple_keys.push((key, docs));
+            }
+        } else {
+            // Missing keys (None) are treated as simple comments
+            simple_keys.push((key, docs));
+        }
+    }
+
+    writeln!(writer, "\n## TOML Reference\n")?;
+    writeln!(writer, "> [!TIP]")?;
+    writeln!(
+        writer,
+        "> Settings can be provided via config.toml as well, using the --config option."
+    )?;
+    writeln!(
+        writer,
+        "> Provided is the reference configuration in TOML format\n"
+    )?;
+    writeln!(writer, "```toml")?;
+
+    // Helper to write keys
+    let mut write_keys = |keys: Vec<(String, Option<String>)>| -> io::Result<()> {
+        for (key, docs) in keys {
+            // Try to find the corresponding argument help in the Clap Command
+            if let Some(arg) = cmd.get_arguments().find(|a| a.get_long() == Some(&key)) {
+                if let Some(help) = arg.get_help() {
+                    writeln!(writer, "# {}", help)?;
+                }
+            }
+
+            // Inject docsif present
+            if let Some(doc) = docs {
+                // Split each line, trim, and add comment prefix
+                for line in doc.lines() {
+                    writeln!(writer, "# {}", line.trim())?;
+                }
+            }
+
+            if let Some(val) = active_map.get(&key) {
+                let mut mini_map = toml::map::Map::new();
+                mini_map.insert(key.clone(), val.clone());
+                let line = toml::to_string(&mini_map).unwrap();
+                write!(writer, "{}", line)?;
+            } else {
+                writeln!(writer, "# {} = ...", key)?;
+            }
+            writeln!(writer)?;
+        }
+        Ok(())
+    };
+
+    write_keys(simple_keys)?;
+    write_keys(table_keys)?;
+
+    writeln!(writer, "```")?;
+
+    Ok(())
+}
+
+/// Determines if a TOML will be rendered as section or inline value
+fn is_toml_table_section(val: &toml::Value) -> bool {
+    match val {
+        toml::Value::Table(_) => true,
+        toml::Value::Array(arr) => {
+            if let Some(first) = arr.first() {
+                first.is_table()
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn clean_environment(cmd: &Command) {
+    for arg in cmd.get_arguments() {
+        if let Some(env_os) = arg.get_env() {
+            // Unset this variable for the current process
+            // so Clap doesn't think it's active.
+            unsafe { std::env::remove_var(env_os) };
+        }
+    }
+
+    // Recurse into subcommands (inject, exec, etc.)
+    for sub in cmd.get_subcommands() {
+        clean_environment(sub);
+    }
+}
+
+fn patch_defaults(cmd: &mut Command, defaults: &HashMap<String, String>) {
+    let mut updates = Vec::new();
+
+    for arg in cmd.get_arguments() {
+        if let Some(long) = arg.get_long() {
+            if let Some(def) = defaults.get(long) {
+                updates.push((arg.get_id().clone(), def.clone()));
+            }
+        }
+    }
+    let mut owned_cmd = std::mem::take(cmd);
+
+    for (id, val) in updates {
+        owned_cmd = owned_cmd.mut_arg(id, |arg| arg.default_value(val));
+    }
+    *cmd = owned_cmd;
 }
 
 fn has_visible_subcommands(cmd: &Command) -> bool {

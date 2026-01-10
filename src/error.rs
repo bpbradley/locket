@@ -1,4 +1,5 @@
 use crate::{
+    config::ConfigError,
     events::HandlerError,
     health::HealthError,
     logging::LoggingError,
@@ -45,6 +46,9 @@ pub enum LocketError {
 
     #[error(transparent)]
     Logging(#[from] LoggingError),
+
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 }
 
 #[cfg(feature = "compose")]

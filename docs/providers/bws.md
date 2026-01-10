@@ -27,7 +27,7 @@ services:
       - ./templates:/templates:ro
       - out-bws:/run/secrets/locket
     command: # Or use environment variables
-      - "--bws.token=file:/run/secrets/bws_token"
+      - "--bws-token=file:/run/secrets/bws_token"
 secrets:
   bws_token:
     file: /etc/tokens/bws
@@ -46,7 +46,7 @@ services:
       type: locket
       options:
         provider: bws
-        bws.token: file:/etc/bws/token
+        bws-token: file:/etc/bws/token
         secrets:
           - "secret1={{ 3832b656-a93b-45ad-bdfa-b267016802c3 }}"
           - "secret2={{ 3e0f2247-b359-4408-83d0-b3a70152731c }}"

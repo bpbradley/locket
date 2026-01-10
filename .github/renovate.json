@@ -13,7 +13,7 @@
     "customManagers": [
         {
             "customType": "regex",
-            "managerFilePatterns": ["/^Dockerfile$/"],
+            "managerFilePatterns": ["^docker/Dockerfile$"],
             "matchStrings": ["ARG\\s+RUST_TAG=(?<currentValue>[^\\s]+)"],
             "datasourceTemplate": "docker",
             "depNameTemplate": "rust",

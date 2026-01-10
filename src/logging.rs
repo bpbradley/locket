@@ -4,7 +4,9 @@
 //! Uses `tracing` and `tracing-subscriber` for implementation.
 
 use clap::{Args, ValueEnum};
+use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -16,6 +18,7 @@ pub enum LoggingError {
 }
 
 #[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 pub enum LogFormat {
     #[default]
     /// Plain text log format
@@ -25,6 +28,15 @@ pub enum LogFormat {
     #[cfg(feature = "compose")]
     /// Special format for Docker Compose Provider specification
     Compose,
+}
+
+impl std::fmt::Display for LogFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
+    }
 }
 
 impl LogFormat {
@@ -38,7 +50,14 @@ impl LogFormat {
     }
 }
 
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -59,14 +78,54 @@ impl LogLevel {
     }
 }
 
-#[derive(Default, Args, Debug, Clone)]
-pub struct Logger {
+impl FromStr for LogLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "trace" => Ok(LogLevel::Trace),
+            "debug" => Ok(LogLevel::Debug),
+            "info" => Ok(LogLevel::Info),
+            "warn" => Ok(LogLevel::Warn),
+            "error" => Ok(LogLevel::Error),
+            _ => Err(format!("Invalid log level: {}", s)),
+        }
+    }
+}
+
+impl FromStr for LogFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "text" => Ok(LogFormat::Text),
+            "json" => Ok(LogFormat::Json),
+            #[cfg(feature = "compose")]
+            "compose" => Ok(LogFormat::Compose),
+            _ => Err(format!("Invalid log format: {}", s)),
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
+#[serde(rename_all = "kebab-case")]
+#[locket(try_into = "Logger")]
+pub struct LoggerArgs {
     /// Log format
-    #[arg(long, env = "LOCKET_LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
-    pub log_format: LogFormat,
+    #[arg(long, env = "LOCKET_LOG_FORMAT")]
+    #[locket(default = LogFormat::Text)]
+    pub log_format: Option<LogFormat>,
 
     /// Log level
-    #[arg(long, env = "LOCKET_LOG_LEVEL", value_enum, default_value_t = LogLevel::Info)]
+    #[arg(long, env = "LOCKET_LOG_LEVEL")]
+    #[locket(default = LogLevel::Info)]
+    pub log_level: Option<LogLevel>,
+}
+
+#[derive(Default, Args, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Logger {
+    pub log_format: LogFormat,
     pub log_level: LogLevel,
 }
 

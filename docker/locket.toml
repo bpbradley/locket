@@ -1,0 +1,6 @@
+mode = "watch"
+status-file = "/dev/shm/locket/ready"
+
+[[map]]
+source = "/templates"
+dest = "/run/secrets/locket"

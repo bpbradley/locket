@@ -11,13 +11,23 @@
 use clap::{Parser, Subcommand};
 #[cfg(feature = "compose")]
 mod compose;
+mod config;
 #[cfg(feature = "exec")]
 mod exec;
 mod healthcheck;
 mod inject;
+use crate::config::LayeredArgs;
 
 #[cfg(feature = "compose")]
 pub use compose::compose;
+#[cfg(feature = "compose")]
+pub use config::compose::ComposeArgs;
+#[cfg(feature = "exec")]
+pub use config::exec::{ExecArgs, ExecConfig};
+pub use config::{
+    healthcheck::HealthArgs,
+    inject::{InjectArgs, InjectConfig},
+};
 #[cfg(feature = "exec")]
 pub use exec::exec;
 pub use healthcheck::healthcheck;
@@ -45,7 +55,7 @@ pub enum Command {
     ///     --map ./tpl:/run/secrets/locket/mapped \ # Maps all templates in `./tpl/` directory to secrets in `/run/secrets/locket/mapped`
     /// ```
     #[clap(verbatim_doc_comment)]
-    Inject(Box<inject::InjectArgs>),
+    Inject(LayeredArgs<InjectArgs>),
 
     /// Execute a command with secrets injected into the process environment.
     /// and optionally materialize secrets from template files.
@@ -60,16 +70,16 @@ pub enum Command {
     /// ```
     #[cfg(feature = "exec")]
     #[clap(verbatim_doc_comment)]
-    Exec(Box<exec::ExecArgs>),
+    Exec(LayeredArgs<ExecArgs>),
 
     /// Checks the health of the sidecar agent, determined by the state of materialized secrets.
     ///
     /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.
     #[clap(verbatim_doc_comment)]
-    Healthcheck(healthcheck::HealthArgs),
+    Healthcheck(HealthArgs),
     /// Docker Compose provider API
     #[cfg(feature = "compose")]
-    Compose(Box<compose::ComposeArgs>),
+    Compose(Box<ComposeArgs>),
 
     /// Docker CLI plugin metadata command
     #[cfg(feature = "compose")]

@@ -4,6 +4,7 @@
 //! which is created when all secrets have been successfully materialized.
 //! If the file is absent, the sidecar is considered unhealthy.
 use crate::path::AbsolutePath;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -16,8 +17,29 @@ pub enum HealthError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub struct StatusFile(AbsolutePath);
+
+impl Default for StatusFile {
+    fn default() -> Self {
+        #[cfg(target_os = "linux")]
+        return StatusFile(AbsolutePath::new("/dev/shm/locket/ready"));
+        #[cfg(target_os = "macos")]
+        return StatusFile(AbsolutePath::new("/private/tmp/locket/ready"));
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        return StatusFile(AbsolutePath::new("./locket-ready"));
+    }
+}
+
+impl TryFrom<String> for StatusFile {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Ok(Self(s.try_into()?))
+    }
+}
 
 impl FromStr for StatusFile {
     type Err = String;
@@ -30,17 +52,6 @@ impl FromStr for StatusFile {
 impl std::fmt::Display for StatusFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.display())
-    }
-}
-
-impl Default for StatusFile {
-    fn default() -> Self {
-        #[cfg(target_os = "linux")]
-        return StatusFile(AbsolutePath::new("/dev/shm/locket/ready"));
-        #[cfg(target_os = "macos")]
-        return StatusFile(AbsolutePath::new("/private/tmp/locket/ready"));
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        return StatusFile(AbsolutePath::new("./locket-ready"));
     }
 }
 

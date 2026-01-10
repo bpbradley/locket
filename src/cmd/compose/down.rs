@@ -1,4 +1,4 @@
 pub async fn down(_name: String) -> Result<(), crate::error::LocketError> {
-    // Placeholder implementation for the 'down' command
+    // compose down does not have an effect
     Ok(())
 }
