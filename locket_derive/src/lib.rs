@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Data, DeriveInput, Expr, ExprLit, Field, Fields, Lit, LitStr, Meta, Type,
+    Attribute, Data, DeriveInput, Expr, ExprLit, Field, Fields, Lit, LitStr, Type,
     parse_macro_input,
 };
 
@@ -22,25 +22,30 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
     let defaults_logic = generate_defaults_body(&input.data);
     let doc_defaults_logic = generate_doc_defaults_impl(&input.data, &struct_name);
     let structure_logic = generate_structure_body(&input.data);
+    let section_logic = generate_section_body(&input.attrs);
 
     // Check for #[locket(try_into = "Path::To::Target")] on the struct
     let config_target = input.attrs.iter().find_map(|attr| {
         if !attr.path().is_ident("locket") {
             return None;
         }
-        match attr.parse_args::<Meta>().ok()? {
-            Meta::NameValue(nv) if nv.path.is_ident("try_into") => {
-                if let Expr::Lit(ExprLit {
-                    lit: Lit::Str(s), ..
-                }) = nv.value
-                {
-                    s.parse::<syn::Path>().ok()
-                } else {
-                    None
-                }
+        let mut target = None;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("try_into") {
+                let content = meta.value()?;
+                let lit: LitStr = content.parse()?;
+                target = lit.parse::<syn::Path>().ok();
+                return Ok(());
             }
-            _ => None,
-        }
+            // Consume sibling attribute to avoid parse error
+            if meta.path.is_ident("section") {
+                let content = meta.value()?;
+                let _: LitStr = content.parse()?;
+                return Ok(());
+            }
+            Ok(())
+        });
+        target
     });
 
     let try_from_impl = if let Some(target) = config_target {
@@ -75,6 +80,13 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
             }
         }
 
+        #[automatically_derived]
+        impl crate::config::ConfigSection for #struct_name {
+            fn section_name() -> Option<&'static str> {
+                #section_logic
+            }
+        }
+
         // Only generate introspection traits if locket-docs feature is enabled
         #[cfg(feature = "locket-docs")]
         #doc_defaults_logic
@@ -100,10 +112,12 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                 let recurse = fields.named.iter().filter_map(|f| {
                     let name = &f.ident;
 
-                    let should_skip = f.attrs.iter().any(|a|
+                    let should_skip = f.attrs.iter().any(|a| {
                         a.path().is_ident("locket") &&
-                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("skip")))
-                    );
+                        a.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("skip") { Ok(()) } else { Err(meta.error("skip check")) }
+                        }).is_ok()
+                    });
                     if should_skip { return None; }
 
                     // Check for #[locket(try_into)] or #[command(flatten)]
@@ -125,15 +139,19 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                         tp.path.segments.last().map(|s| s.ident == "Option").unwrap_or(false)
                     } else { false };
 
-                    let has_default = f.attrs.iter().any(|a|
+                    let has_default = f.attrs.iter().any(|a| {
                         a.path().is_ident("locket") &&
-                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::NameValue(nv) if nv.path.is_ident("default")))
-                    );
+                        a.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("default") { Ok(()) } else { Err(meta.error("check")) }
+                        }).is_ok()
+                    });
 
-                    let is_explicit_optional = f.attrs.iter().any(|a|
+                    let is_explicit_optional = f.attrs.iter().any(|a| {
                         a.path().is_ident("locket") &&
-                        a.parse_args::<Meta>().is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("optional")))
-                    );
+                        a.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("optional") { Ok(()) } else { Err(meta.error("check")) }
+                        }).is_ok()
+                    });
 
                     // Forward cfgs
                     let cfgs: Vec<&Attribute> = f.attrs.iter()
@@ -275,10 +293,16 @@ fn generate_defaults_body(data: &Data) -> proc_macro2::TokenStream {
                     // Parse attributes for #[locket(default = ...)]
                     let default_expr = f.attrs.iter().find_map(|attr| {
                         if !attr.path().is_ident("locket") { return None; }
-                        match attr.parse_args::<Meta>().ok()? {
-                            Meta::NameValue(nv) if nv.path.is_ident("default") => Some(nv.value),
-                            _ => None,
-                        }
+                        let mut found = None;
+                        let _ = attr.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("default") {
+                                let val = meta.value()?;
+                                let expr: Expr = val.parse()?;
+                                found = Some(expr);
+                            }
+                            Ok(())
+                        });
+                        found
                     });
 
                     if let Some(expr) = default_expr {
@@ -338,8 +362,14 @@ fn generate_doc_defaults_impl(data: &Data, struct_name: &syn::Ident) -> proc_mac
 
                     let is_skipped = f.attrs.iter().any(|a| {
                         a.path().is_ident("locket")
-                            && a.parse_args::<Meta>()
-                                .is_ok_and(|m| matches!(m, Meta::Path(p) if p.is_ident("skip")))
+                            && a.parse_nested_meta(|meta| {
+                                if meta.path.is_ident("skip") {
+                                    Ok(())
+                                } else {
+                                    Err(meta.error("skip check"))
+                                }
+                            })
+                            .is_ok()
                     });
                     if is_skipped {
                         return quote! {};
@@ -349,10 +379,16 @@ fn generate_doc_defaults_impl(data: &Data, struct_name: &syn::Ident) -> proc_mac
                         if !attr.path().is_ident("locket") {
                             return None;
                         }
-                        match attr.parse_args::<Meta>().ok()? {
-                            Meta::NameValue(nv) if nv.path.is_ident("default") => Some(nv.value),
-                            _ => None,
-                        }
+                        let mut found = None;
+                        let _ = attr.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("default") {
+                                let val = meta.value()?;
+                                let expr: Expr = val.parse()?;
+                                found = Some(expr);
+                            }
+                            Ok(())
+                        });
+                        found
                     });
 
                     if let Some(expr) = default_val {
@@ -422,28 +458,28 @@ fn generate_structure_body(data: &Data) -> proc_macro2::TokenStream {
                         // kebab case
                         let key = name.as_ref().unwrap().to_string().replace('_', "-");
                         let docs_expr = f.attrs.iter().find_map(|attr| {
-                        if !attr.path().is_ident("locket") { return None; }
-                        match attr.parse_args::<Meta>().ok()? {
-                            Meta::NameValue(nv) if nv.path.is_ident("docs") => {
-                                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = nv.value {
-                                    Some(s.value())
-                                } else {
-                                    None
+                            if !attr.path().is_ident("locket") { return None; }
+                            let mut found = None;
+                            let _ = attr.parse_nested_meta(|meta| {
+                                if meta.path.is_ident("docs") {
+                                    let content = meta.value()?;
+                                    let lit: LitStr = content.parse()?;
+                                    found = Some(lit.value());
                                 }
-                            }
-                            _ => None,
+                                Ok(())
+                            });
+                            found
+                        });
+
+                        let docs_code = match docs_expr {
+                            Some(s) => quote! { Some(#s.to_string()) },
+                            None => quote! { None },
+                        };
+
+                        quote! {
+                            #(#cfgs)*
+                            keys.push((#key.to_string(), #docs_code));
                         }
-                    });
-
-                    let docs_code = match docs_expr {
-                        Some(s) => quote! { Some(#s.to_string()) },
-                        None => quote! { None },
-                    };
-
-                    quote! {
-                        #(#cfgs)*
-                        keys.push((#key.to_string(), #docs_code));
-                    }
                     }
                 });
                     quote! {
@@ -475,9 +511,14 @@ fn validate_attributes(data: &Data) -> syn::Result<()> {
 
         let is_exempt = field.attrs.iter().any(|a| {
             a.path().is_ident("locket")
-                && a.parse_args::<Meta>().is_ok_and(
-                    |m| matches!(m, Meta::Path(p) if p.is_ident("allow_mismatched_flatten")),
-                )
+                && a.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("allow_mismatched_flatten") {
+                        Ok(())
+                    } else {
+                        Err(meta.error("check"))
+                    }
+                })
+                .is_ok()
         });
 
         if !is_exempt && (has_clap_flatten != has_serde_flatten) {
@@ -545,4 +586,34 @@ fn get_clap_long_name(field: &Field) -> String {
         }
     }
     default_name
+}
+
+fn generate_section_body(attrs: &[Attribute]) -> proc_macro2::TokenStream {
+    let section = attrs.iter().find_map(|attr| {
+        if !attr.path().is_ident("locket") {
+            return None;
+        }
+        let mut found = None;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("section") {
+                let content = meta.value()?;
+                let lit: LitStr = content.parse()?;
+                found = Some(lit.value());
+                return Ok(());
+            }
+            // Consume sibling attribute to avoid parse error
+            if meta.path.is_ident("try_into") {
+                let content = meta.value()?;
+                let _: LitStr = content.parse()?;
+                return Ok(());
+            }
+            Ok(())
+        });
+        found
+    });
+
+    match section {
+        Some(s) => quote! { Some(#s) },
+        None => quote! { None },
+    }
 }

@@ -40,7 +40,7 @@ pub struct InjectConfig {
 
 #[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
 #[serde(rename_all = "kebab-case")]
-#[locket(try_into = "InjectConfig")]
+#[locket(try_into = "InjectConfig", section = "inject")]
 pub struct InjectArgs {
     /// Mode of operation
     #[arg(long, env = "LOCKET_INJECT_MODE", value_enum)]

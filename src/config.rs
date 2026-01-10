@@ -1,5 +1,20 @@
+//! Configuration layering
+//!
+//! This module implements a layered configuration pattern, allowing settings to be
+//! defined in multiple places with a strict precedence order:
+//!
+//! 1. **CLI Arguments**: Highest priority (overrides everything).
+//! 2. **Environment Variables**: Handled implicitly by `clap`.
+//! 3. **Configuration File**: TOML format.
+//! 4. **Locket Defaults**: Fallback values defined in `#[locket(default = ...)]`
+//!
+//! The core of this system is the [`Layered`] trait, which orchestrates the
+//! merging (`overlay`), defaulting (`apply_defaults`), and validation (`try_into`) pipeline.
+//!
+//! Necessary traits to support layering can be derived using the `#[derive(LayeredConfig)]` attribute
+
 use crate::error::LocketError;
-use crate::path::AbsolutePath;
+use crate::path::CanonicalPath;
 use clap::Args;
 use serde::de::DeserializeOwned;
 use std::path::Path;
@@ -10,6 +25,7 @@ pub mod exec;
 pub mod inject;
 pub mod utils;
 
+/// Represents all errors that can occur during the configuration resolution lifecycl
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to load configuration file: {0}")]
@@ -26,30 +42,95 @@ pub enum ConfigError {
     Process(#[from] crate::process::ProcessError),
 }
 
-/// Trait for merging two partial structs.
+/// Defines how two partial configuration states are merged.
+///
+/// Implements how a top layer should be merged onto a base layer.
 pub trait Overlay {
-    /// self is the base layer, over is the top layer.
+    /// Merges `over` onto `self`.
+    ///
+    /// `self` is the base layer. `over` is the top layer.
     fn overlay(self, over: Self) -> Self;
 }
 
-// If top layer exists, use it. Otherwise keep base.
+/// If the top layer is `Some`, it replaces the base. Otherwise, the base is preserved.
 impl<T> Overlay for Option<T> {
     fn overlay(self, over: Self) -> Self {
         over.or(self)
     }
 }
 
+/// If the top layer is non-empty, it replaces the base. Otherwise, the base is preserved.
 impl<T> Overlay for Vec<T> {
     fn overlay(self, over: Self) -> Self {
         if over.is_empty() { self } else { over }
     }
 }
 
+/// Applies configured default values to optional fields.
+///
+/// This is typically the final step before validation, ensuring that
+/// fields remaining `None` after the overlay process are filled with
+/// their default values.
+pub trait ApplyDefaults {
+    fn apply_defaults(self) -> Self;
+}
+
+/// The primary trait for the configuration lifecycle.
+///
+/// This trait orchestrates the resolution pipeline
+///
+/// 1. Load configuration file if present, otherwise structure defaults (Base Layer)
+/// 2. Overlay runtime arguments (Top Layer)
+/// 3. Apply defaults to gaps
+/// 4. validate and convert to the final Domain Type.
+pub trait Layered<C>:
+    Overlay + DeserializeOwned + Default + ApplyDefaults + ConfigSection + Sized
+{
+    /// Resolves the layered configuration into the target domain type `C`.
+    fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError>;
+}
+
+impl<T, C> Layered<C> for T
+where
+    T: Overlay + DeserializeOwned + Default + ApplyDefaults + ConfigSection,
+    T: TryInto<C>,
+    <T as TryInto<C>>::Error: Into<LocketError>,
+{
+    fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError> {
+        let base = if let Some(path) = config_path {
+            let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
+
+            if let Some(section) = Self::section_name() {
+                let root: toml::Value = toml::from_str(&content).map_err(ConfigError::Parse)?;
+
+                if let Some(table) = root.get(section) {
+                    table.clone().try_into().map_err(ConfigError::Parse)?
+                } else {
+                    root.try_into().map_err(ConfigError::Parse)?
+                }
+            } else {
+                toml::from_str::<Self>(&content).map_err(ConfigError::Parse)?
+            }
+        } else {
+            Self::default()
+        };
+
+        base.overlay(self)
+            .apply_defaults()
+            .try_into()
+            .map_err(Into::into)
+    }
+}
+
+/// A wrapper for Clap arguments that supports file-based configuration layering.
+///
+/// This separates the `--config` flag (used to locate the base layer)
+/// from the actual application arguments `inner` (the top layer).
 #[derive(Args, Debug, Clone)]
 pub struct LayeredArgs<T: Args> {
     /// Path to configuration file
     #[arg(long, env = "LOCKET_CONFIG")]
-    pub config: Option<AbsolutePath>,
+    pub config: Option<CanonicalPath>,
 
     #[command(flatten)]
     pub inner: T,
@@ -67,47 +148,21 @@ where
     }
 }
 
-pub trait Layered<C>: Overlay + DeserializeOwned + Default + ApplyDefaults + Sized {
-    fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError>;
-}
-
-impl<T, C> Layered<C> for T
-where
-    T: Overlay + DeserializeOwned + Default + ApplyDefaults,
-    T: TryInto<C>,
-    <T as TryInto<C>>::Error: Into<LocketError>,
-{
-    fn resolve(self, config_path: Option<&Path>) -> Result<C, LocketError> {
-        let base = if let Some(path) = config_path {
-            if path.exists() {
-                let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
-
-                toml::from_str::<Self>(&content).map_err(ConfigError::Parse)?
-            } else {
-                Self::default()
-            }
-        } else {
-            Self::default()
-        };
-
-        base.overlay(self)
-            .apply_defaults()
-            .try_into()
-            .map_err(Into::into)
+/// Trait to identify the TOML section name for a configuration struct.
+pub trait ConfigSection {
+    fn section_name() -> Option<&'static str> {
+        None
     }
 }
 
-/// Trait for applying configured default values to optional fields.
-pub trait ApplyDefaults {
-    fn apply_defaults(self) -> Self;
-}
-
-/// Trait to expose defaults defined in #[locket(default = ...)] for documentation.
+/// Introspection trait used by documentation tools to discover default values.
+///
+/// This is derived via `locket_derive` and uses `#[locket(default = ...)]` attributes.
 #[cfg(feature = "locket-docs")]
 pub trait LocketDocDefaults {
     fn register_defaults(map: &mut std::collections::HashMap<String, String>);
 
-    /// Helper to get all defaults as a map
+    /// Helper to retrieve all registered defaults as a map.
     fn get_defaults() -> std::collections::HashMap<String, String> {
         let mut map = std::collections::HashMap::new();
         Self::register_defaults(&mut map);
@@ -115,7 +170,10 @@ pub trait LocketDocDefaults {
     }
 }
 
-/// Trait to expose the structural keys of a configuration struct for documentation.
+/// Introspection trait used by documentation tools to generate sample configuration files.
+///
+/// Returns a list of all valid configuration keys (in definition order)
+/// and their optional example/comment text.
 #[cfg(feature = "locket-docs")]
 pub trait ConfigStructure {
     fn get_structure() -> Vec<(String, Option<String>)>;
@@ -124,7 +182,7 @@ pub trait ConfigStructure {
 #[cfg(test)]
 mod tests {
     use crate::config::{ApplyDefaults, LayeredArgs, Overlay};
-    use crate::path::AbsolutePath;
+    use crate::path::CanonicalPath;
     use clap::{Args, Parser};
     use locket_derive::LayeredConfig;
     use serde::{Deserialize, Serialize};
@@ -217,7 +275,7 @@ mod tests {
         )
         .unwrap();
 
-        let config_path = AbsolutePath::new(tmp.path());
+        let config_path = CanonicalPath::try_new(tmp.path()).unwrap();
 
         let args = TestArgs {
             name: None,
