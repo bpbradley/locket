@@ -16,17 +16,21 @@ categories = ["command-line-utilities", "config"]
 members = [".", "locket_derive", "xtask"]
 
 [features]
-default = ["op", "connect", "bws", "compose", "exec"]
+# Base release features
 op = ["tokio/process", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
+
+# Used to compile with mock types for testing
 testing = []
+# Generates introspection types that are necessary for documentation generation
 locket-docs = []
 
 full = ["op", "connect", "bws", "compose", "exec"]
 dev = ["locket-docs", "testing", "full"]
+default = ["full"]
 
 [dependencies]
 locket_derive = { path = "./locket_derive" }
