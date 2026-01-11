@@ -81,6 +81,5 @@ pub struct InjectArgs {
     /// Secrets provider selection
     #[command(flatten, next_help_heading = "Provider Configuration")]
     #[serde(flatten)]
-    #[locket(try_into)]
     pub provider: ProviderArgs,
 }

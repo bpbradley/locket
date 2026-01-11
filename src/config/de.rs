@@ -10,10 +10,11 @@ pub trait TryFromKv: Sized {
 }
 
 /// deserializes a list or a map into Vec<T>.
-pub fn polymorphic_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+pub fn polymorphic_vec<'de, D, T, C>(deserializer: D) -> Result<C, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de> + FromStr + TryFromKv,
+    C: From<Vec<T>>,
     <T as FromStr>::Err: Display,
     <T as TryFromKv>::Err: Display,
 {
@@ -31,17 +32,19 @@ where
         Map(HashMap<String, String>),
     }
 
-    match Container::<T>::deserialize(deserializer)? {
+    let vec = match Container::<T>::deserialize(deserializer)? {
         Container::List(items) => items
             .into_iter()
             .map(|item| match item {
                 Item::Obj(val) => Ok(val),
                 Item::Str(s) => s.parse().map_err(serde::de::Error::custom),
             })
-            .collect(),
+            .collect::<Result<Vec<T>, _>>()?,
         Container::Map(map) => map
             .into_iter()
             .map(|(k, v)| T::try_from_kv(k, v).map_err(serde::de::Error::custom))
-            .collect(),
-    }
+            .collect::<Result<Vec<T>, _>>()?,
+    };
+
+    Ok(C::from(vec))
 }

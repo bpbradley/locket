@@ -167,16 +167,6 @@ pub enum ProviderKind {
     Bws,
 }
 
-impl From<ProviderKind> for clap::builder::OsStr {
-    fn from(kind: ProviderKind) -> Self {
-        kind.to_possible_value()
-            .expect("ProviderKind variants must have a value")
-            .get_name()
-            .to_string()
-            .into()
-    }
-}
-
 #[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProviderConfigs {

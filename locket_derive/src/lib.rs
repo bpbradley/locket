@@ -55,6 +55,7 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
                 type Error = crate::error::LocketError;
 
                 fn try_from(args: #struct_name) -> Result<Self, Self::Error> {
+                    #[allow(clippy::unnecessary_fallible_conversions)]
                     Ok(Self {
                         #mapping_logic
                     })
@@ -120,20 +121,6 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                     });
                     if should_skip { return None; }
 
-                    // Check for #[locket(try_into)] or #[command(flatten)]
-                    let force_try = f.attrs.iter().any(|attr| {
-                        attr.path().is_ident("locket") &&
-                        attr.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("try_into") { Ok(()) } else { Err(meta.error("unsupported")) }
-                        }).is_ok()
-                    });
-
-                    let is_flattened = ["command", "clap", "arg", "serde"]
-                        .iter()
-                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
-
-                    let needs_conversion = force_try || is_flattened;
-
                     // Identify field type metadata
                     let is_option_type = if let Type::Path(tp) = &f.ty {
                         tp.path.segments.last().map(|s| s.ident == "Option").unwrap_or(false)
@@ -161,61 +148,38 @@ fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
                     if is_option_type {
                         if is_explicit_optional {
                             // Option -> Option
-                            if needs_conversion {
-                                Some(quote_spanned! {f.span()=>
-                                    #(#cfgs)*
-                                    #name: args.#name.map(|v| v.try_into()).transpose()?
-                                })
-                            } else {
-                                Some(quote_spanned! {f.span()=>
-                                    #(#cfgs)*
-                                    #name: args.#name
-                                })
-                            }
+                            Some(quote_spanned! {f.span()=>
+                                #(#cfgs)*
+                                #[allow(clippy::useless_conversion)]
+                                #name: args.#name.map(|v| v.try_into()).transpose()?
+                            })
                         } else if has_default {
-                            if needs_conversion {
-                                Some(quote_spanned! {f.span()=>
-                                    #(#cfgs)*
-                                    #name: args.#name
-                                        .expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
-                                        .try_into()?
-                                })
-                            } else {
-                                Some(quote_spanned! {f.span()=>
-                                    #(#cfgs)*
-                                    #name: args.#name.expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
-                                })
-                            }
+                            // Option -> T
+                            Some(quote_spanned! {f.span()=>
+                                #(#cfgs)*
+                                #[allow(clippy::useless_conversion)]
+                                #name: args.#name
+                                    .expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
+                                    .try_into()?
+                            })
                         } else {
                             let flag_name = get_clap_long_name(f);
                             let flag_literal = format!("--{}", flag_name);
                             let err_msg = format!("Missing required configuration field: {}", flag_literal);
 
-                            if needs_conversion {
-                                Some(quote_spanned! {f.span()=>
-                                    #(#cfgs)*
-                                    #name: args.#name
-                                        .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
-                                        .try_into()?
-                                })
-                            } else {
-                                Some(quote_spanned! {f.span()=>
-                                    #(#cfgs)*
-                                    #name: args.#name
-                                        .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
-                                })
-                            }
+                            Some(quote_spanned! {f.span()=>
+                                #(#cfgs)*
+                                #[allow(clippy::useless_conversion)]
+                                #name: args.#name
+                                    .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
+                                    .try_into()?
+                            })
                         }
-                    }
-                    else if needs_conversion {
-                        Some(quote_spanned! {f.span()=>
-                            #(#cfgs)*
-                            #name: args.#name.try_into()?
-                        })
                     } else {
                         Some(quote_spanned! {f.span()=>
                             #(#cfgs)*
-                            #name: args.#name
+                            #[allow(clippy::useless_conversion)]
+                            #name: args.#name.try_into()?
                         })
                     }
                 });

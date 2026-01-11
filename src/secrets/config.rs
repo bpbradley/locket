@@ -1,3 +1,4 @@
+use crate::config::{de::polymorphic_vec, types::MergeVec};
 use crate::path::{AbsolutePath, PathMapping};
 use crate::secrets::{MemSize, Secret, SecretError};
 use crate::write::{FileWriter, FileWriterArgs};
@@ -107,13 +108,10 @@ pub struct SecretManagerArgs {
         alias = "secret_map",
         env = "SECRET_MAP",
         value_delimiter = ',',
-        hide_env_values = true
+        hide_env_values = true,
+        default_value_t
     )]
-    #[serde(
-        alias = "secret_map",
-        default,
-        deserialize_with = "crate::config::de::polymorphic_vec"
-    )]
+    #[serde(alias = "secret_map", default, deserialize_with = "polymorphic_vec")]
     #[locket(docs = "
         TOML syntax supports list of strings or map form:
         List form:
@@ -127,7 +125,7 @@ pub struct SecretManagerArgs {
         source = \"/config\"
         destination = \"/run/secrets/config\"
     ")]
-    pub map: Vec<PathMapping>,
+    pub map: MergeVec<PathMapping>,
 
     /// Additional secret values specified as LABEL=SECRET_TEMPLATE
     ///

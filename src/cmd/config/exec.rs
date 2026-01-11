@@ -110,6 +110,5 @@ pub struct ExecArgs {
     ///
     /// Example: `locket exec -e locket.env -- docker compose up -d`
     #[arg(required = true, trailing_var_arg = true, help_heading = None)]
-    #[locket(try_into)]
     pub cmd: Vec<String>,
 }

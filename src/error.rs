@@ -57,3 +57,9 @@ impl From<crate::compose::MetadataError> for LocketError {
         LocketError::Compose(e.into())
     }
 }
+
+impl From<std::convert::Infallible> for LocketError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible conversion error")
+    }
+}
