@@ -93,20 +93,24 @@ where
 {
     fn resolve(self, configs: &[CanonicalPath]) -> Result<C, LocketError> {
         let mut base = Self::default();
+
         for path in configs {
             let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
-            let layer = if let Some(section) = Self::section_name() {
-                let root: toml::Value = toml::from_str(&content).map_err(ConfigError::Parse)?;
-                if let Some(table) = root.get(section) {
-                    table.clone().try_into().map_err(ConfigError::Parse)?
-                } else {
-                    root.try_into().map_err(ConfigError::Parse)?
-                }
+            let root: toml::Value = toml::from_str(&content).map_err(ConfigError::Parse)?;
+
+            let section = if let Some(name) = Self::section_name() {
+                root.get(name).cloned()
             } else {
-                // No section name specified, parse entire file into the config struct
-                toml::from_str::<Self>(&content).map_err(ConfigError::Parse)?
+                None
             };
-            base = base.overlay(layer);
+
+            let globals: T = root.try_into().map_err(ConfigError::Parse)?;
+            base = base.overlay(globals);
+
+            if let Some(table) = section {
+                let layer: T = table.try_into().map_err(ConfigError::Parse)?;
+                base = base.overlay(layer);
+            }
         }
 
         base.overlay(self)

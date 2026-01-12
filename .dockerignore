@@ -1,4 +1,5 @@
 /target
+/secrets
 **/*.rs.bk
 **/*.swp
 **/*.swo
@@ -13,3 +14,7 @@ tests
 .github
 .vscode
 tests
+/*.dev.toml
+/*.md
+runfile.toml
+release.toml

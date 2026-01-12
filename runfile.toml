@@ -4,26 +4,6 @@
 description = "cargo build (release)"
 cmd = "cargo build --release"
 
-[once]
-description = "run in one shot mode"
-cmd = "cargo run -- inject --config ../config.toml --mode one-shot"
-
-[help]
-description = "get help string for inject"
-cmd = "cargo run -- inject --help"
-
-[health]
-description = "cargo run -- healthcheck"
-cmd = "cargo run -- healthcheck"
-
-[watch]
-description = "run in watch mode"
-cmd = "cargo run -- inject --config ../config.toml --mode watch"
-
-[exec-watch]
-description = "Run exec in watch mode with python3"
-cmd = "cargo run -- exec --config ../config.toml --watch --interactive -- python3"
-
 [test]
 description = "cargo test"
 cmd = "cargo test --features testing"
@@ -78,3 +58,7 @@ cmd = "cargo release major --execute"
 [docs]
 description = "Generate clap derived docs"
 cmd = "cargo xtask docs"
+
+[clean]
+description = "Clean locket outputs"
+cmd = "rm -rf ./secrets/op/out ./secrets/bws/out"

@@ -1,2 +1,4 @@
 [alias]
 xtask = "run --package xtask --"
+locket-inject = "run -- inject --config locket.dev.toml"
+locket-exec = "run -- exec --config locket.dev.toml"
