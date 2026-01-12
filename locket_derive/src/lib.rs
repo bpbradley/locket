@@ -203,9 +203,33 @@ fn generate_overlay_body(data: &Data) -> proc_macro2::TokenStream {
                         .filter(|a| a.path().is_ident("cfg"))
                         .collect();
 
-                    quote_spanned! {f.span()=>
-                        #(#cfgs)*
-                        #name: self.#name.overlay(top.#name)
+                    // #[locket(overlay = "path::to::func")]
+                    let overlay_fn = f.attrs.iter().find_map(|attr| {
+                        if !attr.path().is_ident("locket") {
+                            return None;
+                        }
+                        let mut found = None;
+                        let _ = attr.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("overlay") {
+                                let val = meta.value()?;
+                                let lit: LitStr = val.parse()?;
+                                found = lit.parse::<syn::Path>().ok();
+                            }
+                            Ok(())
+                        });
+                        found
+                    });
+
+                    if let Some(func) = overlay_fn {
+                        quote_spanned! {f.span()=>
+                            #(#cfgs)*
+                            #name: #func(self.#name, top.#name)
+                        }
+                    } else {
+                        quote_spanned! {f.span()=>
+                            #(#cfgs)*
+                            #name: self.#name.overlay(top.#name)
+                        }
                     }
                 });
                 quote! { Self { #(#recurse),* } }

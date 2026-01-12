@@ -375,7 +375,6 @@ pub fn parse_secret_path(s: &str) -> Result<crate::secrets::Secret, String> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-
     #[derive(Deserialize)]
     struct Config {
         #[serde(deserialize_with = "crate::config::de::polymorphic_vec")]
@@ -485,8 +484,8 @@ mod tests {
         let toml_input = format!(
             r#"
                 map = [
-                    "{src}:/tmp/dst1",                         # String syntax
-                    {{ src = "{src}", dst = "/tmp/dst2" }}     # Map syntax
+                    "{src}:/tmp/dst1",
+                    {{ src = "{src}", dst = "/tmp/dst2" }}
                 ]
                 "#,
             src = src_path

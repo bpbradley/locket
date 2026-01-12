@@ -19,7 +19,6 @@ use clap::Args;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 pub mod de;
-pub mod types;
 
 /// Represents all errors that can occur during the configuration resolution lifecycl
 #[derive(Debug, Error)]
