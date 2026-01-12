@@ -3,6 +3,11 @@ name = "locket_derive"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
+authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
+description = "proc macro to support layered conigurations in locket"
+repository = "https://github.com/bpbradley/locket"
+homepage = "https://github.com/bpbradley/locket"
+publish = false
 
 [lib]
 proc-macro = true
