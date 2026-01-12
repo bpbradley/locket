@@ -54,10 +54,11 @@ impl<T> Overlay for Option<T> {
     }
 }
 
-/// If the top layer is non-empty, it replaces the base. Otherwise, the base is preserved.
+/// Extends the base layer with the top layer, without deduplication.
 impl<T> Overlay for Vec<T> {
-    fn overlay(self, over: Self) -> Self {
-        if over.is_empty() { self } else { over }
+    fn overlay(mut self, over: Self) -> Self {
+        self.extend(over);
+        self
     }
 }
 
