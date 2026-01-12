@@ -1,102 +1,98 @@
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Data, DeriveInput, Expr, ExprLit, Field, Fields, Lit, LitStr, Type,
-    parse_macro_input,
+    Attribute, Data, DeriveInput, Error, Expr, ExprLit, Field, Fields, Ident, Lit, LitStr, Meta,
+    Path, Type, parse_macro_input,
 };
+
+struct FieldInfo<'a> {
+    field: &'a Field,
+    ident: &'a Ident,
+    ty: &'a Type,
+    is_option: bool,
+    is_flattened: bool,
+    clap_long_name: String,
+    cfgs: Vec<&'a Attribute>,
+    locket: LocketFieldAttrs,
+}
+
+#[derive(Default)]
+struct LocketFieldAttrs {
+    skip: bool,
+    optional: bool,
+    default: Option<Expr>,
+    overlay_fn: Option<Path>,
+    docs: Option<String>,
+    allow_mismatched_flatten: bool,
+}
+
+#[derive(Default)]
+struct LocketStructAttrs {
+    try_into: Option<Path>,
+    section: Option<String>,
+}
 
 #[proc_macro_derive(LayeredConfig, attributes(locket))]
 pub fn derive_layered_config(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
-    // Fail fast if attributes are invalid
-    if let Err(e) = validate_attributes(&input.data) {
-        return e.into_compile_error().into();
-    }
+    // struct level
+    let struct_attrs = match parse_struct_attrs(&input.attrs) {
+        Ok(attrs) => attrs,
+        Err(e) => return e.into_compile_error().into(),
+    };
 
-    let struct_name = input.ident;
+    // field level
+    let struct_info = match parse_field_info(&input) {
+        Ok(info) => info,
+        Err(e) => return e.into_compile_error().into(),
+    };
 
-    // Generate all implementations
-    let overlay_logic = generate_overlay_body(&input.data);
-    let defaults_logic = generate_defaults_body(&input.data);
-    let doc_defaults_logic = generate_doc_defaults_impl(&input.data, &struct_name);
-    let structure_logic = generate_structure_body(&input.data);
-    let section_logic = generate_section_body(&input.attrs);
+    let struct_name = &input.ident;
 
-    // Check for #[locket(try_into = "Path::To::Target")] on the struct
-    let config_target = input.attrs.iter().find_map(|attr| {
-        if !attr.path().is_ident("locket") {
-            return None;
-        }
-        let mut target = None;
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("try_into") {
-                let content = meta.value()?;
-                let lit: LitStr = content.parse()?;
-                target = lit.parse::<syn::Path>().ok();
-                return Ok(());
-            }
-            // Consume sibling attribute to avoid parse error
-            if meta.path.is_ident("section") {
-                let content = meta.value()?;
-                let _: LitStr = content.parse()?;
-                return Ok(());
-            }
-            Ok(())
-        });
-        target
-    });
+    let overlay_impl = generate_overlay_impl(&struct_info);
+    let defaults_impl = generate_defaults_impl(&struct_info);
+    let section_impl = generate_section_impl(&struct_attrs);
+    let doc_defaults_impl = generate_doc_defaults_impl(&struct_info, struct_name);
+    let structure_impl = generate_structure_impl(&struct_info);
 
-    let try_from_impl = if let Some(target) = config_target {
-        let mapping_logic = generate_try_from_body(&input.data);
-        quote! {
-            impl TryFrom<#struct_name> for #target {
-                type Error = crate::error::LocketError;
-
-                fn try_from(args: #struct_name) -> Result<Self, Self::Error> {
-                    #[allow(clippy::unnecessary_fallible_conversions)]
-                    Ok(Self {
-                        #mapping_logic
-                    })
-                }
-            }
-        }
-    } else {
-        quote! {}
+    let try_from_impl = match generate_try_from_impl(struct_name, &struct_attrs, &struct_info) {
+        Ok(tokens) => tokens,
+        Err(e) => return e.into_compile_error().into(),
     };
 
     let expanded = quote! {
         #[automatically_derived]
         impl crate::config::Overlay for #struct_name {
             fn overlay(self, top: Self) -> Self {
-                #overlay_logic
+                #overlay_impl
             }
         }
 
         #[automatically_derived]
         impl crate::config::ApplyDefaults for #struct_name {
             fn apply_defaults(self) -> Self {
-                #defaults_logic
+                #defaults_impl
             }
         }
 
         #[automatically_derived]
         impl crate::config::ConfigSection for #struct_name {
             fn section_name() -> Option<&'static str> {
-                #section_logic
+                #section_impl
             }
         }
 
-        // Only generate introspection traits if locket-docs feature is enabled
         #[cfg(feature = "locket-docs")]
-        #doc_defaults_logic
+        #doc_defaults_impl
 
         #[cfg(feature = "locket-docs")]
         #[automatically_derived]
         impl crate::config::ConfigStructure for #struct_name {
             fn get_structure() -> Vec<(String, Option<String>)> {
-                #structure_logic
+                #structure_impl
             }
         }
 
@@ -106,414 +102,71 @@ pub fn derive_layered_config(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-fn generate_try_from_body(data: &Data) -> proc_macro2::TokenStream {
-    match data {
-        Data::Struct(struct_data) => match &struct_data.fields {
-            Fields::Named(fields) => {
-                let recurse = fields.named.iter().filter_map(|f| {
-                    let name = &f.ident;
+fn parse_struct_attrs(attrs: &[Attribute]) -> syn::Result<LocketStructAttrs> {
+    let mut info = LocketStructAttrs::default();
 
-                    let should_skip = f.attrs.iter().any(|a| {
-                        a.path().is_ident("locket") &&
-                        a.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("skip") { Ok(()) } else { Err(meta.error("skip check")) }
-                        }).is_ok()
-                    });
-                    if should_skip { return None; }
-
-                    // Identify field type metadata
-                    let is_option_type = if let Type::Path(tp) = &f.ty {
-                        tp.path.segments.last().map(|s| s.ident == "Option").unwrap_or(false)
-                    } else { false };
-
-                    let has_default = f.attrs.iter().any(|a| {
-                        a.path().is_ident("locket") &&
-                        a.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("default") { Ok(()) } else { Err(meta.error("check")) }
-                        }).is_ok()
-                    });
-
-                    let is_explicit_optional = f.attrs.iter().any(|a| {
-                        a.path().is_ident("locket") &&
-                        a.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("optional") { Ok(()) } else { Err(meta.error("check")) }
-                        }).is_ok()
-                    });
-
-                    // Forward cfgs
-                    let cfgs: Vec<&Attribute> = f.attrs.iter()
-                        .filter(|a| a.path().is_ident("cfg"))
-                        .collect();
-
-                    if is_option_type {
-                        if is_explicit_optional {
-                            // Option -> Option
-                            Some(quote_spanned! {f.span()=>
-                                #(#cfgs)*
-                                #[allow(clippy::useless_conversion)]
-                                #name: args.#name.map(|v| v.try_into()).transpose()?
-                            })
-                        } else if has_default {
-                            // Option -> T
-                            Some(quote_spanned! {f.span()=>
-                                #(#cfgs)*
-                                #[allow(clippy::useless_conversion)]
-                                #name: args.#name
-                                    .expect(concat!("Locket: Default logic failed for ", stringify!(#name)))
-                                    .try_into()?
-                            })
-                        } else {
-                            let flag_name = get_clap_long_name(f);
-                            let flag_literal = format!("--{}", flag_name);
-                            let err_msg = format!("Missing required configuration field: {}", flag_literal);
-
-                            Some(quote_spanned! {f.span()=>
-                                #(#cfgs)*
-                                #[allow(clippy::useless_conversion)]
-                                #name: args.#name
-                                    .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
-                                    .try_into()?
-                            })
-                        }
-                    } else {
-                        Some(quote_spanned! {f.span()=>
-                            #(#cfgs)*
-                            #[allow(clippy::useless_conversion)]
-                            #name: args.#name.try_into()?
-                        })
-                    }
-                });
-                quote! { #(#recurse),* }
-            }
-            _ => quote! {},
-        },
-        _ => quote! {},
-    }
-}
-
-fn generate_overlay_body(data: &Data) -> proc_macro2::TokenStream {
-    match data {
-        Data::Struct(struct_data) => match &struct_data.fields {
-            Fields::Named(fields) => {
-                let recurse = fields.named.iter().map(|f| {
-                    let name = &f.ident;
-                    let cfgs: Vec<&Attribute> = f
-                        .attrs
-                        .iter()
-                        .filter(|a| a.path().is_ident("cfg"))
-                        .collect();
-
-                    // #[locket(overlay = "path::to::func")]
-                    let overlay_fn = f.attrs.iter().find_map(|attr| {
-                        if !attr.path().is_ident("locket") {
-                            return None;
-                        }
-                        let mut found = None;
-                        let _ = attr.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("overlay") {
-                                let val = meta.value()?;
-                                let lit: LitStr = val.parse()?;
-                                found = lit.parse::<syn::Path>().ok();
-                            }
-                            Ok(())
-                        });
-                        found
-                    });
-
-                    if let Some(func) = overlay_fn {
-                        quote_spanned! {f.span()=>
-                            #(#cfgs)*
-                            #name: #func(self.#name, top.#name)
-                        }
-                    } else {
-                        quote_spanned! {f.span()=>
-                            #(#cfgs)*
-                            #name: self.#name.overlay(top.#name)
-                        }
-                    }
-                });
-                quote! { Self { #(#recurse),* } }
-            }
-            Fields::Unnamed(fields) => {
-                let recurse = fields.unnamed.iter().enumerate().map(|(i, f)| {
-                    let index = syn::Index::from(i);
-                    let cfgs: Vec<&Attribute> = f
-                        .attrs
-                        .iter()
-                        .filter(|a| a.path().is_ident("cfg"))
-                        .collect();
-                    quote_spanned! {f.span()=>
-                        #(#cfgs)*
-                        self.#index.overlay(top.#index)
-                    }
-                });
-                quote! { Self( #(#recurse),* ) }
-            }
-            Fields::Unit => quote! { Self },
-        },
-        _ => panic!("#[derive(LayeredConfig)] only works on structs"),
-    }
-}
-
-fn generate_defaults_body(data: &Data) -> proc_macro2::TokenStream {
-    match data {
-        Data::Struct(struct_data) => match &struct_data.fields {
-            Fields::Named(fields) => {
-                let recurse = fields.named.iter().map(|f| {
-                    let name = &f.ident;
-
-                    let cfgs: Vec<&Attribute> = f.attrs.iter()
-                        .filter(|a| a.path().is_ident("cfg"))
-                        .collect();
-
-                    // if flattened, recurse apply_defautls
-                    let is_flattened = ["command", "clap", "arg", "serde"]
-                        .iter()
-                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
-
-                    if is_flattened {
-                        return quote_spanned! {f.span()=>
-                            #(#cfgs)*
-                            #name: self.#name.apply_defaults()
-                        };
-                    }
-
-                    // Parse attributes for #[locket(default = ...)]
-                    let default_expr = f.attrs.iter().find_map(|attr| {
-                        if !attr.path().is_ident("locket") { return None; }
-                        let mut found = None;
-                        let _ = attr.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("default") {
-                                let val = meta.value()?;
-                                let expr: Expr = val.parse()?;
-                                found = Some(expr);
-                            }
-                            Ok(())
-                        });
-                        found
-                    });
-
-                    if let Some(expr) = default_expr {
-                        // Handle String literals specifically for .parse()
-                        let is_string_lit = matches!(
-                            expr,
-                            Expr::Lit(ExprLit { lit: Lit::Str(_), .. })
-                        );
-
-                        if is_string_lit {
-                            quote_spanned! {f.span()=>
-                                #(#cfgs)*
-                                #name: self.#name.or_else(|| Some(
-                                    #expr.parse().expect(concat!("Locket: Invalid default value for field '", stringify!(#name), "'"))
-                                ))
-                            }
-                        } else {
-
-                            quote_spanned! {f.span()=>
-                                #(#cfgs)*
-                                #name: self.#name.or_else(|| {
-                                    #[allow(clippy::useless_conversion)]
-                                    Some((#expr).into())
-                                })
-                            }
-                        }
-                    } else {
-                        quote_spanned! {f.span()=>
-                            #(#cfgs)*
-                            #name: self.#name
-                        }
-                    }
-                });
-                quote! { Self { #(#recurse),* } }
-            }
-            _ => quote! { self },
-        },
-        _ => quote! { self },
-    }
-}
-
-fn generate_doc_defaults_impl(data: &Data, struct_name: &syn::Ident) -> proc_macro2::TokenStream {
-    let body = match data {
-        Data::Struct(struct_data) => match &struct_data.fields {
-            Fields::Named(fields) => {
-                let statements = fields.named.iter().map(|f| {
-                    let is_flattened = ["command", "clap", "arg", "serde"]
-                        .iter()
-                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
-
-                    if is_flattened {
-                        let ty = &f.ty;
-                        return quote! {
-                            <#ty as crate::config::LocketDocDefaults>::register_defaults(map);
-                        };
-                    }
-
-                    let is_skipped = f.attrs.iter().any(|a| {
-                        a.path().is_ident("locket")
-                            && a.parse_nested_meta(|meta| {
-                                if meta.path.is_ident("skip") {
-                                    Ok(())
-                                } else {
-                                    Err(meta.error("skip check"))
-                                }
-                            })
-                            .is_ok()
-                    });
-                    if is_skipped {
-                        return quote! {};
-                    }
-
-                    let default_val = f.attrs.iter().find_map(|attr| {
-                        if !attr.path().is_ident("locket") {
-                            return None;
-                        }
-                        let mut found = None;
-                        let _ = attr.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("default") {
-                                let val = meta.value()?;
-                                let expr: Expr = val.parse()?;
-                                found = Some(expr);
-                            }
-                            Ok(())
-                        });
-                        found
-                    });
-
-                    if let Some(expr) = default_val {
-                        let flag_name = get_clap_long_name(f);
-
-                        match expr {
-                            // String Literal
-                            Expr::Lit(ExprLit {
-                                lit: Lit::Str(s), ..
-                            }) => {
-                                let val = s.value();
-                                quote! {
-                                    map.insert(#flag_name.to_string(), #val.to_string());
-                                }
-                            }
-                            // emit the expression directly.
-                            // assume the result implements ToString or Display.
-                            _ => {
-                                quote! {
-                                    map.insert(#flag_name.to_string(), (#expr).to_string());
-                                }
-                            }
-                        }
-                    } else {
-                        quote! {}
-                    }
-                });
-                quote! { #(#statements)* }
-            }
-            _ => quote! {},
-        },
-        _ => quote! {},
-    };
-
-    quote! {
-        #[automatically_derived]
-        impl crate::config::LocketDocDefaults for #struct_name {
-            fn register_defaults(map: &mut std::collections::HashMap<String, String>) {
-                #body
-            }
+    for attr in attrs {
+        if !attr.path().is_ident("locket") {
+            continue;
         }
-    }
-}
 
-fn generate_structure_body(data: &Data) -> proc_macro2::TokenStream {
-    match data {
-        Data::Struct(struct_data) => {
-            match &struct_data.fields {
-                Fields::Named(fields) => {
-                    let recurse = fields.named.iter().map(|f| {
-                    let name = &f.ident;
-                    let is_flattened = ["command", "clap", "arg", "serde"]
-                        .iter()
-                        .any(|key| has_attribute(&f.attrs, key, "flatten"));
-
-                    let cfgs: Vec<&Attribute> = f.attrs.iter()
-                        .filter(|a| a.path().is_ident("cfg"))
-                        .collect();
-
-                    if is_flattened {
-                        let ty = &f.ty;
-                        quote! {
-                            #(#cfgs)*
-                            keys.extend(<#ty as crate::config::ConfigStructure>::get_structure());
-                        }
-                    } else {
-                        // kebab case
-                        let key = name.as_ref().unwrap().to_string().replace('_', "-");
-                        let docs_expr = f.attrs.iter().find_map(|attr| {
-                            if !attr.path().is_ident("locket") { return None; }
-                            let mut found = None;
-                            let _ = attr.parse_nested_meta(|meta| {
-                                if meta.path.is_ident("docs") {
-                                    let content = meta.value()?;
-                                    let lit: LitStr = content.parse()?;
-                                    found = Some(lit.value());
-                                }
-                                Ok(())
-                            });
-                            found
-                        });
-
-                        let docs_code = match docs_expr {
-                            Some(s) => quote! { Some(#s.to_string()) },
-                            None => quote! { None },
-                        };
-
-                        quote! {
-                            #(#cfgs)*
-                            keys.push((#key.to_string(), #docs_code));
-                        }
-                    }
-                });
-                    quote! {
-                        let mut keys = Vec::new();
-                        #(#recurse)*
-                        keys
-                    }
-                }
-                _ => quote! { Vec::new() },
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("try_into") {
+                let val = meta.value()?;
+                let s: LitStr = val.parse()?;
+                info.try_into = Some(s.parse()?);
+                return Ok(());
             }
-        }
-        _ => quote! { Vec::new() },
+            if meta.path.is_ident("section") {
+                let val = meta.value()?;
+                let s: LitStr = val.parse()?;
+                info.section = Some(s.value());
+                return Ok(());
+            }
+            // Ignore unknown keys at struct level
+            Ok(())
+        })?;
     }
+    Ok(info)
 }
 
-fn validate_attributes(data: &Data) -> syn::Result<()> {
-    let Data::Struct(data) = data else {
-        return Ok(());
+fn parse_field_info<'a>(input: &'a DeriveInput) -> syn::Result<Vec<FieldInfo<'a>>> {
+    let Data::Struct(data) = &input.data else {
+        return Err(Error::new(
+            input.span(),
+            "#[derive(LayeredConfig)] only supports structs",
+        ));
     };
     let Fields::Named(fields) = &data.fields else {
-        return Ok(());
+        return Err(Error::new(
+            input.span(),
+            "#[derive(LayeredConfig)] only supports named fields",
+        ));
     };
 
+    let mut infos = Vec::new();
+
     for field in &fields.named {
+        let ident = field.ident.as_ref().unwrap();
+        let locket = parse_locket_field_attrs(&field.attrs)?;
+        let cfgs: Vec<&Attribute> = field
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("cfg"))
+            .collect();
+        let is_option = is_type_option(&field.ty);
+        let clap_long_name = get_clap_long_name(field);
+
         let has_clap_flatten = ["command", "clap", "arg"]
             .iter()
             .any(|k| has_attribute(&field.attrs, k, "flatten"));
         let has_serde_flatten = has_attribute(&field.attrs, "serde", "flatten");
+        let is_flattened = has_clap_flatten || has_serde_flatten;
 
-        let is_exempt = field.attrs.iter().any(|a| {
-            a.path().is_ident("locket")
-                && a.parse_nested_meta(|meta| {
-                    if meta.path.is_ident("allow_mismatched_flatten") {
-                        Ok(())
-                    } else {
-                        Err(meta.error("check"))
-                    }
-                })
-                .is_ok()
-        });
-
-        if !is_exempt && (has_clap_flatten != has_serde_flatten) {
-            return Err(syn::Error::new(
+        if !locket.allow_mismatched_flatten && (has_clap_flatten != has_serde_flatten) {
+            return Err(Error::new(
                 field.span(),
-                "Locket: Mismatched flattening! You have `flatten` on Clap or Serde but not both.\n\
-                 Fix: Ensure both attributes are present or use #[locket(allow_mismatched_flatten)].",
+                "Locket: Mismatched flattening! Ensure both Clap and Serde use `flatten` or use #[locket(allow_mismatched_flatten)].",
             ));
         }
 
@@ -521,17 +174,247 @@ fn validate_attributes(data: &Data) -> syn::Result<()> {
             has_attribute(&field.attrs, k, "default_value")
                 || has_attribute(&field.attrs, k, "default_value_t")
         });
-
         if has_clap_default {
-            return Err(syn::Error::new(
+            return Err(Error::new(
                 field.span(),
-                "Locket: Clap default detected! Do not use `default_value` in Clap.\n\
-                 It populates the value before the config file is read, preventing overrides.\n\
-                 Fix: Use `#[locket(default = ...)]` instead.",
+                "Locket: Clap default detected! Use `#[locket(default = ...)]` instead.",
             ));
         }
+
+        infos.push(FieldInfo {
+            field,
+            ident,
+            ty: &field.ty,
+            is_option,
+            is_flattened,
+            clap_long_name,
+            cfgs,
+            locket,
+        });
     }
-    Ok(())
+    Ok(infos)
+}
+
+fn parse_locket_field_attrs(attrs: &[Attribute]) -> syn::Result<LocketFieldAttrs> {
+    let mut info = LocketFieldAttrs::default();
+    for attr in attrs {
+        if !attr.path().is_ident("locket") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("skip") {
+                info.skip = true;
+            } else if meta.path.is_ident("optional") {
+                info.optional = true;
+            } else if meta.path.is_ident("default") {
+                let val = meta.value()?;
+                info.default = Some(val.parse()?);
+            } else if meta.path.is_ident("overlay") {
+                let val = meta.value()?;
+                let s: LitStr = val.parse()?;
+                info.overlay_fn = Some(s.parse()?);
+            } else if meta.path.is_ident("docs") {
+                let val = meta.value()?;
+                let s: LitStr = val.parse()?;
+                info.docs = Some(s.value());
+            } else if meta.path.is_ident("allow_mismatched_flatten") {
+                info.allow_mismatched_flatten = true;
+            }
+            Ok(())
+        })?;
+    }
+    Ok(info)
+}
+
+fn generate_overlay_impl(infos: &[FieldInfo]) -> TokenStream2 {
+    let assignments = infos.iter().map(|info| {
+        let name = info.ident;
+        let cfgs = &info.cfgs;
+        if let Some(func) = &info.locket.overlay_fn {
+            quote_spanned! {info.field.span()=> #(#cfgs)* #name: #func(self.#name, top.#name) }
+        } else {
+            quote_spanned! {info.field.span()=> #(#cfgs)* #name: self.#name.overlay(top.#name) }
+        }
+    });
+    quote! { Self { #(#assignments),* } }
+}
+
+fn generate_defaults_impl(infos: &[FieldInfo]) -> TokenStream2 {
+    let assignments = infos.iter().map(|info| {
+        let name = info.ident;
+        let cfgs = &info.cfgs;
+
+        if info.is_flattened {
+            return quote_spanned! {info.field.span()=> #(#cfgs)* #name: self.#name.apply_defaults() };
+        }
+
+        if let Some(expr) = &info.locket.default {
+            let is_string_lit = matches!(expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+            if is_string_lit {
+                quote_spanned! {info.field.span()=>
+                    #(#cfgs)*
+                    #name: self.#name.or_else(|| Some(
+                        #expr.parse().expect(concat!("Locket: Invalid default value for '", stringify!(#name), "'"))
+                    ))
+                }
+            } else {
+                quote_spanned! {info.field.span()=>
+                    #(#cfgs)*
+                    #[allow(clippy::useless_conversion)]
+                    #name: self.#name.or_else(|| Some((#expr).into()))
+                }
+            }
+        } else {
+            quote_spanned! {info.field.span()=> #(#cfgs)* #name: self.#name }
+        }
+    });
+    quote! { Self { #(#assignments),* } }
+}
+
+fn generate_section_impl(attrs: &LocketStructAttrs) -> TokenStream2 {
+    match &attrs.section {
+        Some(s) => quote! { Some(#s) },
+        None => quote! { None },
+    }
+}
+
+fn generate_structure_impl(infos: &[FieldInfo]) -> TokenStream2 {
+    let recurse = infos.iter().map(|info| {
+        let name = info.ident;
+        let cfgs = &info.cfgs;
+
+        if info.is_flattened {
+            let ty = info.ty;
+            quote! { #(#cfgs)* keys.extend(<#ty as crate::config::ConfigStructure>::get_structure()); }
+        } else {
+            let key = name.to_string().replace('_', "-");
+            let docs_code = match &info.locket.docs {
+                Some(s) => quote! { Some(#s.to_string()) },
+                None => quote! { None },
+            };
+            quote! { #(#cfgs)* keys.push((#key.to_string(), #docs_code)); }
+        }
+    });
+    quote! {
+        let mut keys = Vec::new();
+        #(#recurse)*
+        keys
+    }
+}
+
+fn generate_doc_defaults_impl(infos: &[FieldInfo], struct_name: &Ident) -> TokenStream2 {
+    let statements = infos.iter().map(|info| {
+        if info.locket.skip {
+            return quote! {};
+        }
+        if info.is_flattened {
+            let ty = info.ty;
+            return quote! { <#ty as crate::config::LocketDocDefaults>::register_defaults(map); };
+        }
+        if let Some(expr) = &info.locket.default {
+            let flag_name = &info.clap_long_name;
+            match expr {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => {
+                    let val = s.value();
+                    quote! { map.insert(#flag_name.to_string(), #val.to_string()); }
+                }
+                _ => quote! { map.insert(#flag_name.to_string(), (#expr).to_string()); },
+            }
+        } else {
+            quote! {}
+        }
+    });
+    quote! {
+        #[automatically_derived]
+        impl crate::config::LocketDocDefaults for #struct_name {
+            fn register_defaults(map: &mut std::collections::HashMap<String, String>) {
+                #(#statements)*
+            }
+        }
+    }
+}
+
+fn generate_try_from_impl(
+    struct_name: &Ident,
+    attrs: &LocketStructAttrs,
+    infos: &[FieldInfo],
+) -> syn::Result<TokenStream2> {
+    let Some(target) = &attrs.try_into else {
+        return Ok(quote! {});
+    };
+
+    let fields = infos.iter().filter_map(|info| {
+        if info.locket.skip { return None; }
+        let name = info.ident;
+        let cfgs = &info.cfgs;
+
+        // Logic:
+        // If source is NOT Option -> It is mandatory. Convert directly.
+        // If source is Option:
+        //    a. Default? -> UnwrapOr(default) -> Convert.
+        //    b. Is Explicitly Optional (Target is Option)? -> Map -> Convert -> Transpose.
+        //    c. Is Implicitly Mandatory (Target is T)? -> OkOr(Error) -> Convert.
+
+        let expr = if !info.is_option {
+            quote_spanned! {info.field.span()=> args.#name.try_into()? }
+        } else if info.locket.default.is_some() {
+            quote_spanned! {info.field.span()=>
+                args.#name
+                    .ok_or_else(|| crate::config::ConfigError::Validation(
+                        format!("Missing field '{}' despite default existing. Did you call apply_defaults()?", stringify!(#name)).into()
+                    ))?
+                    .try_into()?
+            }
+        } else if info.locket.optional {
+            // Target is explicitly Option<U>
+            quote_spanned! {info.field.span()=>
+                args.#name.map(|v| v.try_into()).transpose()?
+            }
+        } else {
+            // Target is U (Strict)
+            let flag_literal = format!("--{}", info.clap_long_name);
+            let err_msg = format!("Missing required configuration field: {}", flag_literal);
+            quote_spanned! {info.field.span()=>
+                args.#name
+                    .ok_or_else(|| crate::config::ConfigError::Validation(#err_msg.into()))?
+                    .try_into()?
+            }
+        };
+
+        Some(quote! {
+            #(#cfgs)*
+            #[allow(clippy::useless_conversion)]
+            #name: #expr
+        })
+    });
+
+    Ok(quote! {
+        impl TryFrom<#struct_name> for #target {
+            type Error = crate::error::LocketError;
+
+            fn try_from(args: #struct_name) -> Result<Self, Self::Error> {
+                #[allow(clippy::unnecessary_fallible_conversions)]
+                Ok(Self {
+                    #(#fields),*
+                })
+            }
+        }
+    })
+}
+
+fn is_type_option(ty: &Type) -> bool {
+    if let Type::Path(tp) = ty {
+        tp.path
+            .segments
+            .last()
+            .map(|s| s.ident == "Option")
+            .unwrap_or(false)
+    } else {
+        false
+    }
 }
 
 fn has_attribute(attrs: &[Attribute], path_ident: &str, nested_ident: &str) -> bool {
@@ -540,68 +423,41 @@ fn has_attribute(attrs: &[Attribute], path_ident: &str, nested_ident: &str) -> b
             return false;
         }
         let mut found = false;
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident(nested_ident) {
-                found = true;
-            }
-            Ok(())
-        });
+        if let Meta::List(meta) = &attr.meta {
+            let _ = meta.parse_nested_meta(|m| {
+                if m.path.is_ident(nested_ident) {
+                    found = true;
+                }
+                Ok(())
+            });
+        }
         found
     })
 }
 
 fn get_clap_long_name(field: &Field) -> String {
     let default_name = field.ident.as_ref().unwrap().to_string().replace('_', "-");
-
     for attr in &field.attrs {
         if !attr.path().is_ident("arg") && !attr.path().is_ident("clap") {
             continue;
         }
         let mut explicit_name = None;
         let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("long")
-                && let Ok(value) = meta.value()
-                && let Ok(lit) = value.parse::<LitStr>()
-            {
-                explicit_name = Some(lit.value());
+            if meta.path.is_ident("long") {
+                match meta.value() {
+                    Ok(val) => {
+                        if let Ok(lit) = val.parse::<LitStr>() {
+                            explicit_name = Some(lit.value());
+                        }
+                    }
+                    Err(_) => explicit_name = Some(default_name.clone()),
+                }
             }
-
             Ok(())
         });
-
         if let Some(name) = explicit_name {
             return name;
         }
     }
     default_name
-}
-
-fn generate_section_body(attrs: &[Attribute]) -> proc_macro2::TokenStream {
-    let section = attrs.iter().find_map(|attr| {
-        if !attr.path().is_ident("locket") {
-            return None;
-        }
-        let mut found = None;
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("section") {
-                let content = meta.value()?;
-                let lit: LitStr = content.parse()?;
-                found = Some(lit.value());
-                return Ok(());
-            }
-            // Consume sibling attribute to avoid parse error
-            if meta.path.is_ident("try_into") {
-                let content = meta.value()?;
-                let _: LitStr = content.parse()?;
-                return Ok(());
-            }
-            Ok(())
-        });
-        found
-    });
-
-    match section {
-        Some(s) => quote! { Some(#s) },
-        None => quote! { None },
-    }
 }
