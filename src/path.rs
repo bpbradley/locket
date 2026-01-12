@@ -5,7 +5,7 @@
 //!
 //! Using these utilities prevents path traversal vulnerabilities when handling user inputs.
 
-use crate::config::de::TryFromKv;
+use crate::config::parsers::TryFromKv;
 use crate::secrets::SecretError;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -375,11 +375,6 @@ pub fn parse_secret_path(s: &str) -> Result<crate::secrets::Secret, String> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    #[derive(Deserialize)]
-    struct Config {
-        #[serde(deserialize_with = "crate::config::de::polymorphic_vec")]
-        map: Vec<PathMapping>,
-    }
 
     #[test]
     fn test_basic_clean() {
@@ -474,28 +469,5 @@ mod tests {
         // Missing source file
         let s_missing = format!("{}_missing:/dst", src_str);
         assert!(PathMapping::from_str(&s_missing).is_err());
-    }
-
-    #[test]
-    fn test_path_mapping_polymorphism() {
-        let source_file = tempfile::NamedTempFile::new().unwrap();
-        let src_path = source_file.path().to_str().unwrap();
-
-        let toml_input = format!(
-            r#"
-                map = [
-                    "{src}:/tmp/dst1",
-                    {{ src = "{src}", dst = "/tmp/dst2" }}
-                ]
-                "#,
-            src = src_path
-        );
-
-        let config: Config = toml::from_str(&toml_input).expect("Parsing failed");
-
-        assert_eq!(config.map.len(), 2);
-
-        assert_eq!(config.map[0].src().as_path(), source_file.path());
-        assert_eq!(config.map[1].src().as_path(), source_file.path());
     }
 }

@@ -6,7 +6,7 @@
 //! It also handles the low-level "reading" mechanics via `SecretSource` and `SourceReader`,
 //! ensuring that file reads are memory-limited.
 
-use crate::config::de::TryFromKv;
+use crate::config::parsers::TryFromKv;
 use crate::path::CanonicalPath;
 use crate::provider::ProviderError;
 use serde::{Deserialize, Serialize};

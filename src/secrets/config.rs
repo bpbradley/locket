@@ -1,4 +1,4 @@
-use crate::config::de::polymorphic_vec;
+use crate::config::parsers::polymorphic_vec;
 use crate::path::{AbsolutePath, PathMapping};
 use crate::secrets::{MemSize, Secret, SecretError};
 use crate::write::{FileWriter, FileWriterArgs};
@@ -190,7 +190,7 @@ mod tests {
 
     #[derive(Deserialize, Debug)]
     struct TestWrapper {
-        #[serde(deserialize_with = "crate::config::de::polymorphic_vec")]
+        #[serde(deserialize_with = "crate::config::parsers::polymorphic_vec")]
         secrets: Vec<Secret>,
     }
 

@@ -18,9 +18,9 @@ use crate::path::CanonicalPath;
 use clap::Args;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
-pub mod de;
+pub mod parsers;
 
-/// Represents all errors that can occur during the configuration resolution lifecycl
+/// Represents all errors that9 can occur during the configuration resolution lifecycl
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to load configuration file: {0}")]
@@ -56,9 +56,8 @@ impl<T> Overlay for Option<T> {
 
 /// Extends the base layer with the top layer, without deduplication.
 impl<T> Overlay for Vec<T> {
-    fn overlay(mut self, over: Self) -> Self {
-        self.extend(over);
-        self
+    fn overlay(self, over: Self) -> Self {
+        parsers::vec_extend(self, over)
     }
 }
 
