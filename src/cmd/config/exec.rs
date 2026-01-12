@@ -26,7 +26,13 @@ pub struct ExecConfig {
 #[locket(try_into = "ExecConfig", section = "exec")]
 pub struct ExecArgs {
     /// Watch mode will monitor for changes to .env files and restart the command if changes are detected.
-    #[arg(long, env = "LOCKET_EXEC_WATCH")]
+    #[arg(
+        long,
+        env = "LOCKET_EXEC_WATCH",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        require_equals = false
+    )]
     #[locket(default = false)]
     pub watch: Option<bool>,
 
@@ -38,7 +44,7 @@ pub struct ExecArgs {
         env = "LOCKET_EXEC_INTERACTIVE",
         num_args = 0..=1,
         default_missing_value = "true",
-        require_equals = true,
+        require_equals = false,
     )]
     #[locket(optional)]
     pub interactive: Option<bool>,
