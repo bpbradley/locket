@@ -1,0 +1,29 @@
+---
+name: provider
+services:
+    locket-op:
+        provider:
+            type: locket
+            options:
+                provider: op-connect
+                connect-token: file:/etc/tokens/connect
+                connect-host: $OP_CONNECT_HOST
+                env_file: locket.env
+                env:
+                    - TEXT="OVERRIDE! {{op://Mordin/SecretPassword/Test Section/text}}"
+                    - "@override.env"
+    locket-bws:
+        provider:
+            type: locket
+            options:
+                provider: bws
+                bws-token: file:/etc/tokens/bws
+                env:
+                    - TEXT={{814d7d9a-54a5-47a0-afc0-b3a7015213c4}}
+    demo:
+        image: busybox
+        user: "1000:1000"
+        command: env
+        depends_on:
+            - locket-op
+            - locket-bws

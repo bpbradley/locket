@@ -6,18 +6,22 @@
 //! It also handles the low-level "reading" mechanics via `SecretSource` and `SourceReader`,
 //! ensuring that file reads are memory-limited.
 
+use crate::config::parsers::TryFromKv;
 use crate::path::CanonicalPath;
 use crate::provider::ProviderError;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error;
 
+pub mod config;
 mod file;
 mod manager;
 mod registry;
-pub use crate::secrets::manager::{InjectFailurePolicy, SecretFileManager, SecretFileOpts};
+pub use crate::secrets::config::{InjectFailurePolicy, SecretManagerArgs, SecretManagerConfig};
+pub use crate::secrets::manager::SecretFileManager;
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -66,7 +70,7 @@ pub enum SecretError {
     Write(#[from] crate::write::WriterError),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct SecretKey(String);
 
 impl TryFrom<String> for SecretKey {
@@ -124,7 +128,9 @@ impl From<&SecretKey> for String {
 /// For example, in the SecretFileManager, anonymous secrets are treated the same as Named
 /// file backed secrets, except the key is derived from the file name.
 /// However in the EnvManager, anonymous secrets are treated as .env files.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub enum Secret {
     /// An anonymous secret source (e.g., a file path or string literal)
     ///
@@ -180,6 +186,21 @@ impl Secret {
     }
 }
 
+impl TryFromKv for Secret {
+    type Err = SecretError;
+    fn try_from_kv(key: String, val: String) -> Result<Self, SecretError> {
+        Self::from_kv(key, val)
+    }
+}
+
+impl TryFrom<String> for Secret {
+    type Error = SecretError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
 impl FromStr for Secret {
     type Err = SecretError;
 
@@ -207,7 +228,7 @@ impl FromStr for Secret {
 }
 
 /// The origin of the secret template content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SecretSource {
     /// Template loaded from a file path on disk.
     File(CanonicalPath),
@@ -303,9 +324,28 @@ impl<'a> SourceReader<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub struct MemSize {
     pub bytes: u64,
+}
+
+impl Serialize for MemSize {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl TryFrom<String> for MemSize {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
 }
 
 impl Default for MemSize {

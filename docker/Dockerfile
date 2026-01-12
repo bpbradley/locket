@@ -5,7 +5,7 @@ ARG RUST_TAG=1.92-alpine3.22
 FROM rust:${RUST_TAG} AS build
 WORKDIR /src
 RUN apk add --no-cache musl-dev build-base pkgconfig \
- && rustup target add x86_64-unknown-linux-musl
+    && rustup target add x86_64-unknown-linux-musl
 
 COPY Cargo.toml Cargo.lock ./
 COPY . .
@@ -13,24 +13,31 @@ COPY . .
 ARG FEATURES="op,connect,bws"
 
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
-  --no-default-features --features "${FEATURES}" \
- && strip target/x86_64-unknown-linux-musl/release/locket
+    --no-default-features --features "${FEATURES}" \
+    && strip target/x86_64-unknown-linux-musl/release/locket
 
 FROM alpine:3.23 AS rootfs
 RUN addgroup -g 65532 nonroot \
- && adduser -D -H -u 65532 -G nonroot nonroot
+    && adduser -D -H -u 65532 -G nonroot nonroot
 
 RUN grep -E '^(root|nonroot)' /etc/passwd > /etc/passwd.min \
- && grep -E '^(root|nonroot)' /etc/group > /etc/group.min
+    && grep -E '^(root|nonroot)' /etc/group > /etc/group.min
 
 RUN install -d -m 1777 /tmp \
- && install -d -m 0755 /etc/ssl/certs \
- && install -d -m 0755 /usr/local/bin \
- && install -d -m 0755 /home/nonroot && chown nonroot:nonroot /home/nonroot \
- && install -d -m 0755 /templates && chown nonroot:nonroot /templates \
- && install -d -m 0755 /run/secrets && chown nonroot:nonroot /run/secrets \
- && install -d -m 0700 /config/op && chown nonroot:nonroot /config/op \
- && apk add --no-cache ca-certificates
+    && install -d -m 0755 /etc/ssl/certs \
+    && install -d -m 0755 /usr/local/bin \
+    && install -d -m 0755 /home/nonroot && chown nonroot:nonroot /home/nonroot \
+    && install -d -m 0755 /templates && chown nonroot:nonroot /templates \
+    && install -d -m 0755 /run/secrets && chown nonroot:nonroot /run/secrets \
+    && install -d -m 0755 /etc/locket && chown nonroot:nonroot /etc/locket \
+    && install -d -m 0700 /config/op && chown nonroot:nonroot /config/op \
+    && apk add --no-cache ca-certificates
+
+COPY docker/locket.toml /tmp/locket.toml
+
+RUN mv /tmp/locket.toml /etc/locket/locket.toml \
+    && chown nonroot:nonroot /etc/locket/locket.toml \
+    && chmod 644 /etc/locket/locket.toml
 
 RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
 
@@ -39,9 +46,6 @@ LABEL org.opencontainers.image.title="locket (base)"
 
 ARG DEFAULT_PROVIDER
 ENV SECRETS_PROVIDER=${DEFAULT_PROVIDER}
-ENV LOCKET_STATUS_FILE=/dev/shm/locket/ready
-ENV SECRET_MAP=/templates:/run/secrets/locket
-ENV LOCKET_INJECT_MODE=watch
 
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
@@ -58,14 +62,15 @@ COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
 COPY --from=rootfs --chmod=1777 /tmp /tmp
 COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
+COPY --from=rootfs --chown=nonroot:nonroot /etc/locket /etc/locket
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 
 WORKDIR /
 USER nonroot:nonroot
 VOLUME ["/run/secrets/locket", "/templates"]
 HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
-  CMD ["locket","healthcheck"]
-ENTRYPOINT ["locket","inject"]
+    CMD ["locket","healthcheck"]
+ENTRYPOINT ["locket","inject", "--config", "/etc/locket/locket.toml"]
 
 FROM alpine:3.23 AS opstage
 ARG OP_VERSION=2.32.0
@@ -73,7 +78,7 @@ RUN set -eux; \
     apk add --no-cache ca-certificates wget; \
     echo "https://downloads.1password.com/linux/alpinelinux/stable/" >> /etc/apk/repositories; \
     wget -O /etc/apk/keys/support@1password.com-61ddfc31.rsa.pub \
-      https://downloads.1password.com/linux/keys/alpinelinux/support@1password.com-61ddfc31.rsa.pub; \
+    https://downloads.1password.com/linux/keys/alpinelinux/support@1password.com-61ddfc31.rsa.pub; \
     apk update; \
     apk add --no-cache 1password-cli=${OP_VERSION}-r0 || apk add --no-cache 1password-cli
 
@@ -102,10 +107,10 @@ ENV PATH="/usr/local/bin:${PATH}" \
     XDG_CONFIG_HOME=/config
 
 RUN mkdir -p /run/secrets /templates /config/op \
- && chmod 740 /run/secrets /templates /config/op
+    && chmod 740 /run/secrets /templates /config/op
 
 RUN addgroup -g 65532 nonroot \
- && adduser -D -H -u 65532 -G nonroot nonroot
+    && adduser -D -H -u 65532 -G nonroot nonroot
 
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op

@@ -8,14 +8,10 @@
 //! and a selection mechanism to choose the provider at runtime
 use crate::path::CanonicalPath;
 use async_trait::async_trait;
-#[cfg(feature = "bws")]
-use bws::{BwsConfig, BwsProvider};
 use clap::{Args, ValueEnum};
-#[cfg(feature = "connect")]
-use connect::{OpConnectConfig, OpConnectProvider};
-#[cfg(feature = "op")]
-use op::{OpConfig, OpProvider};
+use locket_derive::LayeredConfig;
 use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Serialize, Serializer};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
@@ -25,6 +21,7 @@ compile_error!("At least one provider feature must be enabled (e.g. --features o
 
 #[cfg(feature = "bws")]
 mod bws;
+pub mod config;
 #[cfg(feature = "connect")]
 mod connect;
 #[cfg(feature = "op")]
@@ -97,62 +94,67 @@ pub trait SecretsProvider: ReferenceParser + Send + Sync {
 }
 
 /// Provider backend configuration
+#[derive(Debug, Clone)]
 pub enum Provider {
     #[cfg(feature = "op")]
-    Op(OpConfig),
+    Op(config::op::OpConfig),
     #[cfg(feature = "connect")]
-    Connect(OpConnectConfig),
+    Connect(config::connect::ConnectConfig),
     #[cfg(feature = "bws")]
-    Bws(BwsConfig),
+    Bws(config::bws::BwsConfig),
 }
 
 impl Provider {
     pub async fn build(self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
         let provider: Arc<dyn SecretsProvider> = match self {
             #[cfg(feature = "op")]
-            Self::Op(c) => Arc::new(OpProvider::new(c).await?),
+            Self::Op(c) => Arc::new(op::OpProvider::new(c).await?),
             #[cfg(feature = "connect")]
-            Self::Connect(c) => Arc::new(OpConnectProvider::new(c).await?),
+            Self::Connect(c) => Arc::new(connect::OpConnectProvider::new(c).await?),
             #[cfg(feature = "bws")]
-            Self::Bws(c) => Arc::new(BwsProvider::new(c).await?),
+            Self::Bws(c) => Arc::new(bws::BwsProvider::new(c).await?),
         };
 
         Ok(provider)
     }
 }
 
-impl From<ProviderArgs> for Provider {
-    fn from(args: ProviderArgs) -> Self {
-        match args.kind {
-            #[cfg(feature = "op")]
-            ProviderKind::Op => Self::Op(args.config.op),
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProviderArgs {
+    /// Secrets provider backend to use.
+    #[arg(long, env = "SECRETS_PROVIDER")]
+    pub provider: Option<ProviderKind>,
 
-            #[cfg(feature = "connect")]
-            ProviderKind::OpConnect => Self::Connect(args.config.connect),
+    /// Provider-specific configuration
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub config: ProviderConfigs,
+}
 
+impl TryFrom<ProviderArgs> for Provider {
+    type Error = crate::error::LocketError;
+
+    fn try_from(args: ProviderArgs) -> Result<Self, Self::Error> {
+        let kind = args.provider.ok_or_else(|| {
+            crate::config::ConfigError::Validation(
+                "Missing required argument: --provider <kind>".into(),
+            )
+        })?;
+
+        match kind {
             #[cfg(feature = "bws")]
-            ProviderKind::Bws => Self::Bws(args.config.bws),
+            ProviderKind::Bws => Ok(Provider::Bws(args.config.bws.try_into()?)),
+            #[cfg(feature = "op")]
+            ProviderKind::Op => Ok(Provider::Op(args.config.op.try_into()?)),
+            #[cfg(feature = "connect")]
+            ProviderKind::OpConnect => Ok(Provider::Connect(args.config.connect.try_into()?)),
         }
     }
 }
 
-#[derive(Args, Debug, Clone)]
-pub struct ProviderArgs {
-    /// Secrets provider backend to use.
-    #[arg(
-        long = "provider",
-        env = "SECRETS_PROVIDER",
-        value_enum,
-        id = "provider"
-    )]
-    kind: ProviderKind,
-
-    /// Provider-specific configuration
-    #[command(flatten, next_help_heading = "Provider Configuration")]
-    config: ProviderConfigs,
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
+#[derive(Copy, Clone, Debug, ValueEnum, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
     /// 1Password Service Account
     #[cfg(feature = "op")]
@@ -165,31 +167,29 @@ pub enum ProviderKind {
     Bws,
 }
 
-impl From<ProviderKind> for clap::builder::OsStr {
-    fn from(kind: ProviderKind) -> Self {
-        kind.to_possible_value()
-            .expect("ProviderKind variants must have a value")
-            .get_name()
-            .to_string()
-            .into()
-    }
-}
-
-#[derive(Args, Debug, Clone)]
+#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
 pub struct ProviderConfigs {
     #[cfg(feature = "op")]
     #[command(flatten, next_help_heading = "1Password (op)")]
-    pub op: OpConfig,
+    #[serde(flatten)]
+    pub op: config::op::OpArgs,
+
     #[cfg(feature = "connect")]
     #[command(flatten, next_help_heading = "1Password Connect")]
-    pub connect: OpConnectConfig,
+    #[serde(flatten)]
+    pub connect: config::connect::ConnectArgs,
+
     #[cfg(feature = "bws")]
     #[command(flatten, next_help_heading = "Bitwarden Secrets Provider")]
-    pub bws: BwsConfig,
+    #[serde(flatten)]
+    pub bws: config::bws::BwsArgs,
 }
 
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub struct AuthToken(SecretString);
 
 impl AuthToken {
@@ -215,9 +215,26 @@ impl AuthToken {
     }
 }
 
+impl Serialize for AuthToken {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Do not expose the actual token.
+        serializer.serialize_str("[REDACTED]")
+    }
+}
+
 impl AsRef<SecretString> for AuthToken {
     fn as_ref(&self) -> &SecretString {
         &self.0
+    }
+}
+
+impl TryFrom<String> for AuthToken {
+    type Error = ProviderError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
     }
 }
 
@@ -253,8 +270,9 @@ impl ExposeSecret<str> for AuthToken {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ConcurrencyLimit(NonZeroUsize);
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ConcurrencyLimit(NonZeroUsize);
 
 impl ConcurrencyLimit {
     pub const fn new(limit: usize) -> Self {

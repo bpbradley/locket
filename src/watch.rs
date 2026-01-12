@@ -13,6 +13,7 @@ use notify::{
     event::{EventKind, ModifyKind, RenameMode},
     recommended_watcher,
 };
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{path::PathBuf, str::FromStr};
 use thiserror::Error;
@@ -234,8 +235,19 @@ impl<H: EventHandler> FsWatcher<H> {
 }
 
 /// Debounce duration wrapper to support human-readable parsing and sane defaults for watcher
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub struct DebounceDuration(pub Duration);
+
+impl TryFrom<String> for DebounceDuration {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+            .map_err(|e: humantime::DurationError| e.to_string())
+    }
+}
 
 /// Defaults to milliseconds if no unit specified, otherwise uses humantime parsing.
 impl FromStr for DebounceDuration {
@@ -248,6 +260,15 @@ impl FromStr for DebounceDuration {
         }
         let duration = humantime::parse_duration(s)?;
         Ok(DebounceDuration(duration))
+    }
+}
+
+impl Serialize for DebounceDuration {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
     }
 }
 

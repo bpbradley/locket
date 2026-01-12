@@ -1,6 +1,6 @@
 use locket::path::{AbsolutePath, CanonicalPath, PathMapping};
 use locket::provider::{ProviderError, ReferenceParser, SecretReference, SecretsProvider};
-use locket::secrets::{Secret, SecretError, SecretFileManager, SecretFileOpts};
+use locket::secrets::{Secret, SecretError, SecretFileManager, SecretManagerConfig};
 use secrecy::SecretString;
 use std::collections::HashMap;
 use std::path::Path;
@@ -45,12 +45,15 @@ fn collisions_structure_conflict() {
     let blocked_src = src_b.join("nested");
     std::fs::write(&blocked_src, "I am inside a dir").unwrap();
 
-    let opts = SecretFileOpts::default().with_mapping(vec![
-        make_mapping(blocker_src.clone(), output.join("config")),
-        make_mapping(blocked_src.clone(), output.join("config/nested")),
-    ]);
+    let config = SecretManagerConfig {
+        map: vec![
+            make_mapping(blocker_src.clone(), output.join("config")),
+            make_mapping(blocked_src.clone(), output.join("config/nested")),
+        ],
+        ..Default::default()
+    };
 
-    let secrets = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+    let secrets = SecretFileManager::new(config, Arc::new(NoOpProvider));
 
     assert!(secrets.is_err(), "Should detect structure conflict");
     assert!(matches!(
@@ -74,12 +77,14 @@ fn collisions_on_output_dst() {
 
     let args: Vec<Secret> = Secret::try_from_map(values.clone()).unwrap();
 
-    let opts = SecretFileOpts::default()
-        .with_secret_dir(AbsolutePath::new(&out_dir))
-        .with_mapping(vec![make_mapping(&src_dir, &out_dir)])
-        .with_secrets(args);
+    let config = SecretManagerConfig {
+        out: AbsolutePath::new(&out_dir),
+        map: vec![make_mapping(&src_dir, &out_dir)],
+        secrets: args,
+        ..Default::default()
+    };
 
-    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+    let manager = SecretFileManager::new(config, Arc::new(NoOpProvider));
 
     assert!(manager.is_err());
 
@@ -94,8 +99,12 @@ fn validate_fails_loop_dst_inside_src() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
-    let manager = SecretFileManager::new(opts.clone(), Arc::new(NoOpProvider));
+    let config = SecretManagerConfig {
+        map: vec![make_mapping(&src, &dst)],
+        ..Default::default()
+    };
+
+    let manager = SecretFileManager::new(config, Arc::new(NoOpProvider));
     assert!(matches!(
         manager,
         Err(SecretError::Loop { src: s, dst: d }) if s == src && d == dst
@@ -110,8 +119,12 @@ fn validate_fails_destructive() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
-    let manager = SecretFileManager::new(opts.clone(), Arc::new(NoOpProvider));
+    let config = SecretManagerConfig {
+        map: vec![make_mapping(&src, &dst)],
+        ..Default::default()
+    };
+
+    let manager = SecretFileManager::new(config, Arc::new(NoOpProvider));
     assert!(matches!(
         manager,
         Err(SecretError::Destructive { src: s, dst: d }) if s == src && d == dst
@@ -127,11 +140,13 @@ fn validate_fails_value_dir_loop() {
     let dst = tmp.path().join("safe_out");
     let bad_value_dir = src.join("values");
 
-    let opts = SecretFileOpts::default()
-        .with_mapping(vec![make_mapping(&src, &dst)])
-        .with_secret_dir(AbsolutePath::new(&bad_value_dir));
+    let config = SecretManagerConfig {
+        map: vec![make_mapping(&src, &dst)],
+        out: AbsolutePath::new(&bad_value_dir),
+        ..Default::default()
+    };
 
-    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+    let manager = SecretFileManager::new(config, Arc::new(NoOpProvider));
 
     assert!(matches!(
         manager,
@@ -147,8 +162,11 @@ fn validate_succeeds_valid_config() {
 
     std::fs::create_dir_all(&src).unwrap();
 
-    let opts = SecretFileOpts::default().with_mapping(vec![make_mapping(&src, &dst)]);
-    let manager = SecretFileManager::new(opts, Arc::new(NoOpProvider));
+    let config = SecretManagerConfig {
+        map: vec![make_mapping(&src, &dst)],
+        ..Default::default()
+    };
+    let manager = SecretFileManager::new(config, Arc::new(NoOpProvider));
 
     assert!(manager.is_ok());
 }

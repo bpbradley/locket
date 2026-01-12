@@ -1,4 +1,5 @@
 use crate::{
+    config::ConfigError,
     events::HandlerError,
     health::HealthError,
     logging::LoggingError,
@@ -45,11 +46,20 @@ pub enum LocketError {
 
     #[error(transparent)]
     Logging(#[from] LoggingError),
+
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 }
 
 #[cfg(feature = "compose")]
 impl From<crate::compose::MetadataError> for LocketError {
     fn from(e: crate::compose::MetadataError) -> Self {
         LocketError::Compose(e.into())
+    }
+}
+
+impl From<std::convert::Infallible> for LocketError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible conversion error")
     }
 }

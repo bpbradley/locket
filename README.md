@@ -13,9 +13,9 @@
 1. [Roadmap](#roadmap)
 
 ## Overview
-locket is a small CLI tool, packaged as a tiny rootless and distroless Docker image, designed to orchestrate secrets for dependent applications and services. locket is designed to work with most secrets providers, and it will orchestrate the retrieval of secrets and injection of them into dependent services. locket can help keep sensitive files off disk completely in tmpfs, or just somewhere out of revision control.
+locket is a small CLI tool (also packaged as a tiny rootless and distroless Docker image) designed to orchestrate secrets for dependent applications and services. locket is designed to work with most secrets providers, and it will coordinate the retrieval of secrets and injection of them into dependent services.
 
-locket is a versatile tool which can be used in various ways
+locket is a versatile tool and it supports various forms of secrets injection.
 
 1. [Secrets Injection](./docs/inject.md): Materialize secrets from templates into files using `locket inject`
 1. [Container Sidecar](#sidecar-mode): Inject secrets into configuration files stored in a shared, ephemeral tmpfs volume. locket will render files with secret references replaced with actual secrets so that dependent services can use them.
@@ -33,11 +33,11 @@ locket is a versatile tool which can be used in various ways
 
 ## Sidecar Mode
 
-The basic premise of locket as a sidecar service is:
+In sidecar mode, locket runs as a separate container alongside your application container. The basic premise is:
 
 1. Move your sensitive data to a dedicated secret manager ([Supported Providers](#providers))
 1. Adjust your config files to carry *secret references* instead of raw sensitive data, which are safe to commit directly to revision control (i.e `{{ op://vault/keys/privatekey?ssh-format=openssh }}`)
-1. Configure locket to use your secrets provider `--provider=bws` or with env: `SECRETS_PROVIDER=bws`. Or just use the docker image tag `locket:bws`
+1. Configure locket to use your secrets provider, or just use the docker image tag for your provider.
 1. Mount your templates containing secret references for locket to read, i.e. `./templates:/templates:ro`, and mount an output directory for the secrets to be placed (usually a named tmpfs volume, or some secure location) `secrets-store:/run/secrets/locket`
 1. Finally, map the template->output for each required mapping. You can map arbitrarily many directories->directories or files->files. `--map /templates:/run/secrets/locket`
 
@@ -60,7 +60,7 @@ services:
     # Configurations can be supplied via command like below, or via env variables.
     command:
         - "--provider=op-connect"
-        - "--op.token=file:/run/secrets/op_token"
+        - "--op-token=file:/run/secrets/op_token"
         - "--map=/templates:/run/secrets/locket" # Supports multiple maps, if needed.
         - "--secret=db_pass={{ op://vault/db/pass }}"
         - "--secret=db_host={{ op://vault/db/host }}"
@@ -142,8 +142,8 @@ services:
       type: locket
       options:
         provider: op-connect
-        connect.token: file:/etc/connect/token
-        connect.host: $OP_CONNECT_HOST
+        connect-token: file:/etc/connect/token
+        connect-host: $OP_CONNECT_HOST
         secrets:
           - "secret1={{ op://Mordin/SecretPassword/Test Section/text }}"
           - "secret2={{ op://Mordin/SecretPassword/Test Section/date }}"
@@ -209,7 +209,7 @@ Simply wrap your command with `locket exec`. You can supply secrets via individu
 ```bash
 locket exec \
     --provider bws \
-    --bws.token file:/path/to/token \
+    --bws-token file:/path/to/token \
     --env .env \
     --env .env.override \
     --env MY_SECRET={{reference}}\
@@ -223,7 +223,7 @@ reference `$MY_SECRET` for example, and it will have the resolved secret availab
 ```sh
 locket exec \
   --provider bws \
-  --bws.token file:/etc/tokens/bws \
+  --bws-token file:/etc/tokens/bws \
   -e MY_SECRET={{3832b656-a93b-45ad-bdfa-b267016802c3}} \
   -- python3
 

@@ -13,7 +13,8 @@ group "all" {
 }
 
 target "_common" {
-  context   = "."
+  context   = ".."
+  dockerfile = "docker/Dockerfile"
   platforms = [PLATFORMS]
 }
 
@@ -48,7 +49,7 @@ target "op" {
   args = {
     FEATURES = "op"
     DEFAULT_PROVIDER = "op"
-  } 
+  }
   tags = tags_for("op")
   labels = { "org.opencontainers.image.version" = VERSION }
 }
@@ -59,7 +60,7 @@ target "connect" {
   args = {
     FEATURES = "connect"
     DEFAULT_PROVIDER = "op-connect"
-  } 
+  }
   tags = tags_for("connect")
   labels = { "org.opencontainers.image.version" = VERSION }
 }

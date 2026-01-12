@@ -6,7 +6,7 @@ cmd = "cargo build --release"
 
 [once]
 description = "run in one shot mode"
-cmd = "cargo run -- inject --mode one-shot"
+cmd = "cargo run -- inject --config ../config.toml --mode one-shot"
 
 [help]
 description = "get help string for inject"
@@ -18,11 +18,11 @@ cmd = "cargo run -- healthcheck"
 
 [watch]
 description = "run in watch mode"
-cmd = "cargo run -- inject --mode watch"
+cmd = "cargo run -- inject --config ../config.toml --mode watch"
 
 [exec-watch]
 description = "Run exec in watch mode with python3"
-cmd = "cargo run -- exec --watch --interactive -- python3"
+cmd = "cargo run -- exec --config ../config.toml --watch --interactive -- python3"
 
 [test]
 description = "cargo test"
@@ -38,7 +38,8 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 
 [docker-build]
 description = "docker build dev image"
-cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake -f docker-bake.hcl all --load"
+path = "docker"
+cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake --allow=fs.read=.. -f docker-bake.hcl all --load"
 
 [docker-test-dbg]
 description = "Run test of docker image"
@@ -46,12 +47,12 @@ cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoi
 
 [docker-test]
 description = "Run test of docker image"
-path = "tests/docker/sidecar"
+path = "docker/tests/sidecar"
 cmd = "docker compose -f compose.tests.yaml -p tests up"
 
 [docker-provider]
 description = "Run test of docker provider"
-path = "tests/docker/provider"
+path = "docker/tests/provider"
 cmd = "docker compose --verbose -p provider up"
 
 [release-rc]

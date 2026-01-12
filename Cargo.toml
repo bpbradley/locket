@@ -4,7 +4,7 @@ version = "0.16.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
-description = "Helper tool for secret injection as a dependency"
+description = "Helper tool for secret injection as a process dependency"
 repository = "https://github.com/bpbradley/locket"
 homepage = "https://github.com/bpbradley/locket"
 documentation = "https://docs.rs/locket"
@@ -13,18 +13,27 @@ keywords = ["secrets", "docker"]
 categories = ["command-line-utilities", "config"]
 
 [workspace]
-members = [".", "xtask"]
+members = [".", "locket_derive", "xtask"]
 
 [features]
-default = ["op", "connect", "bws", "compose", "exec"]
+# Base release features
 op = ["tokio/process", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
+
+# Used to compile with mock types for testing
 testing = []
+# Generates introspection types that are necessary for documentation generation
+locket-docs = []
+
+full = ["op", "connect", "bws", "compose", "exec"]
+dev = ["locket-docs", "testing", "full"]
+default = ["full"]
 
 [dependencies]
+locket_derive = { path = "./locket_derive" }
 clap = { version = "4", features = ["derive", "env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
@@ -42,7 +51,8 @@ sanitize-filename = "0.6"
 humantime = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal", "fs"] }
 futures = { version = "0.3"}
-url = { version = "2"}
+url = { version = "2", features = ["serde"]}
+toml = {version = "0.9"}
 percent-encoding = { version = "2.3", optional = true }
 bitwarden = { version = "1", features=["secrets"], optional = true }
 uuid = { version = "1", optional = true }

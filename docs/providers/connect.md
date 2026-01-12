@@ -27,8 +27,8 @@ services:
       - ./templates:/templates:ro
       - out-connect:/run/secrets/locket
     command: # Or use environment variables
-      - "--connect.token=file:/run/secrets/connect_token"
-      - "--connect.host=https://connect.example.com"
+      - "--connect-token=file:/run/secrets/connect_token"
+      - "--connect-host=https://connect.example.com"
 secrets:
   connect_token:
     file: /etc/tokens/connect
@@ -47,8 +47,8 @@ services:
       type: locket
       options:
         provider: op-connect
-        connect.token: file:/etc/connect/token
-        connect.host: $OP_CONNECT_HOST
+        connect-token: file:/etc/connect/token
+        connect-host: $OP_CONNECT_HOST
         secrets:
           - "secret1={{ op://Mordin/SecretPassword/Test Section/text }}"
           - "secret2={{ op://Mordin/SecretPassword/Test Section/date }}"

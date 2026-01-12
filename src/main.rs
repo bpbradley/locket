@@ -6,17 +6,37 @@ use clap::Parser;
 use locket::cmd;
 use locket::cmd::{Cli, Command};
 use locket::error::LocketError;
+use locket::logging::{LogFormat, LogLevel, Logger};
 use std::process::{ExitCode, Termination};
 mod exits;
 use exits::LocketExitCode;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    match run().await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            // Fallback Logger
+            // This should fail if a logger has already been initialized
+            // allowing the already configured logger to handle the error reporting.
+            let _ = Logger::new(LogFormat::Text, LogLevel::Info).init();
+            LocketExitCode(e).report()
+        }
+    }
+}
+
+async fn run() -> Result<(), LocketError> {
     let cli = Cli::parse();
-    let result: Result<(), LocketError> = match cli.cmd {
-        Command::Inject(args) => cmd::inject(*args).await,
+    match cli.cmd {
+        Command::Inject(args) => {
+            let config = args.load()?;
+            cmd::inject(config).await
+        }
         #[cfg(feature = "exec")]
-        Command::Exec(args) => cmd::exec(*args).await,
+        Command::Exec(args) => {
+            let config = args.load()?;
+            cmd::exec(config).await
+        }
         Command::Healthcheck(args) => cmd::healthcheck(args),
         #[cfg(feature = "compose")]
         Command::Compose(args) => cmd::compose(*args).await,
@@ -32,9 +52,5 @@ async fn main() -> ExitCode {
             println!("{}", metadata);
             Ok(())
         }
-    };
-    match result {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(e) => LocketExitCode(e).report(),
     }
 }
