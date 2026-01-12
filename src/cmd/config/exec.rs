@@ -61,11 +61,13 @@ pub struct ExecArgs {
         value_parser = crate::path::parse_secret_path,
         action = clap::ArgAction::Append,
     )]
+    #[serde(alias = "env-file", default)]
     pub env_files: Vec<Secret>,
 
     /// Environment variable overrides which may contain secret references
     #[arg(
         long = "env-overrides",
+        alias = "env",
         short = 'e',
         env = "LOCKET_ENV",
         value_name = "KEY=VAL, KEY=@FILE or /path/to/.env",
@@ -75,6 +77,21 @@ pub struct ExecArgs {
         help_heading = None,
         action = clap::ArgAction::Append,
     )]
+    #[serde(
+        alias = "env",
+        default,
+        deserialize_with = "crate::config::parsers::polymorphic_vec"
+    )]
+    #[locket(docs = "
+        TOML syntax supports list of strings or map form:
+        List form:
+        env = [\"db_password={{..}}\", \"api_key={{..}}\"]
+
+        Map form:
+        [env]
+        db_password = \"{{..}}\"
+        api_key = \"{{..}}\"
+    ")]
     pub env_overrides: Vec<Secret>,
 
     #[command(flatten)]
@@ -115,6 +132,8 @@ pub struct ExecArgs {
     /// Must be the last argument(s), following a `--` separator.
     ///
     /// Example: `locket exec -e locket.env -- docker compose up -d`
-    #[arg(required = true, trailing_var_arg = true, help_heading = None)]
+    #[arg(trailing_var_arg = true, help_heading = None)]
+    #[serde(default)]
+    #[locket(overlay = "crate::config::parsers::vec_replace")]
     pub cmd: Vec<String>,
 }

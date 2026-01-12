@@ -83,6 +83,16 @@ watch = false
 env-files = []
 
 # Environment variable overrides which may contain secret references
+# 
+# TOML syntax supports list of strings or map form:
+# List form:
+# env = ["db_password={{..}}", "api_key={{..}}"]
+# 
+# Map form:
+# [env]
+# db_password = "{{..}}"
+# api_key = "{{..}}"
+# 
 env-overrides = []
 
 # Mapping of source paths to destination paths

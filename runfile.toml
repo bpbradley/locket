@@ -6,7 +6,7 @@ cmd = "cargo build --release"
 
 [once]
 description = "run in one shot mode"
-cmd = "cargo run -- inject --config ../config.inject.toml --mode one-shot"
+cmd = "cargo run -- inject --config ../config.toml --mode one-shot"
 
 [help]
 description = "get help string for inject"
@@ -18,11 +18,11 @@ cmd = "cargo run -- healthcheck"
 
 [watch]
 description = "run in watch mode"
-cmd = "cargo run -- inject --config ../config.inject.toml --mode watch"
+cmd = "cargo run -- inject --config ../config.toml --mode watch"
 
 [exec-watch]
 description = "Run exec in watch mode with python3"
-cmd = "cargo run -- exec --watch --interactive -- python3"
+cmd = "cargo run -- exec --config ../config.toml --watch --interactive -- python3"
 
 [test]
 description = "cargo test"
