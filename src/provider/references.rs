@@ -11,7 +11,9 @@ mod op;
 #[cfg(feature = "bws")]
 pub use bws::BwsReference;
 #[cfg(feature = "infisical")]
-pub use infisical::{InfisicalParseError, InfisicalProjectId, InfisicalReference, InfisicalSlug};
+pub use infisical::{
+    InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference, InfisicalSlug,
+};
 #[cfg(any(feature = "op", feature = "connect"))]
 pub use op::{OpParseError, OpReference};
 

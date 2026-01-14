@@ -1,5 +1,5 @@
 use crate::provider::{
-    AuthToken,
+    AuthToken, ConcurrencyLimit,
     references::{InfisicalProjectId, InfisicalSlug},
 };
 use clap::Args;
@@ -13,6 +13,7 @@ pub struct InfisicalConfig {
     pub infisical_client_id: String,
     pub infisical_default_environment: Option<InfisicalSlug>,
     pub infisical_default_project_id: Option<InfisicalProjectId>,
+    pub infisical_max_concurrent: ConcurrencyLimit,
 }
 
 #[derive(Args, Debug, Clone, Default, LayeredConfig, Deserialize, Serialize)]
@@ -35,4 +36,8 @@ pub struct InfisicalArgs {
     /// The default project ID to use when one is not specified.
     #[arg(long, env = "INFISICAL_DEFAULT_PROJECT_ID")]
     pub infisical_default_project_id: Option<InfisicalProjectId>,
+    /// Maximum allowed concurrent requests to Infisical API.
+    #[arg(long, env = "INFISICAL_MAX_CONCURRENT")]
+    #[locket(default = ConcurrencyLimit::new(20))]
+    pub infisical_max_concurrent: Option<ConcurrencyLimit>,
 }

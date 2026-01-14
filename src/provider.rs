@@ -118,7 +118,7 @@ impl Provider {
             #[cfg(feature = "bws")]
             Self::Bws(c) => Arc::new(bws::BwsProvider::new(c).await?),
             #[cfg(feature = "infisical")]
-            Self::Infisical(_) => todo!("Infisical provider not yet implemented"),
+            Self::Infisical(c) => Arc::new(infisical::InfisicalProvider::new(c).await?),
         };
 
         Ok(provider)

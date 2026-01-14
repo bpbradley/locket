@@ -1,3 +1,4 @@
+use super::SecretReference;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,19 @@ pub struct InfisicalOptions {
 impl InfisicalReference {
     pub fn new(key: InfisicalSecretKey, options: InfisicalOptions) -> Self {
         Self { key, options }
+    }
+}
+
+impl<'a> TryFrom<&'a SecretReference> for &'a InfisicalReference {
+    type Error = ();
+
+    #[allow(irrefutable_let_patterns)]
+    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
+        if let SecretReference::Infisical(inf) = value {
+            Ok(inf)
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -236,6 +250,14 @@ pub struct InfisicalPath(String);
 impl InfisicalPath {
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl FromStr for InfisicalPath {
+    type Err = ValidationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.to_string())
     }
 }
 
