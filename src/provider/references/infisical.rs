@@ -9,6 +9,18 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
+// slugs can be lowercase, numbers, or hyphens only
+static SLUG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9-]+$").expect("regex must be valid"));
+
+// keys cannot contain slashes, control characters, or colon
+static KEY_INVALID_CHARS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[:/?\x00-\x1f]").expect("regex must be valid"));
+
+// paths must begin with / and contain only alphanumerics and dashes
+static PATH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^/[a-zA-Z0-9_/-]*$").expect("regex must be valid"));
+
 #[derive(Debug, Error)]
 pub enum InfisicalParseError {
     #[error("reference must start with 'infisical://'")]
@@ -61,6 +73,32 @@ pub struct InfisicalOptions {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<InfisicalProjectId>,
+
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub secret_type: Option<InfisicalSecretType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct InfisicalSlug(String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InfisicalSecretKey(String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct InfisicalProjectId(Uuid);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct InfisicalPath(String);
+
+#[derive(Debug, Serialize, Default, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum InfisicalSecretType {
+    #[default]
+    Shared,
+    Personal,
 }
 
 impl InfisicalReference {
@@ -127,22 +165,6 @@ impl fmt::Display for InfisicalReference {
     }
 }
 
-// slugs can be lowercase, numbers, or hyphens only
-static SLUG_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-z0-9-]+$").expect("regex must be valid"));
-
-// keys cannot contain slashes, control characters, or colon
-static KEY_INVALID_CHARS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[:/?\x00-\x1f]").expect("regex must be valid"));
-
-// paths must begin with / and contain only alphanumerics and dashes
-static PATH_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^/[a-zA-Z0-9_/-]*$").expect("regex must be valid"));
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct InfisicalSlug(String);
-
 impl TryFrom<String> for InfisicalSlug {
     type Error = ValidationError;
 
@@ -180,9 +202,6 @@ impl fmt::Display for InfisicalSlug {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct InfisicalSecretKey(String);
-
 impl InfisicalSecretKey {
     pub fn parse(s: impl Into<String>) -> Result<Self, ValidationError> {
         let s = s.into();
@@ -202,10 +221,6 @@ impl fmt::Display for InfisicalSecretKey {
         write!(f, "{}", self.0)
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct InfisicalProjectId(Uuid);
 
 impl TryFrom<String> for InfisicalProjectId {
     type Error = ValidationError;
@@ -242,10 +257,6 @@ impl fmt::Display for InfisicalProjectId {
         write!(f, "{}", self.0)
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct InfisicalPath(String);
 
 impl InfisicalPath {
     pub fn as_str(&self) -> &str {
@@ -331,6 +342,7 @@ mod tests {
             options: InfisicalOptions {
                 env: Some(InfisicalSlug::try_from("production".to_string()).unwrap()),
                 path: Some(InfisicalPath::try_from("/deeply/nested/path".to_string()).unwrap()),
+                secret_type: Some(InfisicalSecretType::default()),
                 project_id: None,
             },
         };
@@ -393,5 +405,35 @@ mod tests {
         assert!(InfisicalProjectId::try_from(Uuid::new_v4().to_string()).is_ok());
         let err = InfisicalProjectId::try_from("invalid-uuid".to_string()).unwrap_err();
         assert!(matches!(err, ValidationError::ProjectId(_)));
+    }
+
+    #[test]
+    fn test_secret_type_validation() {
+        let raw = "infisical:///key?type=shared";
+        let reference = InfisicalReference::from_str(raw).expect("should parse shared");
+        assert_eq!(
+            reference.options.secret_type,
+            Some(InfisicalSecretType::Shared)
+        );
+
+        let raw = "infisical:///key?type=personal";
+        let reference = InfisicalReference::from_str(raw).expect("should parse personal");
+        assert_eq!(
+            reference.options.secret_type,
+            Some(InfisicalSecretType::Personal)
+        );
+
+        let raw = "infisical:///key?type=user";
+        let err = InfisicalReference::from_str(raw);
+
+        assert!(err.is_err());
+
+        assert!(matches!(
+            err.unwrap_err(),
+            InfisicalParseError::QueryParam(_)
+        ));
+
+        let raw = "infisical:///key?type=SHARED";
+        assert!(InfisicalReference::from_str(raw).is_err());
     }
 }

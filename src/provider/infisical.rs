@@ -4,8 +4,8 @@ use super::{
     ProviderError, SecretsProvider,
     config::infisical::InfisicalConfig,
     references::{
-        InfisicalPath, InfisicalProjectId, InfisicalReference, InfisicalSlug, ReferenceParser,
-        SecretReference,
+        InfisicalPath, InfisicalProjectId, InfisicalReference, InfisicalSecretType, InfisicalSlug,
+        ReferenceParser, SecretReference,
     },
 };
 use async_trait::async_trait;
@@ -36,24 +36,10 @@ struct SecretQueryParams<'a> {
     secret_path: Option<&'a InfisicalPath>,
 
     #[serde(rename = "type")]
-    secret_type: SecretType,
+    secret_type: InfisicalSecretType,
 
     expand_secret_references: bool,
     include_imports: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum SecretType {
-    Shared,
-    Personal,
-}
-
-// Default implementation for the static configuration
-impl Default for SecretType {
-    fn default() -> Self {
-        Self::Shared
-    }
 }
 
 #[derive(Deserialize)]
@@ -166,10 +152,10 @@ impl InfisicalProvider {
             .map_err(ProviderError::Url)?;
 
         let query_params = SecretQueryParams {
-            project_id: project_id,
+            project_id,
             environment: env,
             secret_path: reference.options.path.as_ref(),
-            secret_type: SecretType::Shared,
+            secret_type: reference.options.secret_type.clone().unwrap_or_default(),
             expand_secret_references: true,
             include_imports: true,
         };
