@@ -140,6 +140,14 @@ impl TryFrom<String> for InfisicalSlug {
     }
 }
 
+impl FromStr for InfisicalSlug {
+    type Err = ValidationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.to_string())
+    }
+}
+
 impl From<InfisicalSlug> for String {
     fn from(slug: InfisicalSlug) -> Self {
         slug.0
@@ -192,6 +200,14 @@ impl TryFrom<String> for InfisicalProjectId {
         let uuid = Uuid::parse_str(&value)
             .map_err(|_| ValidationError::ProjectId(format!("'{}' is not a valid UUID", value)))?;
         Ok(Self(uuid))
+    }
+}
+
+impl FromStr for InfisicalProjectId {
+    type Err = ValidationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.to_string())
     }
 }
 
