@@ -30,6 +30,9 @@ pub enum InfisicalParseError {
     #[error("missing secret key in path")]
     MissingKey,
 
+    #[error("'infisical://{0}' is missing secret key. Did you mean 'infisical:///{0}'?")]
+    KeyAsHost(String),
+
     #[error("invalid URL format: {0}")]
     Url(#[from] url::ParseError),
 
@@ -133,6 +136,13 @@ impl FromStr for InfisicalReference {
         }
 
         let url = Url::parse(s)?;
+
+        if let Some(host) = url.host_str()
+            && (url.path() == "/" || url.path().is_empty())
+        {
+            return Err(InfisicalParseError::KeyAsHost(host.to_string()));
+        }
+
         let path = url.path();
         let raw_key = path.strip_prefix('/').unwrap_or(path);
 

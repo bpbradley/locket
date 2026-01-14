@@ -4,8 +4,8 @@ use super::{
     ProviderError, SecretsProvider,
     config::infisical::InfisicalConfig,
     references::{
-        InfisicalPath, InfisicalProjectId, InfisicalReference, InfisicalSecretType, InfisicalSlug,
-        ReferenceParser, SecretReference,
+        InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference,
+        InfisicalSecretType, InfisicalSlug, ReferenceParser, SecretReference,
     },
 };
 use async_trait::async_trait;
@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
+use tracing::warn;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,9 +205,14 @@ impl InfisicalProvider {
 
 impl ReferenceParser for InfisicalProvider {
     fn parse(&self, raw: &str) -> Option<SecretReference> {
-        InfisicalReference::from_str(raw)
-            .ok()
-            .map(SecretReference::Infisical)
+        match InfisicalReference::from_str(raw) {
+            Ok(reference) => Some(SecretReference::Infisical(reference)),
+            Err(InfisicalParseError::InvalidScheme) => None,
+            Err(e) => {
+                warn!("Invalid reference '{}': {}", raw, e);
+                None
+            }
+        }
     }
 }
 
