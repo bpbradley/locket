@@ -1,4 +1,5 @@
 use super::SecretReference;
+use clap::ValueEnum;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -93,7 +94,7 @@ pub struct InfisicalProjectId(Uuid);
 #[serde(try_from = "String", into = "String")]
 pub struct InfisicalPath(String);
 
-#[derive(Debug, Serialize, Default, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Default, Deserialize, Clone, PartialEq, Eq, Hash, ValueEnum, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum InfisicalSecretType {
     #[default]
@@ -101,9 +102,12 @@ pub enum InfisicalSecretType {
     Personal,
 }
 
-impl InfisicalReference {
-    pub fn new(key: InfisicalSecretKey, options: InfisicalOptions) -> Self {
-        Self { key, options }
+impl std::fmt::Display for InfisicalSecretType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
     }
 }
 

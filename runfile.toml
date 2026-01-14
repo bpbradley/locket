@@ -61,4 +61,4 @@ cmd = "cargo xtask docs"
 
 [clean]
 description = "Clean locket outputs"
-cmd = "rm -rf ./secrets/op/out ./secrets/bws/out"
+cmd = "rm -rf ./secrets/op/out ./secrets/bws/out ./secrets/infisical/out"

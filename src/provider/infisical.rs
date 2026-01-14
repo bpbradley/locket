@@ -32,8 +32,7 @@ struct LoginResponse {
 struct SecretQueryParams<'a> {
     project_id: &'a InfisicalProjectId,
     environment: &'a InfisicalSlug,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    secret_path: Option<&'a InfisicalPath>,
+    secret_path: &'a InfisicalPath,
 
     #[serde(rename = "type")]
     secret_type: InfisicalSecretType,
@@ -44,14 +43,14 @@ struct SecretQueryParams<'a> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V4SecretResponse {
-    secret: V4Secret,
+struct InfisicalSecretResponse {
+    secret: InfisicalSecret,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V4Secret {
-    secret_value: String,
+struct InfisicalSecret {
+    secret_value: SecretString,
 }
 
 pub struct InfisicalProvider {
@@ -119,7 +118,7 @@ impl InfisicalProvider {
         &self,
         reference: &InfisicalReference,
     ) -> Result<SecretString, ProviderError> {
-        let env = reference
+        let environment = reference
             .options
             .env
             .as_ref()
@@ -143,6 +142,17 @@ impl InfisicalProvider {
                 ))
             })?;
 
+        let secret_path: &InfisicalPath = reference
+            .options
+            .path
+            .as_ref()
+            .unwrap_or(&self.config.infisical_default_path);
+
+        let secret_type: InfisicalSecretType = reference
+            .options
+            .secret_type
+            .unwrap_or(self.config.infisical_default_secret_type);
+
         let secret_name = reference.key.as_str();
 
         let url = self
@@ -153,9 +163,9 @@ impl InfisicalProvider {
 
         let query_params = SecretQueryParams {
             project_id,
-            environment: env,
-            secret_path: reference.options.path.as_ref(),
-            secret_type: reference.options.secret_type.clone().unwrap_or_default(),
+            environment,
+            secret_path,
+            secret_type,
             expand_secret_references: true,
             include_imports: true,
         };
@@ -171,11 +181,11 @@ impl InfisicalProvider {
 
         match resp.status() {
             StatusCode::OK => {
-                let wrapper: V4SecretResponse = resp
+                let wrapper: InfisicalSecretResponse = resp
                     .json()
                     .await
                     .map_err(|e| ProviderError::Network(Box::new(e)))?;
-                Ok(SecretString::new(wrapper.secret.secret_value.into()))
+                Ok(wrapper.secret.secret_value)
             }
             StatusCode::NOT_FOUND => Err(ProviderError::NotFound(reference.to_string())),
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(ProviderError::Unauthorized(
