@@ -4,10 +4,14 @@ use thiserror::Error;
 
 #[cfg(feature = "bws")]
 mod bws;
+#[cfg(feature = "infisical")]
+mod infisical;
 #[cfg(any(feature = "op", feature = "connect"))]
 mod op;
 #[cfg(feature = "bws")]
 pub use bws::BwsReference;
+#[cfg(feature = "infisical")]
+pub use infisical::{InfisicalParseError, InfisicalReference};
 #[cfg(any(feature = "op", feature = "connect"))]
 pub use op::{OpParseError, OpReference};
 
@@ -24,6 +28,10 @@ pub enum ReferenceParseError {
     #[cfg(feature = "bws")]
     #[error("invalid BWS UUID: {0}")]
     Bws(#[from] uuid::Error),
+
+    #[cfg(feature = "infisical")]
+    #[error(transparent)]
+    Infisical(#[from] InfisicalParseError),
 }
 
 /// A parsed reference to a secret.
@@ -33,12 +41,16 @@ pub enum ReferenceParseError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SecretReference {
     #[cfg(any(feature = "op", feature = "connect"))]
-    /// A 1Password reference (used by both CLI and Connect providers)
+    /// A 1Password reference
     OnePassword(OpReference),
 
     #[cfg(feature = "bws")]
     /// A Bitwarden Secrets Manager reference (UUID)
     Bws(BwsReference),
+
+    #[cfg(feature = "infisical")]
+    /// An Infisical reference
+    Infisical(InfisicalReference),
 
     #[cfg(any(test, doctest, feature = "testing"))]
     /// A mock reference for testing purposes
@@ -59,6 +71,9 @@ impl std::fmt::Display for SecretReference {
             #[cfg(feature = "bws")]
             Self::Bws(reference) => write!(f, "{}", reference),
 
+            #[cfg(feature = "infisical")]
+            Self::Infisical(reference) => write!(f, "{}", reference),
+
             #[cfg(any(test, doctest, feature = "testing"))]
             Self::Mock(reference) => write!(f, "{}", reference),
         }
@@ -74,6 +89,13 @@ impl FromStr for SecretReference {
         if s.starts_with("op://") {
             let op_ref = OpReference::from_str(s)?;
             return Ok(Self::OnePassword(op_ref));
+        }
+
+        // Check Infisical
+        #[cfg(feature = "infisical")]
+        if s.starts_with("infisical://") {
+            let infisical_ref = InfisicalReference::from_str(s)?;
+            return Ok(Self::Infisical(infisical_ref));
         }
 
         // Check BWS

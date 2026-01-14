@@ -21,6 +21,7 @@ op = ["tokio/process", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
+infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
 
 # Used to compile with mock types for testing
@@ -28,7 +29,7 @@ testing = []
 # Generates introspection types that are necessary for documentation generation
 locket-docs = []
 
-full = ["op", "connect", "bws", "compose", "exec"]
+full = ["op", "connect", "bws", "infisical", "compose", "exec"]
 dev = ["locket-docs", "testing", "full"]
 default = ["full"]
 
@@ -58,7 +59,7 @@ bitwarden = { version = "1", features=["secrets"], optional = true }
 uuid = { version = "1", optional = true }
 dotenvy = {version = "0.15", optional = true}
 nix = { version = "0.30", features = ["signal", "term"], optional = true}
-
+serde_urlencoded = { version = "0.7", optional = true }
 # bitwarden sdk needs to update their crate. Cannot build without this.
 # https://github.com/bitwarden/sdk-sm/issues/1244
 rustls-webpki = { version = "0.102", features = ["std"], optional = true }
@@ -67,6 +68,7 @@ rustls-webpki = { version = "0.102", features = ["std"], optional = true }
 # The only other way to fix it that I could find was to install 0.13 reqwest with rustls-no-provider,
 # and then manually call `let _ = rustls::crypto::ring::default_provider().install_default();` to handle certs manually.
 reqwest = { version = ">=0.12.24, <0.13", features = ["json", "rustls-tls-webpki-roots"], default-features = false, optional = true }
+regex = { version = "1.7", optional = true }
 
 [dev-dependencies]
 assert_fs = "1"
