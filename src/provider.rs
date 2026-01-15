@@ -16,8 +16,15 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
 
-#[cfg(not(any(feature = "op", feature = "connect", feature = "bws", feature = "infisical")))]
-compile_error!("At least one provider feature must be enabled (e.g. --features op,connect,bws,infisical)");
+#[cfg(not(any(
+    feature = "op",
+    feature = "connect",
+    feature = "bws",
+    feature = "infisical"
+)))]
+compile_error!(
+    "At least one provider feature must be enabled (e.g. --features op,connect,bws,infisical)"
+);
 
 #[cfg(feature = "bws")]
 mod bws;
@@ -144,7 +151,7 @@ impl TryFrom<ProviderArgs> for Provider {
     fn try_from(args: ProviderArgs) -> Result<Self, Self::Error> {
         use crate::config::ApplyDefaults;
         let args = args.apply_defaults();
-        
+
         let kind = args.provider.ok_or_else(|| {
             crate::config::ConfigError::Validation(
                 "Missing required argument: --provider <kind>".into(),
@@ -241,6 +248,12 @@ impl Serialize for AuthToken {
     {
         // Do not expose the actual token.
         serializer.serialize_str("[REDACTED]")
+    }
+}
+
+impl From<AuthToken> for SecretString {
+    fn from(token: AuthToken) -> Self {
+        token.0
     }
 }
 

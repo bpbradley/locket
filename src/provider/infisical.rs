@@ -1,7 +1,7 @@
 //! Infisical provider implementation.
 
 use super::{
-    ProviderError, SecretsProvider,
+    ConcurrencyLimit, ProviderError, SecretsProvider,
     config::infisical::InfisicalConfig,
     references::{
         InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference,
@@ -15,21 +15,152 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::time::Duration;
-use tracing::warn;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+use tracing::{debug, warn};
+use url::Url;
+use uuid::Uuid;
+
+pub struct InfisicalProvider {
+    client: Client,
+    config: ProviderConfig,
+    auth: InfisicalAuthenticator,
+}
+
+struct InfisicalAuthenticator {
+    client: Client,
+    config: AuthConfig,
+    token: RwLock<InfisicalToken>,
+}
+
+#[derive(Debug, Clone)]
+struct AuthConfig {
+    url: Url,
+    client_id: Uuid,
+    client_secret: SecretString,
+}
+
+#[derive(Debug, Clone)]
+struct ProviderConfig {
+    url: Url,
+    default_path: InfisicalPath,
+    default_secret_type: InfisicalSecretType,
+    default_env: Option<InfisicalSlug>,
+    default_project: Option<InfisicalProjectId>,
+    max_concurrent: ConcurrencyLimit,
+}
+
+impl From<InfisicalConfig> for (AuthConfig, ProviderConfig) {
+    fn from(config: InfisicalConfig) -> Self {
+        let auth_config = AuthConfig {
+            url: config.infisical_url.clone(),
+            client_id: config.infisical_client_id,
+            client_secret: config.infisical_client_secret.into(),
+        };
+
+        let provider_config = ProviderConfig {
+            url: config.infisical_url,
+            default_env: config.infisical_default_environment,
+            default_project: config.infisical_default_project_id,
+            default_path: config.infisical_default_path,
+            default_secret_type: config.infisical_default_secret_type,
+            max_concurrent: config.infisical_max_concurrent,
+        };
+
+        (auth_config, provider_config)
+    }
+}
+
+impl InfisicalAuthenticator {
+    pub async fn try_new(client: Client, config: AuthConfig) -> Result<Self, ProviderError> {
+        let token = Self::login(&client, &config).await?;
+
+        Ok(Self {
+            client,
+            config,
+            token: RwLock::new(token),
+        })
+    }
+
+    /// Returns a valid bearer token, renewing it if necessary.
+    pub async fn get_token(&self) -> Result<SecretString, ProviderError> {
+        {
+            let guard = self.token.read().await;
+            if !guard.is_expired() {
+                return Ok(guard.access_token.clone());
+            }
+        }
+
+        // Token expired. Need to renew
+        let mut guard = self.token.write().await;
+
+        // Check if token is expired again in case it was renewed by another thread
+        // while waiting for the write lock
+        if !guard.is_expired() {
+            return Ok(guard.access_token.clone());
+        }
+
+        debug!("Token expired. Renewing...");
+        let new_token = Self::login(&self.client, &self.config).await?;
+
+        *guard = new_token.clone();
+
+        Ok(new_token.access_token)
+    }
+
+    async fn login(client: &Client, config: &AuthConfig) -> Result<InfisicalToken, ProviderError> {
+        let url = config
+            .url
+            .join("/api/v1/auth/universal-auth/login")
+            .map_err(ProviderError::Url)?;
+
+        let payload = serde_json::json!({
+            "clientId": config.client_id,
+            "clientSecret": config.client_secret.expose_secret(),
+        });
+
+        let resp = client
+            .post(url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(Box::new(e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(ProviderError::Unauthorized(format!(
+                "Infisical login failed: {} - {}",
+                status, text
+            )));
+        }
+
+        let login_resp: LoginResponse = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError::Network(Box::new(e)))?;
+
+        debug!(
+            "Login successful. Expires in {} seconds",
+            login_resp.expires_in
+        );
+
+        Ok(InfisicalToken {
+            access_token: login_resp.access_token,
+            expires_at: Instant::now() + Duration::from_secs(login_resp.expires_in),
+        })
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoginResponse {
     access_token: SecretString,
-    #[allow(dead_code)]
-    expires_in: i64,
-    #[allow(dead_code)]
-    token_type: String,
+    expires_in: u64,
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")] // Automagically handles "workspaceId", "secretPath", etc.
+#[serde(rename_all = "camelCase")]
 struct SecretQueryParams<'a> {
     project_id: &'a InfisicalProjectId,
     environment: &'a InfisicalSlug,
@@ -54,65 +185,34 @@ struct InfisicalSecret {
     secret_value: SecretString,
 }
 
-pub struct InfisicalProvider {
-    client: Client,
-    config: InfisicalConfig,
-    token: SecretString,
+#[derive(Debug, Clone)]
+struct InfisicalToken {
+    access_token: SecretString,
+    expires_at: Instant,
+}
+
+impl InfisicalToken {
+    fn is_expired(&self) -> bool {
+        self.expires_at <= Instant::now() + Duration::from_secs(60)
+    }
 }
 
 impl InfisicalProvider {
     pub async fn new(config: InfisicalConfig) -> Result<Self, ProviderError> {
+        let (auth_config, config) = config.into();
+
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
 
-        // Perform initial login to get access token
-        let token = Self::login(&client, &config).await?;
+        let auth = InfisicalAuthenticator::try_new(client.clone(), auth_config).await?;
 
         Ok(Self {
             client,
             config,
-            token,
+            auth,
         })
-    }
-
-    async fn login(
-        client: &Client,
-        config: &InfisicalConfig,
-    ) -> Result<SecretString, ProviderError> {
-        let url = config
-            .infisical_url
-            .join("/api/v1/auth/universal-auth/login")
-            .map_err(ProviderError::Url)?;
-
-        let payload = serde_json::json!({
-            "clientId": config.infisical_client_id,
-            "clientSecret": config.infisical_client_secret.expose_secret(),
-        });
-
-        let resp = client
-            .post(url)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| ProviderError::Network(Box::new(e)))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(ProviderError::Unauthorized(format!(
-                "Infisical login failed: {} - {}",
-                status, text
-            )));
-        }
-
-        let login_resp: LoginResponse = resp
-            .json()
-            .await
-            .map_err(|e| ProviderError::Network(Box::new(e)))?;
-
-        Ok(login_resp.access_token)
     }
 
     async fn fetch_single(
@@ -123,7 +223,7 @@ impl InfisicalProvider {
             .options
             .env
             .as_ref()
-            .or(self.config.infisical_default_environment.as_ref())
+            .or(self.config.default_env.as_ref())
             .ok_or_else(|| {
                 ProviderError::InvalidConfig(format!(
                     "Missing environment for secret '{}' and no default provided",
@@ -135,7 +235,7 @@ impl InfisicalProvider {
             .options
             .project_id
             .as_ref()
-            .or(self.config.infisical_default_project_id.as_ref())
+            .or(self.config.default_project.as_ref())
             .ok_or_else(|| {
                 ProviderError::InvalidConfig(format!(
                     "Missing project_id for secret '{}' and no default provided",
@@ -147,18 +247,18 @@ impl InfisicalProvider {
             .options
             .path
             .as_ref()
-            .unwrap_or(&self.config.infisical_default_path);
+            .unwrap_or(&self.config.default_path);
 
         let secret_type: InfisicalSecretType = reference
             .options
             .secret_type
-            .unwrap_or(self.config.infisical_default_secret_type);
+            .unwrap_or(self.config.default_secret_type);
 
         let secret_name = reference.key.as_str();
 
         let url = self
             .config
-            .infisical_url
+            .url
             .join(&format!("/api/v4/secrets/{}", secret_name))
             .map_err(ProviderError::Url)?;
 
@@ -171,11 +271,13 @@ impl InfisicalProvider {
             include_imports: true,
         };
 
+        let token = self.auth.get_token().await?;
+
         let resp = self
             .client
             .get(url)
             .query(&query_params)
-            .bearer_auth(self.token.expose_secret())
+            .bearer_auth(token.expose_secret())
             .send()
             .await
             .map_err(|e| ProviderError::Network(Box::new(e)))?;
@@ -239,7 +341,7 @@ impl SecretsProvider for InfisicalProvider {
                     Err(e) => Err(e),
                 }
             })
-            .buffer_unordered(self.config.infisical_max_concurrent.into_inner())
+            .buffer_unordered(self.config.max_concurrent.into_inner())
             .collect::<Vec<_>>()
             .await;
 

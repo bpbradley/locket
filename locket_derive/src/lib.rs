@@ -397,7 +397,7 @@ fn generate_try_from_impl(
 
             fn try_from(args: #struct_name) -> Result<Self, Self::Error> {
                 use crate::config::ApplyDefaults;
-                let args = args.apply_defaults(); 
+                let args = args.apply_defaults();
                 #[allow(clippy::unnecessary_fallible_conversions)]
                 Ok(Self {
                     #(#fields),*

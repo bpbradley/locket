@@ -5,12 +5,13 @@ use crate::provider::{
 use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct InfisicalConfig {
     pub infisical_url: url::Url,
     pub infisical_client_secret: AuthToken,
-    pub infisical_client_id: String,
+    pub infisical_client_id: Uuid,
     pub infisical_default_path: InfisicalPath,
     pub infisical_default_secret_type: InfisicalSecretType,
     pub infisical_default_environment: Option<InfisicalSlug>,
@@ -35,7 +36,7 @@ pub struct InfisicalArgs {
 
     /// The client ID for Universal Auth to authenticate with Infisical.
     #[arg(long, env = "INFISICAL_CLIENT_ID")]
-    pub infisical_client_id: Option<String>,
+    pub infisical_client_id: Option<Uuid>,
 
     /// The default environment slug to use when one is not specified.
     #[arg(long, env = "INFISICAL_DEFAULT_ENVIRONMENT")]
