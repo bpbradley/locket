@@ -98,35 +98,53 @@ impl InfisicalProvider {
             include_imports: true,
         };
 
-        let token = self.auth.get_token().await?;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let token = self.auth.get_token().await?;
 
-        let resp = self
-            .client
-            .get(url)
-            .query(&query_params)
-            .bearer_auth(token.expose_secret())
-            .send()
-            .await
-            .map_err(|e| ProviderError::Network(Box::new(e)))?;
+            let resp = self
+                .client
+                .get(url.clone())
+                .query(&query_params)
+                .bearer_auth(token.expose_secret())
+                .send()
+                .await
+                .map_err(|e| ProviderError::Network(Box::new(e)))?;
 
-        match resp.status() {
-            StatusCode::OK => {
-                let wrapper: InfisicalSecretResponse = resp
-                    .json()
-                    .await
-                    .map_err(|e| ProviderError::Network(Box::new(e)))?;
-                Ok(wrapper.secret.secret_value)
-            }
-            StatusCode::NOT_FOUND => Err(ProviderError::NotFound(reference.to_string())),
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(ProviderError::Unauthorized(
-                format!("Access denied for {}", reference),
-            )),
-            s => {
-                let txt = resp.text().await.unwrap_or_default();
-                Err(ProviderError::Other(format!(
-                    "Infisical error {}: {}",
-                    s, txt
-                )))
+            match resp.status() {
+                s if s.is_success() => {
+                    let wrapper: InfisicalSecretResponse = resp
+                        .json()
+                        .await
+                        .map_err(|e| ProviderError::Network(Box::new(e)))?;
+                    return Ok(wrapper.secret.secret_value);
+                }
+                // Token may need to be refreshed
+                StatusCode::UNAUTHORIZED if attempt < 2 => {
+                    warn!(
+                        "Got Unauthorized for {}. Invalidating token and retrying...",
+                        reference.key
+                    );
+                    self.auth.invalidate(&token).await;
+                    continue;
+                }
+                StatusCode::NOT_FOUND => {
+                    return Err(ProviderError::NotFound(reference.to_string()));
+                }
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                    return Err(ProviderError::Unauthorized(format!(
+                        "Access denied for {}",
+                        reference
+                    )));
+                }
+                status => {
+                    let txt = resp.text().await.unwrap_or_default();
+                    return Err(ProviderError::Other(format!(
+                        "Infisical error {}: {}",
+                        status, txt
+                    )));
+                }
             }
         }
     }
@@ -272,6 +290,13 @@ impl InfisicalAuthenticator {
             expires_at: Instant::now() + Duration::from_secs(login_resp.expires_in),
         })
     }
+
+    async fn invalidate(&self, token: &SecretString) {
+        let mut guard = self.token.write().await;
+        if guard.access_token.expose_secret() == token.expose_secret() {
+            guard.poison();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -321,6 +346,10 @@ struct InfisicalToken {
 impl InfisicalToken {
     fn is_expired(&self) -> bool {
         self.expires_at <= Instant::now() + Duration::from_secs(60)
+    }
+    fn poison(&mut self) {
+        // Set to a point in the past so that it will be considered expired
+        self.expires_at = Instant::now() - Duration::from_secs(1);
     }
 }
 
