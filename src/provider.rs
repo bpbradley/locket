@@ -142,6 +142,9 @@ impl TryFrom<ProviderArgs> for Provider {
     type Error = crate::error::LocketError;
 
     fn try_from(args: ProviderArgs) -> Result<Self, Self::Error> {
+        use crate::config::ApplyDefaults;
+        let args = args.apply_defaults();
+        
         let kind = args.provider.ok_or_else(|| {
             crate::config::ConfigError::Validation(
                 "Missing required argument: --provider <kind>".into(),
