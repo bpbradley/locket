@@ -21,7 +21,7 @@ op = ["tokio/process", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
-infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex"]
+infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex", "dep:uuid"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
 
 # Used to compile with mock types for testing

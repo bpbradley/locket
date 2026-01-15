@@ -16,8 +16,8 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
 
-#[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
-compile_error!("At least one provider feature must be enabled (e.g. --features op,connect,bws)");
+#[cfg(not(any(feature = "op", feature = "connect", feature = "bws", feature = "infisical")))]
+compile_error!("At least one provider feature must be enabled (e.g. --features op,connect,bws,infisical)");
 
 #[cfg(feature = "bws")]
 mod bws;

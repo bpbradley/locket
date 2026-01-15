@@ -20,6 +20,17 @@ services:
                 bws-token: file:/etc/tokens/bws
                 env:
                     - TEXT={{814d7d9a-54a5-47a0-afc0-b3a7015213c4}}
+    locket-infisical:
+        provider:
+            type: locket
+            options:
+                provider: infisical
+                infisical-client-secret: file:/etc/tokens/infisical
+                infisical-client-id: "db63bd8b-4972-4c1e-b047-8ef3482b5666"
+                infisical-default-project-id: "0667e4a5-2168-4a63-8800-31475718ae85"
+                infisical-default-environment: "dev"
+                env:
+                    - TEXT={{infisical:///SECRET}}
     demo:
         image: busybox
         user: "1000:1000"
@@ -27,3 +38,4 @@ services:
         depends_on:
             - locket-op
             - locket-bws
+            - locket-infisical

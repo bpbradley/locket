@@ -5,11 +5,11 @@ variable "IMAGE"         { default = "locket" }
 variable "PLATFORMS"     { default = "linux/amd64" }
 
 group "release" {
-  targets = ["connect", "op", "bws", "aio"]
+  targets = ["connect", "op", "bws", "infisical", "aio"]
 }
 
 group "all" {
-  targets = ["connect", "op", "bws", "aio", "debug"]
+  targets = ["connect", "op", "bws", "infisical", "aio", "debug"]
 }
 
 target "_common" {
@@ -47,7 +47,7 @@ target "op" {
   inherits = ["_common"]
   target = "op"
   args = {
-    FEATURES = "op"
+    FEATURES = "op,exec"
     DEFAULT_PROVIDER = "op"
   }
   tags = tags_for("op")
@@ -58,7 +58,7 @@ target "connect" {
   inherits = ["_common"]
   target = "base"
   args = {
-    FEATURES = "connect"
+    FEATURES = "connect,exec"
     DEFAULT_PROVIDER = "op-connect"
   }
   tags = tags_for("connect")
@@ -69,10 +69,21 @@ target "bws" {
   inherits = ["_common"]
   target = "base"
   args = {
-    FEATURES = "bws"
+    FEATURES = "bws,exec"
     DEFAULT_PROVIDER = "bws"
   }
   tags = tags_for("bws")
+  labels = { "org.opencontainers.image.version" = VERSION }
+}
+
+target "infisical" {
+  inherits = ["_common"]
+  target = "base"
+  args = {
+    FEATURES = "infisical,exec"
+    DEFAULT_PROVIDER = "infisical"
+  }
+  tags = tags_for("infisical")
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
@@ -80,7 +91,7 @@ target "aio" {
   inherits = ["_common"]
   target = "aio"
   args = {
-    FEATURES = "op,connect,bws"
+    FEATURES = "op,connect,bws,infisical,exec"
   }
   tags = tags_main()
   labels = { "org.opencontainers.image.version" = VERSION }
@@ -90,7 +101,7 @@ target "debug" {
   inherits = ["_common"]
   target = "debug"
   args = {
-    FEATURES = "op,connect,bws"
+    FEATURES = "op,connect,bws,infisical,exec"
   }
   tags = [
     "${REGISTRY}/${IMAGE}:${VERSION}-debug",
