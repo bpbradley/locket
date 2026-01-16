@@ -23,7 +23,8 @@ RUN addgroup -g 65532 nonroot \
 RUN grep -E '^(root|nonroot)' /etc/passwd > /etc/passwd.min \
     && grep -E '^(root|nonroot)' /etc/group > /etc/group.min
 
-RUN install -d -m 1777 /tmp \
+RUN install -d -m 0755 skeleton \
+    && install -d -m 1777 /skeleton/tmp \
     && install -d -m 0755 /etc/ssl/certs \
     && install -d -m 0755 /usr/local/bin \
     && install -d -m 0755 /home/nonroot && chown nonroot:nonroot /home/nonroot \
@@ -33,11 +34,12 @@ RUN install -d -m 1777 /tmp \
     && install -d -m 0700 /config/op && chown nonroot:nonroot /config/op \
     && apk add --no-cache ca-certificates
 
-COPY docker/locket.toml /tmp/locket.toml
+COPY docker/locket.toml /staging/locket.toml
 
-RUN mv /tmp/locket.toml /etc/locket/locket.toml \
+RUN mv /staging/locket.toml /etc/locket/locket.toml \
     && chown nonroot:nonroot /etc/locket/locket.toml \
-    && chmod 644 /etc/locket/locket.toml
+    && chmod 644 /etc/locket/locket.toml \
+    && rmdir /staging
 
 RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
 
@@ -53,13 +55,13 @@ ENV PATH=/usr/local/bin \
     XDG_CONFIG_HOME=/config \
     HOME=/home/nonroot
 
+COPY --from=rootfs /skeleton /
 COPY --from=rootfs /ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=rootfs /etc/passwd /etc/passwd
 COPY --from=rootfs /etc/group /etc/group
 COPY --from=rootfs --chown=nonroot:nonroot /home/nonroot /home/nonroot
 COPY --from=rootfs --chown=nonroot:nonroot /templates /templates
 COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
-COPY --from=rootfs --chmod=1777 /tmp /tmp
 COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
 COPY --from=rootfs --chown=nonroot:nonroot /etc/locket /etc/locket

@@ -21,6 +21,10 @@ description = "docker build dev image"
 path = "docker"
 cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake --allow=fs.read=.. -f docker-bake.hcl all --load"
 
+[docker-op]
+path = "docker"
+cmd = "docker compose -f compose.test.yaml up"
+
 [docker-test-dbg]
 description = "Run test of docker image"
 cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoint /bin/sh locket"
