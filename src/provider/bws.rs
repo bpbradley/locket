@@ -25,57 +25,9 @@ use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
 
-/// BWS SDK URL wrapper
-/// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
-/// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct BwsUrl(Url);
-
-impl BwsUrl {
-    /// Get the URL as a string, stripping any trailing slash
-    /// This is needed because the BWS SDK does not accept URLs with trailing slashes
-    pub fn as_bws_string(&self) -> &str {
-        let s = self.0.as_str();
-        s.strip_suffix('/').unwrap_or(s)
-    }
-}
-
-impl std::str::FromStr for BwsUrl {
-    type Err = ProviderError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(BwsUrl(Url::parse(s)?))
-    }
-}
-
-impl std::fmt::Display for BwsUrl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_bws_string())
-    }
-}
-
-impl AsRef<str> for BwsUrl {
-    fn as_ref(&self) -> &str {
-        self.as_bws_string()
-    }
-}
-
-impl From<Url> for BwsUrl {
-    fn from(url: Url) -> Self {
-        BwsUrl(url)
-    }
-}
-
 pub struct BwsProvider {
     client: Client,
     max_concurrent: ConcurrencyLimit,
-}
-
-impl ReferenceParser for BwsProvider {
-    fn parse(&self, raw: &str) -> Option<SecretReference> {
-        BwsReference::from_str(raw).ok().map(SecretReference::Bws)
-    }
 }
 
 impl BwsProvider {
@@ -104,6 +56,12 @@ impl BwsProvider {
             client,
             max_concurrent: cfg.bws_max_concurrent,
         })
+    }
+}
+
+impl ReferenceParser for BwsProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        BwsReference::from_str(raw).ok().map(SecretReference::Bws)
     }
 }
 
@@ -153,5 +111,47 @@ impl SecretsProvider for BwsProvider {
         }
 
         Ok(map)
+    }
+}
+
+/// BWS SDK URL wrapper
+/// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
+/// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BwsUrl(Url);
+
+impl BwsUrl {
+    /// Get the URL as a string, stripping any trailing slash
+    /// This is needed because the BWS SDK does not accept URLs with trailing slashes
+    pub fn as_bws_string(&self) -> &str {
+        let s = self.0.as_str();
+        s.strip_suffix('/').unwrap_or(s)
+    }
+}
+
+impl std::str::FromStr for BwsUrl {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(BwsUrl(Url::parse(s)?))
+    }
+}
+
+impl std::fmt::Display for BwsUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_bws_string())
+    }
+}
+
+impl AsRef<str> for BwsUrl {
+    fn as_ref(&self) -> &str {
+        self.as_bws_string()
+    }
+}
+
+impl From<Url> for BwsUrl {
+    fn from(url: Url) -> Self {
+        BwsUrl(url)
     }
 }

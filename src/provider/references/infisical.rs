@@ -1,3 +1,14 @@
+//! Defines the Infisical secret reference syntax and parsing logic.
+//!
+//! Since infisical does not have a native secret reference syntax, this defines
+//! a URI based scheme
+//!
+//! `infisical:///<secret-key>?env=<env-slug>&path=<path>&project_id=<project-uuid>&type=<secret-type>`
+//!
+//! * The URI prefix is used to disambiguate from other providers.
+//! * The secret key is required and is encoded in the path component.
+//! * The environment slug, path, project ID, and secret type are optional query parameters, which override defaults.
+//!
 use super::SecretReference;
 use clap::ValueEnum;
 use percent_encoding::percent_decode_str;
@@ -67,66 +78,6 @@ pub struct InfisicalReference {
     pub options: InfisicalOptions,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct InfisicalOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<InfisicalSlug>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<InfisicalPath>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<InfisicalProjectId>,
-
-    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
-    pub secret_type: Option<InfisicalSecretType>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct InfisicalSlug(String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct InfisicalSecretKey(String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct InfisicalProjectId(Uuid);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct InfisicalPath(String);
-
-#[derive(Debug, Serialize, Default, Deserialize, Clone, PartialEq, Eq, Hash, ValueEnum, Copy)]
-#[serde(rename_all = "lowercase")]
-pub enum InfisicalSecretType {
-    #[default]
-    Shared,
-    Personal,
-}
-
-impl std::fmt::Display for InfisicalSecretType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
-    }
-}
-
-impl<'a> TryFrom<&'a SecretReference> for &'a InfisicalReference {
-    type Error = ();
-
-    #[allow(irrefutable_let_patterns)]
-    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
-        if let SecretReference::Infisical(inf) = value {
-            Ok(inf)
-        } else {
-            Err(())
-        }
-    }
-}
-
 impl FromStr for InfisicalReference {
     type Err = InfisicalParseError;
 
@@ -176,6 +127,66 @@ impl fmt::Display for InfisicalReference {
         }
 
         write!(f, "{}", url)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct InfisicalOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<InfisicalSlug>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<InfisicalPath>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<InfisicalProjectId>,
+
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub secret_type: Option<InfisicalSecretType>,
+}
+
+impl<'a> TryFrom<&'a SecretReference> for &'a InfisicalReference {
+    type Error = ();
+
+    #[allow(irrefutable_let_patterns)]
+    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
+        if let SecretReference::Infisical(inf) = value {
+            Ok(inf)
+        } else {
+            Err(())
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct InfisicalSlug(String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InfisicalSecretKey(String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct InfisicalProjectId(Uuid);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct InfisicalPath(String);
+
+#[derive(Debug, Serialize, Default, Deserialize, Clone, PartialEq, Eq, Hash, ValueEnum, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum InfisicalSecretType {
+    #[default]
+    Shared,
+    Personal,
+}
+
+impl std::fmt::Display for InfisicalSecretType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
     }
 }
 

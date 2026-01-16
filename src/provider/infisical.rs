@@ -1,4 +1,10 @@
 //! Infisical provider implementation.
+//!
+//! Uses the Infisical v4 API to fetch secrets
+//! and the v1 Univeral Auth API for authentication.
+//!
+//! The authentication token is lazily refreshed when it expires
+//! and it will gracefully handle rotating authentication when request limit is reached
 
 use super::{
     ConcurrencyLimit, ProviderError, SecretsProvider,
@@ -120,7 +126,8 @@ impl InfisicalProvider {
                         .map_err(|e| ProviderError::Network(Box::new(e)))?;
                     return Ok(wrapper.secret.secret_value);
                 }
-                // Token may need to be refreshed
+                // Token may need to be refreshed. Try invalidating the token
+                // to trigger a rotation and try again
                 StatusCode::UNAUTHORIZED if attempt < 2 => {
                     warn!(
                         "Got Unauthorized for {}. Invalidating token and retrying...",
@@ -205,6 +212,13 @@ impl SecretsProvider for InfisicalProvider {
     }
 }
 
+/// Handles authentication and token renewal for Infisical
+///
+/// Tokens are automatically renewed when they expire or when
+/// intentionally invalidated.
+///
+/// Uses Universal Auth method for authentication, and the token
+/// is held in a RwLock to allow concurrent reads and exclusive writes
 struct InfisicalAuthenticator {
     client: Client,
     config: AuthConfig,
@@ -287,7 +301,7 @@ impl InfisicalAuthenticator {
 
         Ok(InfisicalToken {
             access_token: login_resp.access_token,
-            expires_at: Instant::now() + Duration::from_secs(login_resp.expires_in),
+            expiry: Instant::now() + Duration::from_secs(login_resp.expires_in),
         })
     }
 
@@ -340,16 +354,16 @@ impl From<InfisicalConfig> for (AuthConfig, ProviderConfig) {
 #[derive(Debug, Clone)]
 struct InfisicalToken {
     access_token: SecretString,
-    expires_at: Instant,
+    expiry: Instant,
 }
 
 impl InfisicalToken {
     fn is_expired(&self) -> bool {
-        self.expires_at <= Instant::now() + Duration::from_secs(60)
+        self.expiry <= Instant::now() + Duration::from_secs(60)
     }
     fn poison(&mut self) {
         // Set to a point in the past so that it will be considered expired
-        self.expires_at = Instant::now() - Duration::from_secs(1);
+        self.expiry = Instant::now() - Duration::from_secs(1);
     }
 }
 

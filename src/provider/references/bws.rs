@@ -5,15 +5,8 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 /// Represents a syntactically valid Bitwarden Secrets Manager secret reference.
-/// Syntax: `<uuid>`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BwsReference(Uuid);
-
-impl std::fmt::Display for BwsReference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 impl FromStr for BwsReference {
     type Err = ReferenceParseError;
@@ -21,6 +14,12 @@ impl FromStr for BwsReference {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let uuid = Uuid::parse_str(s)?;
         Ok(BwsReference(uuid))
+    }
+}
+
+impl std::fmt::Display for BwsReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
