@@ -6,7 +6,7 @@ It uses the [Infisical API](https://infisical.com/docs/api-reference/overview/in
 ## Reference syntax.
 
 Infisical does not have a native secret reference syntax like other providers. It is fundamentally
-unique in how it organizes secrets. Secrets must be part of a project and an environment, and they will have a path (either at the root of the project, or nested internally). They may also be a shared secret, or a personaly one. So in order to make secret referencing work within locket, we define a custom URI scheme to reference secrets stored in Infisical:
+unique in how it organizes secrets. Secrets must be part of a project and an environment, and they will have a path (either at the root of the project, or nested internally). They may also be a shared secret, or a personal one. So in order to make secret referencing work within locket, we define a custom URI scheme:
 
 `infisical:///<secret-key>?env=<env-slug>&path=</path/to/folder>&project_id=<project-uuid>&type=<secret-type[shared | personal]>`
 
