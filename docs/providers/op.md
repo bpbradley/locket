@@ -22,6 +22,16 @@ If these issues are not satisfactory, the [1password connect provider](./connect
 
 [Full configuration reference](../inject.md#1password-op)
 
+```sh
+locket inject --provider op \
+  --op-token file:/path/to/token \\
+  --out /run/secrets/locket \
+  --secret name={{op://Vault/Secret/Section/Item}}
+  --secret /path/to/secrets.yaml \
+  --secret auth_key=@key.pem \
+  --map ./tpl:/run/secrets/locket/mapped 
+```
+
 # Example `locket inject` Configuration
 
 ```yaml

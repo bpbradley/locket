@@ -9,6 +9,17 @@ This provider is based on a [1password Connect](https://developer.1password.com/
 1. [Create an access token](https://developer.1password.com/docs/connect/manage-connect#create-a-token)
 1. Configure locket with your reachable connect host URL, and your authentication token. [Configuration Reference](../inject.md#1password-connect)
 
+```sh
+locket inject --provider op-connect \
+  --connect-token file:/path/to/token \
+  --connect-host https://connect.example.com \
+  --out /run/secrets/locket \
+  --secret name={{op://Vault/Secret/Section/Item}}
+  --secret /path/to/secrets.yaml \
+  --secret auth_key=@key.pem \
+  --map ./tpl:/run/secrets/locket/mapped 
+```
+
 ## Example `locket inject` Configuration
 
 ```yaml

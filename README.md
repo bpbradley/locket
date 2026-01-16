@@ -27,6 +27,7 @@ locket is a versatile tool and it supports various forms of secrets injection.
 1. [1password Connect](./docs/providers/connect.md)
 2. [1password Service Accounts](./docs/providers/op.md)
 3. [Bitwarden Secrets Manager](./docs/providers/bws.md)
+4. [Infisical](./docs/providers/infisical.md)
 
 > [!TIP]
 > Each provider has its own docker image for sidecar mode, if a slim version is preferred. The `latest` tag bundles all providers and their respective dependencies. But a provider specific tag like `locket:connect` is only about 4MB and has no extra dependencies besides what is needed for the connect provider.
@@ -319,12 +320,6 @@ volumes:
 
 ## Roadmap
 
-### Before v1.0.0
-
-1. Have support for at least 4 providers
 1. **Templating Engine**: Adding attributes to the secret reference which can transform secrets before injection. For example `{{ secret_reference | base64 }}` to encode the secret as base64, or `{{ secret_reference | totp }}` to interpret the secret as a totp code.
-
-### Beyond
-
 1. **Docker Engine Plugin**: Support for locket as a native Docker Engine plugin will allow direct creation of Docker volumes using locket.
 1. **Swarm Operator**: Native integration for Docker Swarm secrets.
