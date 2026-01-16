@@ -396,6 +396,8 @@ fn generate_try_from_impl(
             type Error = crate::error::LocketError;
 
             fn try_from(args: #struct_name) -> Result<Self, Self::Error> {
+                use crate::config::ApplyDefaults;
+                let args = args.apply_defaults();
                 #[allow(clippy::unnecessary_fallible_conversions)]
                 Ok(Self {
                     #(#fields),*

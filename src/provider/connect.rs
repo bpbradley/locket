@@ -28,138 +28,12 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use url::Url;
 
-#[derive(Debug, Deserialize)]
-struct VaultResponse {
-    id: VaultId,
-}
-
-#[derive(Debug, Deserialize)]
-struct ItemResponse {
-    id: ItemId,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConnectItemDetail {
-    fields: Option<Vec<ConnectField>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConnectField {
-    id: String,
-    label: Option<String>,
-    value: Option<SecretString>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    message: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
-#[serde(transparent)]
-struct OpUuid(String);
-
-impl fmt::Display for OpUuid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for OpUuid {
-    type Err = ProviderError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() == 26
-            && s.chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        {
-            Ok(Self(s.to_string()))
-        } else {
-            Err(ProviderError::InvalidId(format!("invalid id '{}'", s)))
-        }
-    }
-}
-
-impl AsRef<str> for OpUuid {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
-#[serde(transparent)]
-struct VaultId(OpUuid);
-
-impl fmt::Display for VaultId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl FromStr for VaultId {
-    type Err = ProviderError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        OpUuid::from_str(s)
-            .map(Self)
-            .map_err(|_| ProviderError::InvalidId(format!("invalid vault id '{}'", s)))
-    }
-}
-
-impl AsRef<str> for VaultId {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
-#[serde(transparent)]
-struct ItemId(OpUuid);
-
-impl fmt::Display for ItemId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl FromStr for ItemId {
-    type Err = ProviderError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        OpUuid::from_str(s)
-            .map(Self)
-            .map_err(|_| ProviderError::InvalidId(format!("invalid item id '{}'", s)))
-    }
-}
-
-impl AsRef<str> for ItemId {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-/// Cache for Name -> UUID resolution to minimize API calls
-#[derive(Default, Debug)]
-struct ResolutionCache {
-    vaults: HashMap<String, VaultId>,
-    items: HashMap<(VaultId, String), ItemId>,
-}
-
 pub struct OpConnectProvider {
     client: Client,
     host: Url,
     token: AuthToken,
     cache: Arc<Mutex<ResolutionCache>>,
     max_concurrent: ConcurrencyLimit,
-}
-
-#[cfg(any(feature = "op", feature = "connect"))]
-impl ReferenceParser for OpConnectProvider {
-    fn parse(&self, raw: &str) -> Option<SecretReference> {
-        OpReference::from_str(raw)
-            .ok()
-            .map(SecretReference::OnePassword)
-    }
 }
 
 impl OpConnectProvider {
@@ -403,6 +277,14 @@ impl OpConnectProvider {
     }
 }
 
+impl ReferenceParser for OpConnectProvider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        OpReference::parse(raw)
+            .ok()
+            .map(SecretReference::OnePassword)
+    }
+}
+
 #[async_trait]
 impl SecretsProvider for OpConnectProvider {
     async fn fetch_map(
@@ -451,4 +333,121 @@ impl SecretsProvider for OpConnectProvider {
 
         Ok(map)
     }
+}
+
+/// Cache for Name -> UUID resolution to minimize API calls
+#[derive(Default, Debug)]
+struct ResolutionCache {
+    vaults: HashMap<String, VaultId>,
+    items: HashMap<(VaultId, String), ItemId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct OpUuid(String);
+
+impl fmt::Display for OpUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for OpUuid {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() == 26
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            Ok(Self(s.to_string()))
+        } else {
+            Err(ProviderError::InvalidId(format!("invalid id '{}'", s)))
+        }
+    }
+}
+
+impl AsRef<str> for OpUuid {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct VaultId(OpUuid);
+
+impl fmt::Display for VaultId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for VaultId {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        OpUuid::from_str(s)
+            .map(Self)
+            .map_err(|_| ProviderError::InvalidId(format!("invalid vault id '{}'", s)))
+    }
+}
+
+impl AsRef<str> for VaultId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+struct ItemId(OpUuid);
+
+impl fmt::Display for ItemId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for ItemId {
+    type Err = ProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        OpUuid::from_str(s)
+            .map(Self)
+            .map_err(|_| ProviderError::InvalidId(format!("invalid item id '{}'", s)))
+    }
+}
+
+impl AsRef<str> for ItemId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultResponse {
+    id: VaultId,
+}
+
+#[derive(Debug, Deserialize)]
+struct ItemResponse {
+    id: ItemId,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConnectItemDetail {
+    fields: Option<Vec<ConnectField>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConnectField {
+    id: String,
+    label: Option<String>,
+    value: Option<SecretString>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponse {
+    message: Option<String>,
 }

@@ -42,7 +42,7 @@ locket exec --provider bws --bws-token=file:/path/to/token \
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
@@ -65,6 +65,18 @@ locket exec --provider bws --bws-token=file:/path/to/token \
 | `--bws-identity-url` | `BWS_IDENTITY_URL` | `https://identity.bitwarden.com` | Bitwarden Identity URL |
 | `--bws-max-concurrent` | `BWS_MAX_CONCURRENT` | `20` | Maximum number of concurrent requests to Bitwarden Secrets Manager |
 | `--bws-user-agent` | `BWS_USER_AGENT` | `locket` | BWS User Agent |
+### Infisical Secrets Provider
+
+| Command | Env | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--infisical-client-secret` | `INFISICAL_CLIENT_SECRET` |  | The client secret for Universal Auth to authenticate with Infisical.<br><br>Either provide the token directly or via a file with `file:` prefix |
+| `--infisical-client-id` | `INFISICAL_CLIENT_ID` |  | The client ID for Universal Auth to authenticate with Infisical |
+| `--infisical-default-environment` | `INFISICAL_DEFAULT_ENVIRONMENT` |  | The default environment slug to use when one is not specified |
+| `--infisical-default-project-id` | `INFISICAL_DEFAULT_PROJECT_ID` |  | The default project ID to use when one is not specified |
+| `--infisical-url` | `INFISICAL_URL` | `https://us.infisical.com` | The URL of the Infisical instance to connect to |
+| `--infisical-default-path` | `INFISICAL_DEFAULT_PATH` | `/` | The default path to use when one is not specified |
+| `--infisical-default-secret-type` | `INFISICAL_DEFAULT_SECRET_TYPE` | `shared` | The default secret type to use when one is not specified <br><br> **Choices:**<br>- `shared`<br>- `personal` |
+| `--infisical-max-concurrent` | `INFISICAL_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Infisical API |
 
 ## TOML Reference
 
@@ -183,6 +195,30 @@ bws-user-agent = "locket"
 
 # Bitwarden Machine Token
 # bws-token = ...
+
+# The URL of the Infisical instance to connect to
+infisical-url = "https://us.infisical.com/"
+
+# The client secret for Universal Auth to authenticate with Infisical
+# infisical-client-secret = ...
+
+# The client ID for Universal Auth to authenticate with Infisical
+# infisical-client-id = ...
+
+# The default environment slug to use when one is not specified
+# infisical-default-environment = ...
+
+# The default project ID to use when one is not specified
+# infisical-default-project-id = ...
+
+# The default path to use when one is not specified
+infisical-default-path = "/"
+
+# The default secret type to use when one is not specified
+infisical-default-secret-type = "shared"
+
+# Maximum allowed concurrent requests to Infisical API
+infisical-max-concurrent = 20
 
 cmd = []
 

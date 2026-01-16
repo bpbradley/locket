@@ -3,6 +3,7 @@ use super::SecretReference;
 use percent_encoding::percent_decode_str;
 use std::str::FromStr;
 use thiserror::Error;
+use tracing::warn;
 
 #[cfg(any(feature = "op", feature = "connect"))]
 #[derive(Debug, Error)]
@@ -38,33 +39,6 @@ pub struct OpReference {
     pub item: String,
     pub section: Option<String>,
     pub field: String,
-}
-
-// TODO: consider going to derive_more to reduce boilerplate,
-// which could help with other impls too.
-impl<'a> TryFrom<&'a SecretReference> for &'a OpReference {
-    type Error = ();
-
-    #[allow(irrefutable_let_patterns)]
-    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
-        if let SecretReference::OnePassword(op) = value {
-            Ok(op)
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl OpReference {
-    pub fn as_str(&self) -> &str {
-        &self.raw
-    }
-}
-
-impl std::fmt::Display for OpReference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.raw)
-    }
 }
 
 impl FromStr for OpReference {
@@ -117,6 +91,38 @@ impl FromStr for OpReference {
             section: section.map(|s| s.to_string()),
             field: field.to_string(),
         })
+    }
+}
+
+impl OpReference {
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
+    pub fn parse(raw: &str) -> Result<Self, OpParseError> {
+        Self::from_str(raw).inspect_err(|e| {
+            if !matches!(e, OpParseError::InvalidScheme) {
+                warn!("Invalid reference '{}': {}", raw, e);
+            }
+        })
+    }
+}
+
+impl<'a> TryFrom<&'a SecretReference> for &'a OpReference {
+    type Error = ();
+
+    #[allow(irrefutable_let_patterns)]
+    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
+        if let SecretReference::OnePassword(op) = value {
+            Ok(op)
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl std::fmt::Display for OpReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.raw)
     }
 }
 

@@ -62,6 +62,10 @@ services:
             - out-op:/run/secrets/locket
             - op-cfg:/config:rw
             - /etc/passwd:/etc/passwd:ro
+            - type: tmpfs
+              target: /tmp
+              tmpfs:
+                  mode: 01777
         command:
             - "--log-level=debug"
             - "--op-token=file:/run/secrets/op_token"
@@ -91,6 +95,30 @@ services:
             - "--secret=my_secret=3832b656-a93b-45ad-bdfa-b267016802c3"
             - "--secret=my_other_secret={{ 3832b656-a93b-45ad-bdfa-b267016802c3 }}"
             - "--inject-failure-policy=error"
+    locket-infisical:
+        image: ghcr.io/bpbradley/locket:infisical
+        user: "1000:1000"
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
+        container_name: locket-infisical
+        secrets:
+            - infisical_token
+        volumes:
+            - ./secrets/infisical:/templates:ro
+            - out-infisical:/run/secrets/locket
+        command:
+            - "--log-level=debug"
+            - "--infisical-client-secret=file:/run/secrets/infisical_token"
+            - "--infisical-client-id=db63bd8b-4972-4c1e-b047-8ef3482b5666"
+            - "--infisical-default-project-id=0667e4a5-2168-4a63-8800-31475718ae85"
+            - "--infisical-default-environment=dev"
+            - "--map=/templates/config:/run/secrets/locket/config"
+            - "--map=/templates/secret.txt:/run/secrets/locket/secret.txt"
+            - "--secret=my_secret=3832b656-a93b-45ad-bdfa-b267016802c3"
+            - "--secret=my_other_secret={{ 3832b656-a93b-45ad-bdfa-b267016802c3 }}"
+            - "--inject-failure-policy=error"
     observer:
         image: alpine:latest
         container_name: observer
@@ -103,12 +131,15 @@ services:
                 condition: service_healthy
             locket-aio:
                 condition: service_healthy
+            locket-infisical:
+                condition: service_healthy
         volumes:
             - ./verify.sh:/verify.sh:ro
             - out-connect:/out/1password-connect:ro
             - out-op:/out/1password-cli:ro
             - out-bws:/out/bitwarden:ro
             - out-aio:/out/aio:ro
+            - out-infisical:/out/infisical:ro
         command: ["/bin/sh", "/verify.sh"]
 
 secrets:
@@ -118,6 +149,8 @@ secrets:
         file: /etc/tokens/connect
     bws_token:
         file: /etc/tokens/bws
+    infisical_token:
+        file: /etc/tokens/infisical
 
 volumes:
     op-cfg:
@@ -161,6 +194,16 @@ volumes:
                 },
         }
     out-aio:
+        {
+            driver: local,
+            driver_opts:
+                {
+                    type: tmpfs,
+                    device: tmpfs,
+                    o: "uid=1000,gid=1000,mode=0700",
+                },
+        }
+    out-infisical:
         {
             driver: local,
             driver_opts:

@@ -16,14 +16,23 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
 
-#[cfg(not(any(feature = "op", feature = "connect", feature = "bws")))]
-compile_error!("At least one provider feature must be enabled (e.g. --features op,connect,bws)");
+#[cfg(not(any(
+    feature = "op",
+    feature = "connect",
+    feature = "bws",
+    feature = "infisical"
+)))]
+compile_error!(
+    "At least one provider feature must be enabled (e.g. --features op,connect,bws,infisical)"
+);
 
 #[cfg(feature = "bws")]
 mod bws;
 pub mod config;
 #[cfg(feature = "connect")]
 mod connect;
+#[cfg(feature = "infisical")]
+mod infisical;
 #[cfg(feature = "op")]
 mod op;
 mod references;
@@ -102,6 +111,8 @@ pub enum Provider {
     Connect(config::connect::ConnectConfig),
     #[cfg(feature = "bws")]
     Bws(config::bws::BwsConfig),
+    #[cfg(feature = "infisical")]
+    Infisical(config::infisical::InfisicalConfig),
 }
 
 impl Provider {
@@ -113,6 +124,8 @@ impl Provider {
             Self::Connect(c) => Arc::new(connect::OpConnectProvider::new(c).await?),
             #[cfg(feature = "bws")]
             Self::Bws(c) => Arc::new(bws::BwsProvider::new(c).await?),
+            #[cfg(feature = "infisical")]
+            Self::Infisical(c) => Arc::new(infisical::InfisicalProvider::new(c).await?),
         };
 
         Ok(provider)
@@ -136,6 +149,9 @@ impl TryFrom<ProviderArgs> for Provider {
     type Error = crate::error::LocketError;
 
     fn try_from(args: ProviderArgs) -> Result<Self, Self::Error> {
+        use crate::config::ApplyDefaults;
+        let args = args.apply_defaults();
+
         let kind = args.provider.ok_or_else(|| {
             crate::config::ConfigError::Validation(
                 "Missing required argument: --provider <kind>".into(),
@@ -149,6 +165,8 @@ impl TryFrom<ProviderArgs> for Provider {
             ProviderKind::Op => Ok(Provider::Op(args.config.op.try_into()?)),
             #[cfg(feature = "connect")]
             ProviderKind::OpConnect => Ok(Provider::Connect(args.config.connect.try_into()?)),
+            #[cfg(feature = "infisical")]
+            ProviderKind::Infisical => Ok(Provider::Infisical(args.config.infisical.try_into()?)),
         }
     }
 }
@@ -165,6 +183,9 @@ pub enum ProviderKind {
     /// Bitwarden Secrets Provider
     #[cfg(feature = "bws")]
     Bws,
+    /// Infisical Secrets Provider
+    #[cfg(feature = "infisical")]
+    Infisical,
 }
 
 #[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
@@ -184,6 +205,11 @@ pub struct ProviderConfigs {
     #[command(flatten, next_help_heading = "Bitwarden Secrets Provider")]
     #[serde(flatten)]
     pub bws: config::bws::BwsArgs,
+
+    #[cfg(feature = "infisical")]
+    #[command(flatten, next_help_heading = "Infisical Secrets Provider")]
+    #[serde(flatten)]
+    pub infisical: config::infisical::InfisicalArgs,
 }
 
 /// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
@@ -222,6 +248,12 @@ impl Serialize for AuthToken {
     {
         // Do not expose the actual token.
         serializer.serialize_str("[REDACTED]")
+    }
+}
+
+impl From<AuthToken> for SecretString {
+    fn from(token: AuthToken) -> Self {
+        token.0
     }
 }
 

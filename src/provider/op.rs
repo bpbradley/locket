@@ -18,7 +18,6 @@ use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::str::FromStr;
 use tokio::process::Command;
 
 pub struct OpProvider {
@@ -63,10 +62,9 @@ impl OpProvider {
     }
 }
 
-#[cfg(any(feature = "op", feature = "connect"))]
 impl ReferenceParser for OpProvider {
     fn parse(&self, raw: &str) -> Option<SecretReference> {
-        OpReference::from_str(raw)
+        OpReference::parse(raw)
             .ok()
             .map(SecretReference::OnePassword)
     }

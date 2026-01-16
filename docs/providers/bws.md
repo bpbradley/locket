@@ -9,6 +9,14 @@ This provider is based on the [Bitwarden Secrets Manager](https://bitwarden.com/
 1. [Add a machine account with access to desired secrets / projects](https://bitwarden.com/help/secrets-manager-quick-start/#add-a-machine-account)
 1. Configure locket with your machine token. [Configuration Reference](../inject.md#bitwarden-secrets-provider)
 
+```sh
+locket inject --provider bws --bws-token=file:/path/to/token
+    --out /run/secrets/locket
+    --secret=/path/to/secrets.yaml
+    --secret=auth_key=@key.pem
+    --map ./tpl:/run/secrets/locket/mapped
+```
+
 ## Example `locket inject` Configuration
 
 ```yaml

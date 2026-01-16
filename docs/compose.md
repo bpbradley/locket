@@ -23,7 +23,7 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
 | `--env-file` | `LOCKET_ENV_FILE` |  | Files containing environment variables which may contain secret references |
 | `--env` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
 | `<service>` |  |  | Service name from Docker Compose |
@@ -49,6 +49,18 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | `--bws-max-concurrent` | `BWS_MAX_CONCURRENT` |  | Maximum number of concurrent requests to Bitwarden Secrets Manager |
 | `--bws-user-agent` | `BWS_USER_AGENT` |  | BWS User Agent |
 | `--bws-token` | `BWS_MACHINE_TOKEN` |  | Bitwarden Machine Token<br><br>Either provide the token directly or via a file with `file:` prefix |
+### Infisical Secrets Provider
+
+| Command | Env | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--infisical-url` | `INFISICAL_URL` |  | The URL of the Infisical instance to connect to |
+| `--infisical-client-secret` | `INFISICAL_CLIENT_SECRET` |  | The client secret for Universal Auth to authenticate with Infisical.<br><br>Either provide the token directly or via a file with `file:` prefix |
+| `--infisical-client-id` | `INFISICAL_CLIENT_ID` |  | The client ID for Universal Auth to authenticate with Infisical |
+| `--infisical-default-environment` | `INFISICAL_DEFAULT_ENVIRONMENT` |  | The default environment slug to use when one is not specified |
+| `--infisical-default-project-id` | `INFISICAL_DEFAULT_PROJECT_ID` |  | The default project ID to use when one is not specified |
+| `--infisical-default-path` | `INFISICAL_DEFAULT_PATH` |  | The default path to use when one is not specified |
+| `--infisical-default-secret-type` | `INFISICAL_DEFAULT_SECRET_TYPE` |  | The default secret type to use when one is not specified <br><br> **Choices:**<br>- `shared`<br>- `personal` |
+| `--infisical-max-concurrent` | `INFISICAL_MAX_CONCURRENT` |  | Maximum allowed concurrent requests to Infisical API |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `debug` | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
 
 ---
