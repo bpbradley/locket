@@ -2,6 +2,7 @@
 name: volume-demo
 services:
     demo:
+        user: 1000:1000
         image: busybox
         command: ["sh", "-c", "cat /run/secrets/locket/.env && sleep 120"]
         volumes:
@@ -10,5 +11,6 @@ volumes:
     locket-volume:
         driver: locket
         driver_opts:
+            user: 1000:1000
             secret: /home/bbradley/git/locket/secrets/op/templates/.env
             watch: "true"

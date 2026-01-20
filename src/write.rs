@@ -7,11 +7,13 @@
 use crate::path::{AbsolutePath, CanonicalPath};
 use clap::Args;
 use locket_derive::LayeredConfig;
+use nix::unistd::{Gid, Uid};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -41,6 +43,21 @@ pub enum FsModeError {
 
     #[error("permission mode 0o{0:o} exceeds limit 0o7777")]
     ValueTooLarge(u32),
+
+    #[error("invalid owner format '{0}', expected 'uid:gid'")]
+    InvalidOwner(String),
+
+    #[error("invalid uid '{input}': {source}")]
+    InvalidUid {
+        input: String,
+        source: std::num::ParseIntError,
+    },
+
+    #[error("invalid gid '{input}': {source}")]
+    InvalidGid {
+        input: String,
+        source: std::num::ParseIntError,
+    },
 }
 
 /// Utilities for writing files atomically with explicit permissions.
@@ -56,6 +73,14 @@ pub struct FileWriterArgs {
     #[clap(long, env = "LOCKET_DIR_MODE")]
     #[locket(default = FsMode::new(0o700))]
     dir_mode: Option<FsMode>,
+
+    /// Owner of the file/dir
+    ///
+    /// Defaults to the running user/group.
+    /// The running user must have write permissions on the directory to change the owner.
+    #[clap(long, env = "LOCKET_FILE_OWNER")]
+    #[locket(optional)]
+    user: Option<FsOwner>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -63,6 +88,7 @@ pub struct FileWriterArgs {
 pub struct FileWriter {
     file_mode: FsMode,
     dir_mode: FsMode,
+    user: Option<FsOwner>,
 }
 
 impl FileWriter {
@@ -70,7 +96,13 @@ impl FileWriter {
         Self {
             file_mode,
             dir_mode,
+            user: None,
         }
+    }
+
+    pub fn with_user(mut self, user: FsOwner) -> Self {
+        self.user = Some(user);
+        self
     }
 
     /// Writes data to a temporary file and atomically swaps it into place.
@@ -86,10 +118,10 @@ impl FileWriter {
             .tempfile_in(parent)?;
 
         tmp.write_all(bytes)?;
-        tmp.as_file().sync_all()?;
 
-        // Atomic Swap
-        // If it fails, the temp file is automatically cleaned up by the destructor.
+        self.apply_file_owner(tmp.as_file())?;
+
+        tmp.as_file().sync_all()?;
         tmp.persist(path).map_err(|e| e.error)?;
 
         self.sync_dir(parent)?;
@@ -129,6 +161,24 @@ impl FileWriter {
         Ok(())
     }
 
+    fn apply_path_owner(&self, path: &Path) -> Result<(), WriterError> {
+        if let Some(user) = self.user {
+            let (u, g) = user.as_nix();
+            tracing::debug!("Changing owner of {:?} to {:?}:{:?}", path, u, g);
+            nix::unistd::chown(path, Some(u), Some(g)).map_err(std::io::Error::from)?;
+        }
+        Ok(())
+    }
+
+    fn apply_file_owner(&self, file: &std::fs::File) -> Result<(), WriterError> {
+        if let Some(user) = self.user {
+            let (u, g) = user.as_nix();
+            tracing::debug!("Changing owner of {:?} to {:?}:{:?}", file, u, g);
+            nix::unistd::fchown(file, Some(u), Some(g)).map_err(std::io::Error::from)?;
+        }
+        Ok(())
+    }
+
     pub fn create_temp_for(
         &self,
         dst: &AbsolutePath,
@@ -146,13 +196,14 @@ impl FileWriter {
     fn prepare<'a>(&self, path: &'a Path) -> Result<&'a Path, WriterError> {
         let parent = path
             .parent()
-            .ok_or_else(|| io::Error::other("path has no parent"))?;
+            .ok_or_else(|| std::io::Error::other("path has no parent"))?;
 
         if !parent.exists() {
             fs::create_dir_all(parent)?;
 
             let perm = fs::Permissions::from_mode(self.dir_mode.into());
             fs::set_permissions(parent, perm)?;
+            self.apply_path_owner(parent)?;
         }
         Ok(parent)
     }
@@ -169,6 +220,7 @@ impl Default for FileWriter {
         Self {
             file_mode: FsMode::new(0o600),
             dir_mode: FsMode::new(0o700),
+            user: None,
         }
     }
 }
@@ -178,6 +230,7 @@ impl std::fmt::Debug for FileWriter {
         f.debug_struct("FileWriter")
             .field("file_mode", &format_args!("0o{:?}", self.file_mode))
             .field("dir_mode", &format_args!("0o{:?}", self.dir_mode))
+            .field("owner", &self.user)
             .finish()
     }
 }
@@ -257,6 +310,61 @@ impl FsMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
+pub struct FsOwner {
+    pub uid: u32,
+    pub gid: u32,
+}
+
+impl FsOwner {
+    pub fn new(uid: u32, gid: u32) -> Self {
+        Self { uid, gid }
+    }
+
+    pub fn as_nix(&self) -> (Uid, Gid) {
+        (Uid::from_raw(self.uid), Gid::from_raw(self.gid))
+    }
+}
+
+impl TryFrom<String> for FsOwner {
+    type Error = FsModeError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl FromStr for FsOwner {
+    type Err = FsModeError;
+
+    fn from_str(s: &str) -> Result<Self, FsModeError> {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() != 2 {
+            return Err(FsModeError::InvalidOwner(s.to_string()));
+        }
+
+        let uid = parts[0].parse().map_err(|e| FsModeError::InvalidUid {
+            input: parts[0].to_string(),
+            source: e,
+        })?;
+
+        let gid = parts[1].parse().map_err(|e| FsModeError::InvalidGid {
+            input: parts[1].to_string(),
+            source: e,
+        })?;
+
+        Ok(Self { uid, gid })
+    }
+}
+
+impl std::fmt::Display for FsOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.uid, self.gid)
+    }
+}
+
 impl Serialize for FsMode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -266,7 +374,7 @@ impl Serialize for FsMode {
     }
 }
 
-impl std::str::FromStr for FsMode {
+impl FromStr for FsMode {
     type Err = FsModeError;
 
     fn from_str(s: &str) -> Result<Self, FsModeError> {
@@ -307,6 +415,7 @@ impl From<FsMode> for u32 {
 mod tests {
     use super::*;
     use clap::Parser;
+    use nix::unistd::{getgid, getuid};
 
     #[derive(Debug, Parser)]
     struct TestParser {
@@ -406,5 +515,71 @@ mod tests {
 
         let content = fs::read(dst).unwrap();
         assert_eq!(content, b"content");
+    }
+
+    #[test]
+    fn test_fs_owner_parsing() {
+        let owner: FsOwner = "1000:1000".parse().expect("should parse");
+        assert_eq!(owner.uid, 1000);
+        assert_eq!(owner.gid, 1000);
+
+        assert!(matches!(
+            "1000".parse::<FsOwner>(),
+            Err(FsModeError::InvalidOwner(_))
+        ));
+
+        assert!(matches!(
+            "abc:1000".parse::<FsOwner>(),
+            Err(FsModeError::InvalidUid { .. })
+        ));
+    }
+
+    #[test]
+    fn test_writer_applies_ownership() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = AbsolutePath::new(tmp.path().join("owned_file"));
+
+        let current_uid = getuid().as_raw();
+        let current_gid = getgid().as_raw();
+
+        let self_owner = FsOwner::new(current_uid, current_gid);
+        let writer = FileWriter::default().with_user(self_owner);
+
+        writer
+            .atomic_write(&path, b"test")
+            .expect("Should succeed chowning to self");
+
+        if current_uid != 0 {
+            let other_owner = FsOwner::new(current_uid + 1, current_gid);
+            let writer = FileWriter::default().with_user(other_owner);
+
+            let err = writer.atomic_write(&path, b"test").unwrap_err();
+
+            match err {
+                WriterError::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied),
+                _ => panic!("Expected IO error"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_writer_recursive_directory_ownership() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dst = AbsolutePath::new(tmp.path().join("subdir/file"));
+
+        let current_uid = getuid().as_raw();
+        let current_gid = getgid().as_raw();
+
+        if current_uid != 0 {
+            let bad_owner = FsOwner::new(current_uid + 1, current_gid);
+            let writer = FileWriter::default().with_user(bad_owner);
+
+            let err = writer.atomic_write(&dst, b"data").unwrap_err();
+
+            match err {
+                WriterError::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied),
+                _ => panic!("Expected PermissionDenied trying to chown directory"),
+            }
+        }
     }
 }

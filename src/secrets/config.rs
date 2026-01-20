@@ -64,6 +64,31 @@ impl SecretManagerConfig {
         }
         Ok(())
     }
+
+    pub fn with_writer(mut self, writer: FileWriter) -> Self {
+        self.writer = writer;
+        self
+    }
+
+    pub fn with_outdir(mut self, outdir: AbsolutePath) -> Self {
+        self.out = outdir;
+        self
+    }
+
+    pub fn with_failure_policy(mut self, policy: InjectFailurePolicy) -> Self {
+        self.inject_failure_policy = policy;
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<Secret>) -> Self {
+        self.secrets = secrets;
+        self
+    }
+
+    pub fn with_mappings(mut self, mappings: Vec<PathMapping>) -> Self {
+        self.map = mappings;
+        self
+    }
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum, Default, Deserialize, Serialize, PartialEq, Eq)]

@@ -10,7 +10,7 @@ use crate::{
     events::{EventHandler, FsEvent, HandlerError},
     path::{AbsolutePath, CanonicalPath},
     provider::SecretsProvider,
-    secrets::{SecretFileManager, config::SecretManagerConfig},
+    secrets::SecretFileManager,
     watch::FsWatcher,
 };
 use async_trait::async_trait;
@@ -155,21 +155,6 @@ impl VolumeRegistry {
             .map_err(|e| PluginError::Locket(LocketError::Io(e)))?;
         Ok(())
     }
-
-    fn prepare_manager(
-        &self,
-        spec: &VolumeSpec,
-        mountpoint: &Path,
-    ) -> Result<SecretFileManager, PluginError> {
-        let config = SecretManagerConfig {
-            out: AbsolutePath::new(mountpoint),
-            secrets: spec.secrets.clone(),
-            ..Default::default()
-        };
-
-        SecretFileManager::new(config, self.provider.clone())
-            .map_err(|e| PluginError::Locket(LocketError::Secret(e)))
-    }
 }
 
 #[async_trait]
@@ -245,7 +230,9 @@ impl VolumeDriver for VolumeRegistry {
                     .map_err(LocketError::Io)?;
             }
 
-            let manager = self.prepare_manager(&spec, &mountpoint)?;
+            let manager = spec
+                .clone()
+                .into_manager(AbsolutePath::new(mountpoint.clone()), self.provider.clone())?;
             if let Err(e) = manager.inject_all().await {
                 error!("Injection failed: {}", e);
 

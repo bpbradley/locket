@@ -1,10 +1,15 @@
 use crate::config::parsers::polymorphic_vec;
 use crate::error::LocketError;
-use crate::secrets::{InjectFailurePolicy, MemSize, Secret};
+use crate::path::AbsolutePath;
+use crate::provider::SecretsProvider;
+use crate::secrets::{
+    InjectFailurePolicy, MemSize, Secret, SecretFileManager, SecretManagerConfig,
+};
 use crate::write::{FileWriter, FileWriterArgs};
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolumeSpec {
@@ -35,6 +40,21 @@ pub struct VolumeArgs {
     #[serde(flatten)]
     #[locket(allow_mismatched_flatten)]
     pub writer: FileWriterArgs,
+}
+
+impl VolumeSpec {
+    pub fn into_manager(
+        self,
+        mountpoint: AbsolutePath,
+        provider: Arc<dyn SecretsProvider>,
+    ) -> Result<SecretFileManager, LocketError> {
+        let config = SecretManagerConfig::default()
+            .with_secrets(self.secrets)
+            .with_writer(self.writer)
+            .with_outdir(mountpoint);
+
+        SecretFileManager::new(config, provider).map_err(LocketError::from)
+    }
 }
 
 //TODO: Need to refactor how I am handling configs as it is messy at this point

@@ -22,8 +22,8 @@ connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
 infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex", "dep:uuid"]
-exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
-volume = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower", "dep:tower-service", "dep:nix", "dep:chrono"]
+exec = ["dep:dotenvy", "nix/signal", "nix/term", "tokio/process"]
+volume = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower", "dep:tower-service", "nix/mount", "nix/fs", "dep:chrono"]
 
 # Used to compile with mock types for testing
 testing = []
@@ -55,11 +55,11 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 futures = { version = "0.3"}
 url = { version = "2", features = ["serde"]}
 toml = {version = "0.9"}
+nix = { version = "0.30", features = ["user"] }
 percent-encoding = { version = "2.3", optional = true }
 bitwarden = { version = "1", features=["secrets"], optional = true }
 uuid = { version = "1", features=["serde"], optional = true }
 dotenvy = {version = "0.15", optional = true}
-nix = { version = "0.30", features = ["signal", "term", "mount", "fs"], optional = true}
 serde_urlencoded = { version = "0.7", optional = true }
 
 hyper = { version = "1", features = ["server", "http1"], optional = true }
