@@ -19,8 +19,8 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
-use tokio::sync::watch;
+use std::sync::Arc;
+use tokio::sync::{RwLock, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
@@ -73,14 +73,14 @@ pub struct VolumeRegistry {
 }
 
 impl VolumeRegistry {
-    pub fn new(
+    pub async fn new(
         state_dir: AbsolutePath,
         runtime_dir: AbsolutePath,
         provider: Arc<dyn SecretsProvider>,
     ) -> Result<Self, LocketError> {
         let state_file = state_dir.join("state.json");
 
-        if let Err(e) = std::fs::create_dir_all(&runtime_dir) {
+        if let Err(e) = tokio::fs::create_dir_all(&runtime_dir).await {
             warn!("Failed to create runtime dir {:?}: {}", runtime_dir, e);
         }
 
@@ -93,19 +93,19 @@ impl VolumeRegistry {
             entries: RwLock::new(HashMap::new()),
         };
 
-        registry.load();
+        registry.load().await;
         Ok(registry)
     }
 
-    fn load(&self) {
+    async fn load(&self) {
         if !self.state_file.exists() {
             return;
         }
 
-        match std::fs::read_to_string(&self.state_file) {
+        match tokio::fs::read_to_string(&self.state_file).await {
             Ok(data) => match serde_json::from_str::<Vec<VolumeMetadata>>(&data) {
                 Ok(list) => {
-                    let mut lock = self.entries.write().unwrap();
+                    let mut lock = self.entries.write().await;
                     let mut loaded = 0;
                     for meta in list {
                         let args = match VolumeArgs::try_from(meta.options.clone()) {
@@ -141,14 +141,17 @@ impl VolumeRegistry {
         }
     }
 
-    fn persist(&self) -> Result<(), PluginError> {
-        let lock = self.entries.read().unwrap();
+    async fn persist(&self) -> Result<(), PluginError> {
+        let lock = self.entries.read().await;
         let list: Vec<&VolumeMetadata> = lock.values().map(|v| &v.meta).collect();
         let json = serde_json::to_string_pretty(&list).map_err(PluginError::Json)?;
 
         let tmp = self.state_file.with_extension("tmp");
-        std::fs::write(&tmp, json).map_err(|e| PluginError::Locket(LocketError::Io(e)))?;
-        std::fs::rename(&tmp, &self.state_file)
+        tokio::fs::write(&tmp, json)
+            .await
+            .map_err(|e| PluginError::Locket(LocketError::Io(e)))?;
+        tokio::fs::rename(&tmp, &self.state_file)
+            .await
             .map_err(|e| PluginError::Locket(LocketError::Io(e)))?;
         Ok(())
     }
@@ -179,7 +182,7 @@ impl VolumeDriver for VolumeRegistry {
         let args = VolumeArgs::try_from(opts.clone())?;
         let spec: VolumeSpec = args.try_into()?;
 
-        let mut lock = self.entries.write().unwrap();
+        let mut lock = self.entries.write().await;
         if lock.contains_key(&name) {
             return Ok(());
         }
@@ -200,12 +203,12 @@ impl VolumeDriver for VolumeRegistry {
         );
         drop(lock);
 
-        self.persist()?;
+        self.persist().await?;
         Ok(())
     }
 
     async fn remove(&self, name: &VolumeName) -> Result<(), PluginError> {
-        let mut lock = self.entries.write().unwrap();
+        let mut lock = self.entries.write().await;
         if let Some(entry) = lock.get(name) {
             if !entry.state.mount_ids.is_empty() {
                 return Err(PluginError::InUse);
@@ -215,13 +218,13 @@ impl VolumeDriver for VolumeRegistry {
         }
         lock.remove(name);
         drop(lock);
-        self.persist()?;
+        self.persist().await?;
         Ok(())
     }
 
     async fn mount(&self, name: &VolumeName, id: &MountId) -> Result<PathBuf, PluginError> {
         let (mountpoint, needs_provision) = {
-            let mut lock = self.entries.write().unwrap();
+            let mut lock = self.entries.write().await;
             let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
             let path = entry.mountpoint(&self.runtime_dir);
             let first_mount = entry.state.mount_ids.is_empty();
@@ -232,11 +235,11 @@ impl VolumeDriver for VolumeRegistry {
         if needs_provision {
             info!(volume=%name, "Provisioning secrets for first mount");
             let spec = {
-                let lock = self.entries.read().unwrap();
+                let lock = self.entries.read().await;
                 lock.get(name).ok_or(PluginError::NotFound)?.spec.clone()
             };
 
-            if !mountpoint.exists() {
+            if !tokio::fs::try_exists(&mountpoint).await.unwrap_or(false) {
                 tokio::fs::create_dir_all(&mountpoint)
                     .await
                     .map_err(LocketError::Io)?;
@@ -247,7 +250,7 @@ impl VolumeDriver for VolumeRegistry {
                 error!("Injection failed: {}", e);
 
                 {
-                    let mut lock = self.entries.write().unwrap();
+                    let mut lock = self.entries.write().await;
                     if let Some(entry) = lock.get_mut(name) {
                         entry.state.mount_ids.remove(id);
                     }
@@ -270,7 +273,7 @@ impl VolumeDriver for VolumeRegistry {
                         error!("Volume watcher failed: {}", e);
                     }
                 });
-                let mut lock = self.entries.write().unwrap();
+                let mut lock = self.entries.write().await;
                 if let Some(entry) = lock.get_mut(name) {
                     entry.state.watcher_task = Some(task);
                     entry.state.shutdown_tx = Some(tx);
@@ -282,7 +285,7 @@ impl VolumeDriver for VolumeRegistry {
 
     async fn unmount(&self, name: &VolumeName, id: &MountId) -> Result<(), PluginError> {
         let cleanup_needed = {
-            let mut lock = self.entries.write().unwrap();
+            let mut lock = self.entries.write().await;
             let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
             entry.state.mount_ids.remove(id);
             entry.state.mount_ids.is_empty()
@@ -291,7 +294,7 @@ impl VolumeDriver for VolumeRegistry {
         if cleanup_needed {
             info!(volume=%name, "Volume unmounted by all containers. Tearing down.");
             let tx = {
-                let mut lock = self.entries.write().unwrap();
+                let mut lock = self.entries.write().await;
                 if let Some(entry) = lock.get_mut(name) {
                     entry.state.shutdown_tx.take()
                 } else {
@@ -310,18 +313,18 @@ impl VolumeDriver for VolumeRegistry {
     }
 
     async fn path(&self, name: &VolumeName) -> Result<PathBuf, PluginError> {
-        let lock = self.entries.read().unwrap();
+        let lock = self.entries.read().await;
         let entry = lock.get(name).ok_or(PluginError::NotFound)?;
         Ok(entry.mountpoint(&self.runtime_dir))
     }
 
     async fn get(&self, name: &VolumeName) -> Result<Option<VolumeInfo>, PluginError> {
-        let lock = self.entries.read().unwrap();
+        let lock = self.entries.read().await;
         Ok(lock.get(name).map(|entry| entry.to_info(&self.runtime_dir)))
     }
 
     async fn list(&self) -> Result<Vec<VolumeInfo>, PluginError> {
-        let lock = self.entries.read().unwrap();
+        let lock = self.entries.read().await;
         Ok(lock
             .values()
             .map(|entry| entry.to_info(&self.runtime_dir))

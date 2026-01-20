@@ -7,3 +7,4 @@ docker/compose.test.yaml
 tests/docker/.env
 tests/docker/secrets/
 /*.dev.toml
+notes.md

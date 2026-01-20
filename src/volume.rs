@@ -34,11 +34,14 @@ impl VolumePlugin {
 
         let provider = self.config.provider.build().await?;
 
-        let driver = Arc::new(VolumeRegistry::new(
-            self.config.state_dir.clone(),
-            self.config.runtime_dir.clone(),
-            provider,
-        )?);
+        let driver = Arc::new(
+            VolumeRegistry::new(
+                self.config.state_dir.clone(),
+                self.config.runtime_dir.clone(),
+                provider,
+            )
+            .await?,
+        );
 
         let service = DockerPluginService::new(driver);
 
