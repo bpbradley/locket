@@ -105,6 +105,10 @@ impl FileWriter {
         self
     }
 
+    pub fn get_user(&self) -> Option<&FsOwner> {
+        self.user.as_ref()
+    }
+
     /// Writes data to a temporary file and atomically swaps it into place.
     ///
     /// This ensures that consumers never see a partially written file.

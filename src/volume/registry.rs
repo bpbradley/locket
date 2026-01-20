@@ -20,9 +20,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{Notify, RwLock, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum VolumeLifecycle {
+    /// Volume is created but not mounted on host
+    #[default]
+    Idle,
+    /// Currently mounting/injecting. Access is blocked for other containers.
+    Provisioning,
+    /// Mounted, secrets injected, and ready for use.
+    Ready,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VolumeMetadata {
@@ -34,6 +45,8 @@ struct VolumeMetadata {
 #[derive(Debug, Default)]
 struct ActiveVolume {
     mount_ids: HashSet<MountId>,
+    lifecycle: VolumeLifecycle,
+    notify: Arc<Notify>,
     watcher_task: Option<JoinHandle<()>>,
     shutdown_tx: Option<watch::Sender<bool>>,
 }
@@ -155,6 +168,85 @@ impl VolumeRegistry {
             .map_err(|e| PluginError::Locket(LocketError::Io(e)))?;
         Ok(())
     }
+
+    async fn provision(&self, name: &VolumeName, mountpoint: &Path) -> Result<(), PluginError> {
+        info!(volume=%name, "Provisioning volume resources");
+
+        if !tokio::fs::try_exists(mountpoint).await.unwrap_or(false) {
+            tokio::fs::create_dir_all(mountpoint)
+                .await
+                .map_err(LocketError::Io)?;
+        }
+
+        let spec = {
+            let lock = self.entries.read().await;
+            lock.get(name).ok_or(PluginError::NotFound)?.spec.clone()
+        };
+
+        let watch_enabled = spec.watch;
+        let target = mountpoint.to_path_buf();
+        if let Some(user) = spec.writer.get_user() {
+            let (u, g) = user.as_nix();
+            let target = target.clone();
+            tokio::task::spawn_blocking(move || nix::unistd::chown(&target, Some(u), Some(g)))
+                .await
+                .map_err(|_| PluginError::Internal("Join error".into()))?
+                .map_err(|e| PluginError::Internal(format!("Chown failed: {}", e)))?;
+        }
+
+        let manager = spec.into_manager(AbsolutePath::from(target), self.provider.clone())?;
+
+        if let Err(e) = manager.inject_all().await {
+            error!("Injection failed: {}", e);
+            let _ = tokio::fs::remove_dir_all(mountpoint).await;
+            return Err(PluginError::Locket(LocketError::Secret(e)));
+        }
+
+        if watch_enabled {
+            let (tx, rx) = watch::channel(false);
+            let adapter = VolumeEventHandler {
+                inner: manager,
+                stop_rx: rx,
+            };
+            let watcher = FsWatcher::new(std::time::Duration::from_millis(500), adapter);
+            let task = tokio::spawn(async move {
+                if let Err(e) = watcher.run().await {
+                    error!("Watcher failed: {}", e);
+                }
+            });
+
+            let mut lock = self.entries.write().await;
+            if let Some(entry) = lock.get_mut(name) {
+                entry.state.watcher_task = Some(task);
+                entry.state.shutdown_tx = Some(tx);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn teardown(&self, name: &VolumeName, mountpoint: &Path) -> Result<(), PluginError> {
+        info!(volume=%name, "Tearing down volume");
+
+        let tx = {
+            let mut lock = self.entries.write().await;
+            if let Some(entry) = lock.get_mut(name) {
+                entry.state.shutdown_tx.take()
+            } else {
+                None
+            }
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(true);
+        }
+
+        if tokio::fs::try_exists(mountpoint).await.unwrap_or(false)
+            && let Err(e) = tokio::fs::remove_dir_all(mountpoint).await
+        {
+            warn!("Failed to remove volume dir: {}", e);
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -208,94 +300,100 @@ impl VolumeDriver for VolumeRegistry {
     }
 
     async fn mount(&self, name: &VolumeName, id: &MountId) -> Result<PathBuf, PluginError> {
-        let (mountpoint, needs_provision) = {
-            let mut lock = self.entries.write().await;
-            let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
-            let path = entry.mountpoint(&self.runtime_dir);
-            let first_mount = entry.state.mount_ids.is_empty();
-            entry.state.mount_ids.insert(id.clone());
-            (path, first_mount)
-        };
+        loop {
+            let (mountpoint, action, notify) = {
+                let mut lock = self.entries.write().await;
+                let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
+                let path = entry.mountpoint(&self.runtime_dir);
 
-        if needs_provision {
-            info!(volume=%name, "Provisioning secrets for first mount");
-            let spec = {
-                let lock = self.entries.read().await;
-                lock.get(name).ok_or(PluginError::NotFound)?.spec.clone()
+                match entry.state.lifecycle {
+                    VolumeLifecycle::Ready => {
+                        entry.state.mount_ids.insert(id.clone());
+                        return Ok(path);
+                    }
+                    VolumeLifecycle::Provisioning => (
+                        path,
+                        VolumeLifecycle::Provisioning,
+                        entry.state.notify.clone(),
+                    ),
+                    VolumeLifecycle::Idle => {
+                        entry.state.lifecycle = VolumeLifecycle::Provisioning;
+                        entry.state.mount_ids.insert(id.clone());
+                        (path, VolumeLifecycle::Idle, entry.state.notify.clone())
+                    }
+                }
             };
 
-            if !tokio::fs::try_exists(&mountpoint).await.unwrap_or(false) {
-                tokio::fs::create_dir_all(&mountpoint)
-                    .await
-                    .map_err(LocketError::Io)?;
-            }
+            match action {
+                VolumeLifecycle::Ready => unreachable!(),
 
-            let manager = spec
-                .clone()
-                .into_manager(AbsolutePath::new(mountpoint.clone()), self.provider.clone())?;
-            if let Err(e) = manager.inject_all().await {
-                error!("Injection failed: {}", e);
-
-                {
-                    let mut lock = self.entries.write().await;
-                    if let Some(entry) = lock.get_mut(name) {
-                        entry.state.mount_ids.remove(id);
-                    }
+                VolumeLifecycle::Provisioning => {
+                    info!(volume=%name, "Waiting for existing provisioning to complete...");
+                    notify.notified().await;
+                    continue;
                 }
 
-                let _ = tokio::fs::remove_dir_all(&mountpoint).await;
-
-                return Err(PluginError::Locket(LocketError::Secret(e)));
-            }
-
-            if spec.watch {
-                let (tx, rx) = watch::channel(false);
-                let adapter = VolumeEventHandler {
-                    inner: manager,
-                    stop_rx: rx,
-                };
-                let watcher = FsWatcher::new(std::time::Duration::from_millis(500), adapter);
-                let task = tokio::spawn(async move {
-                    if let Err(e) = watcher.run().await {
-                        error!("Volume watcher failed: {}", e);
+                VolumeLifecycle::Idle => match self.provision(name, &mountpoint).await {
+                    Ok(_) => {
+                        let mut lock = self.entries.write().await;
+                        if let Some(entry) = lock.get_mut(name) {
+                            entry.state.lifecycle = VolumeLifecycle::Ready;
+                        }
+                        notify.notify_waiters();
+                        return Ok(mountpoint);
                     }
-                });
-                let mut lock = self.entries.write().await;
-                if let Some(entry) = lock.get_mut(name) {
-                    entry.state.watcher_task = Some(task);
-                    entry.state.shutdown_tx = Some(tx);
-                }
+                    Err(e) => {
+                        let mut lock = self.entries.write().await;
+                        if let Some(entry) = lock.get_mut(name) {
+                            entry.state.lifecycle = VolumeLifecycle::Idle;
+                            entry.state.mount_ids.remove(id);
+                        }
+                        notify.notify_waiters();
+                        return Err(e);
+                    }
+                },
             }
         }
-        Ok(mountpoint)
     }
 
     async fn unmount(&self, name: &VolumeName, id: &MountId) -> Result<(), PluginError> {
-        let cleanup_needed = {
+        let (mountpoint, needs_teardown) = {
             let mut lock = self.entries.write().await;
             let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
+
             entry.state.mount_ids.remove(id);
-            entry.state.mount_ids.is_empty()
+
+            let empty = entry.state.mount_ids.is_empty();
+            let path = entry.mountpoint(&self.runtime_dir);
+
+            if empty {
+                entry.state.lifecycle = VolumeLifecycle::Provisioning;
+            }
+
+            (path, empty)
         };
 
-        if cleanup_needed {
-            info!(volume=%name, "Volume unmounted by all containers. Tearing down.");
-            let tx = {
-                let mut lock = self.entries.write().await;
-                if let Some(entry) = lock.get_mut(name) {
-                    entry.state.shutdown_tx.take()
-                } else {
-                    None
+        if needs_teardown {
+            match self.teardown(name, &mountpoint).await {
+                Ok(_) => {
+                    let mut lock = self.entries.write().await;
+                    if let Some(entry) = lock.get_mut(name) {
+                        entry.state.lifecycle = VolumeLifecycle::Idle;
+                        entry.state.notify.notify_waiters();
+                    }
                 }
-            };
-            if let Some(tx) = tx {
-                let _ = tx.send(true);
-            }
-            let mountpoint = self.runtime_dir.join(name.as_str());
-            if mountpoint.exists() {
-                let _ = tokio::fs::remove_dir_all(&mountpoint).await;
+                Err(e) => {
+                    error!("Teardown failed: {}", e);
+                    let mut lock = self.entries.write().await;
+                    if let Some(entry) = lock.get_mut(name) {
+                        entry.state.lifecycle = VolumeLifecycle::Idle;
+                        entry.state.notify.notify_waiters();
+                    }
+                    return Err(e);
+                }
             }
         }
+
         Ok(())
     }
 
