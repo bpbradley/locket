@@ -1,0 +1,14 @@
+---
+name: volume-demo
+services:
+    demo:
+        image: busybox
+        command: ["sh", "-c", "cat /run/secrets/locket/.env && sleep 120"]
+        volumes:
+            - locket-volume:/run/secrets/locket:ro
+volumes:
+    locket-volume:
+        driver: locket
+        driver_opts:
+            secret: /home/bbradley/git/locket/secrets/op/templates/.env
+            watch: "true"

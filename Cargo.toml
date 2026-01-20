@@ -23,13 +23,14 @@ bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
 compose = ["dep:dotenvy"]
 infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex", "dep:uuid"]
 exec = ["dep:dotenvy", "dep:nix", "tokio/process"]
+volume = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower", "dep:tower-service", "dep:nix", "dep:chrono"]
 
 # Used to compile with mock types for testing
 testing = []
 # Generates introspection types that are necessary for documentation generation
 locket-docs = []
 
-full = ["op", "connect", "bws", "infisical", "compose", "exec"]
+full = ["op", "connect", "bws", "infisical", "compose", "exec", "volume"]
 dev = ["locket-docs", "testing", "full"]
 default = ["full"]
 
@@ -58,8 +59,16 @@ percent-encoding = { version = "2.3", optional = true }
 bitwarden = { version = "1", features=["secrets"], optional = true }
 uuid = { version = "1", features=["serde"], optional = true }
 dotenvy = {version = "0.15", optional = true}
-nix = { version = "0.30", features = ["signal", "term"], optional = true}
+nix = { version = "0.30", features = ["signal", "term", "mount", "fs"], optional = true}
 serde_urlencoded = { version = "0.7", optional = true }
+
+hyper = { version = "1", features = ["server", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+http-body-util = { version = "0.1", optional = true }
+tower = { version = "0.5", optional = true }
+tower-service = { version = "0.3", optional = true }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"], optional = true }
+
 # bitwarden sdk needs to update their crate. Cannot build without this.
 # https://github.com/bitwarden/sdk-sm/issues/1244
 rustls-webpki = { version = "0.102", features = ["std"], optional = true }

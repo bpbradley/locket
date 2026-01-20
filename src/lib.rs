@@ -27,5 +27,7 @@ pub mod process;
 pub mod provider;
 pub mod secrets;
 pub mod template;
+#[cfg(feature = "volume")]
+pub mod volume;
 pub mod watch;
 pub mod write;

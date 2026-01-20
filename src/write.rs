@@ -58,7 +58,8 @@ pub struct FileWriterArgs {
     dir_mode: Option<FsMode>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct FileWriter {
     file_mode: FsMode,
     dir_mode: FsMode,
