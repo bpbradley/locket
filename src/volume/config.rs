@@ -5,10 +5,13 @@ use crate::provider::SecretsProvider;
 use crate::secrets::{
     InjectFailurePolicy, MemSize, Secret, SecretFileManager, SecretManagerConfig,
 };
-use crate::write::{FileWriter, FileWriterArgs};
+use crate::write::{FileWriter, FileWriterArgs, FsMode};
 use locket_derive::LayeredConfig;
+use nix::mount::MsFlags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +21,26 @@ pub struct VolumeSpec {
     pub inject_failure_policy: InjectFailurePolicy,
     pub max_file_size: MemSize,
     pub writer: FileWriter,
+    pub mount: MountConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MountConfig {
+    pub size: MemSize,
+    pub mode: FsMode,
+    pub flags: MountFlags,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
+#[serde(rename_all = "kebab-case")]
+#[locket(try_into = "MountConfig")]
+pub struct MountOptions {
+    #[locket(default = MemSize::from_mb(10))]
+    pub size: Option<MemSize>,
+    #[locket(default = FsMode::new(0o700))]
+    pub mode: Option<FsMode>,
+    #[locket(default = MountFlags::default())]
+    pub flags: Option<MountFlags>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
@@ -34,12 +57,16 @@ pub struct VolumeArgs {
     #[locket(default = InjectFailurePolicy::Passthrough)]
     pub inject_failure_policy: Option<InjectFailurePolicy>,
 
-    #[locket(default = MemSize::default())]
+    #[locket(default = MemSize::from_mb(10))]
     pub max_file_size: Option<MemSize>,
 
     #[serde(flatten)]
     #[locket(allow_mismatched_flatten)]
     pub writer: FileWriterArgs,
+
+    #[serde(flatten)]
+    #[locket(allow_mismatched_flatten)]
+    pub mount: MountOptions,
 }
 
 impl VolumeSpec {
@@ -109,5 +136,96 @@ where
             ))),
         },
         None => Ok(None),
+    }
+}
+#[derive(Debug, Clone)]
+pub struct MountFlags(MsFlags);
+
+impl Default for MountFlags {
+    fn default() -> Self {
+        Self(MsFlags::MS_NOEXEC | MsFlags::MS_NOSUID | MsFlags::MS_NODEV)
+    }
+}
+
+impl From<MountFlags> for MsFlags {
+    fn from(f: MountFlags) -> Self {
+        f.0
+    }
+}
+
+impl FromStr for MountFlags {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut flags = MsFlags::empty();
+
+        for part in s.split(',') {
+            match part.trim() {
+                // Restrictions
+                "ro" => flags |= MsFlags::MS_RDONLY,
+                "noexec" => flags |= MsFlags::MS_NOEXEC,
+                "nosuid" => flags |= MsFlags::MS_NOSUID,
+                "nodev" => flags |= MsFlags::MS_NODEV,
+                "noatime" => flags |= MsFlags::MS_NOATIME,
+
+                // Permissions
+                "rw" => flags.remove(MsFlags::MS_RDONLY),
+                "exec" => flags.remove(MsFlags::MS_NOEXEC),
+                "suid" => flags.remove(MsFlags::MS_NOSUID),
+                "dev" => flags.remove(MsFlags::MS_NODEV),
+
+                "defaults" => {}
+
+                "" => continue,
+                unknown => return Err(format!("Unknown mount flag: '{}'", unknown)),
+            }
+        }
+        Ok(Self(flags))
+    }
+}
+
+impl fmt::Display for MountFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+        if self.0.contains(MsFlags::MS_RDONLY) {
+            parts.push("ro");
+        } else {
+            parts.push("rw");
+        }
+        if self.0.contains(MsFlags::MS_NOEXEC) {
+            parts.push("noexec");
+        } else {
+            parts.push("exec");
+        }
+        if self.0.contains(MsFlags::MS_NOSUID) {
+            parts.push("nosuid");
+        } else {
+            parts.push("suid");
+        }
+        if self.0.contains(MsFlags::MS_NODEV) {
+            parts.push("nodev");
+        } else {
+            parts.push("dev");
+        }
+        write!(f, "{}", parts.join(","))
+    }
+}
+
+impl<'de> Deserialize<'de> for MountFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for MountFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
     }
 }

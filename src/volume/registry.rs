@@ -16,6 +16,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
+use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -184,21 +185,36 @@ impl VolumeRegistry {
         };
 
         let watch_enabled = spec.watch;
-        let target = mountpoint.to_path_buf();
+        let target_mount = mountpoint.to_path_buf();
+        let data = format!("size={},mode={}", spec.mount.size, spec.mount.mode);
+        let flags: MsFlags = spec.mount.flags.clone().into();
+        tokio::task::spawn_blocking(move || {
+            let fstype = Some("tmpfs");
+            let src = Some("tmpfs");
+            mount(src, &target_mount, fstype, flags, Some(data.as_str()))
+        })
+        .await
+        .map_err(|e| PluginError::Internal(format!("Join error: {}", e)))?
+        .map_err(|e| PluginError::Internal(format!("Mount failed: {}", e)))?;
         if let Some(user) = spec.writer.get_user() {
             let (u, g) = user.as_nix();
-            let target = target.clone();
-            tokio::task::spawn_blocking(move || nix::unistd::chown(&target, Some(u), Some(g)))
-                .await
-                .map_err(|_| PluginError::Internal("Join error".into()))?
-                .map_err(|e| PluginError::Internal(format!("Chown failed: {}", e)))?;
+            let target_chown = mountpoint.to_path_buf();
+            tokio::task::spawn_blocking(move || {
+                nix::unistd::chown(&target_chown, Some(u), Some(g))
+            })
+            .await
+            .map_err(|_| PluginError::Internal("Join error".into()))?
+            .map_err(|e| PluginError::Internal(format!("Chown failed: {}", e)))?;
         }
 
-        let manager = spec.into_manager(AbsolutePath::from(target), self.provider.clone())?;
+        let manager = spec.into_manager(AbsolutePath::from(mountpoint), self.provider.clone())?;
 
         if let Err(e) = manager.inject_all().await {
             error!("Injection failed: {}", e);
-            let _ = tokio::fs::remove_dir_all(mountpoint).await;
+            let target_cleanup = mountpoint.to_path_buf();
+            let _ =
+                tokio::task::spawn_blocking(move || umount2(&target_cleanup, MntFlags::MNT_DETACH))
+                    .await;
             return Err(PluginError::Locket(LocketError::Secret(e)));
         }
 
@@ -239,6 +255,12 @@ impl VolumeRegistry {
         if let Some(tx) = tx {
             let _ = tx.send(true);
         }
+
+        let target = mountpoint.to_path_buf();
+        tokio::task::spawn_blocking(move || umount2(&target, MntFlags::MNT_DETACH))
+            .await
+            .map_err(|_| PluginError::Internal("Join error".into()))?
+            .map_err(|e| PluginError::Internal(format!("Unmount failed: {}", e)))?;
 
         if tokio::fs::try_exists(mountpoint).await.unwrap_or(false)
             && let Err(e) = tokio::fs::remove_dir_all(mountpoint).await
