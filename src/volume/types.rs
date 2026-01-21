@@ -1,8 +1,125 @@
+use super::{config::MountConfig, error::PluginError};
 use crate::error::LocketError;
+use crate::path::AbsolutePath;
+use crate::write::FsOwner;
+use nix::errno::Errno;
+use nix::mount::{MntFlags, MsFlags, mount, umount2};
+use nix::unistd::chown;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
+use std::path::Path;
 use std::str::FromStr;
+use tracing::{info, warn};
+pub enum VolumeType {
+    Tmpfs,
+}
+
+impl VolumeType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VolumeType::Tmpfs => "tmpfs",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VolumeMount {
+    target: AbsolutePath,
+    config: MountConfig,
+    owner: Option<FsOwner>,
+}
+
+impl VolumeMount {
+    pub fn new(target: AbsolutePath, config: MountConfig, owner: Option<FsOwner>) -> Self {
+        Self {
+            target,
+            config,
+            owner,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.target
+    }
+
+    pub async fn mount(&self) -> Result<(), PluginError> {
+        if !tokio::fs::try_exists(&self.target).await.unwrap_or(false) {
+            tokio::fs::create_dir_all(&self.target)
+                .await
+                .map_err(LocketError::Io)?;
+        }
+
+        let target = self.target.clone();
+        let flags: MsFlags = self.config.flags.clone().into();
+        let data = format!("size={},mode={}", self.config.size, self.config.mode);
+
+        tokio::task::spawn_blocking(move || {
+            mount(
+                Some(VolumeType::Tmpfs.as_str()),
+                target.as_path(),
+                Some(VolumeType::Tmpfs.as_str()),
+                flags,
+                Some(data.as_str()),
+            )
+        })
+        .await
+        .map_err(|e| PluginError::Internal(format!("Join error: {}", e)))?
+        .map_err(|e| PluginError::Internal(format!("Mount failed: {}", e)))?;
+
+        if let Some(owner) = self.owner {
+            let target = self.target.clone();
+            let (u, g) = owner.as_nix();
+
+            tokio::task::spawn_blocking(move || chown(target.as_path(), Some(u), Some(g)))
+                .await
+                .map_err(|_| PluginError::Internal("Join error".into()))?
+                .map_err(|e| PluginError::Internal(format!("Chown failed: {}", e)))?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn unmount(&self) -> Result<(), PluginError> {
+        let target = self.target.clone();
+
+        // It is possible for the target to be mounted multiple times.
+        // And then each mount needs to be successively unwound and unmounted.
+        // Instead of trying to check if the mount already exists during mount,
+        // we simply unmount repeatedly until the mount point is empty.
+        tokio::task::spawn_blocking(move || {
+            let mut attempts = 0;
+            loop {
+                match umount2(target.as_path(), MntFlags::empty()) {
+                    Ok(_) => {
+                        attempts += 1;
+                    }
+                    Err(e) if e == Errno::EINVAL => {
+                        if attempts > 0 {
+                            info!("Volume unmounted with {} layers.", attempts);
+                        }
+                        break;
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| PluginError::Internal("Join error".into()))?
+        .map_err(|e| PluginError::Internal(format!("Unmount failed: {}", e)))?;
+
+        if tokio::fs::try_exists(&self.target).await.unwrap_or(false) {
+            if let Err(e) = tokio::fs::remove_dir(&self.target).await {
+                warn!("Failed to remove directory {:?}: {}", self.target, e);
+            }
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String")]

@@ -3,7 +3,7 @@ use super::{
     config::{VolumeArgs, VolumeSpec},
     driver::VolumeDriver,
     error::PluginError,
-    types::{MountId, VolumeName},
+    types::{MountId, VolumeMount, VolumeName},
 };
 use crate::{
     error::LocketError,
@@ -16,7 +16,6 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
-use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -56,6 +55,7 @@ struct ActiveVolume {
 struct VolumeEntry {
     meta: VolumeMetadata,
     spec: VolumeSpec,
+    mount: VolumeMount,
     state: ActiveVolume,
 }
 
@@ -64,7 +64,7 @@ impl VolumeEntry {
         root_dir.join(self.meta.name.as_str())
     }
 
-    fn to_info(&self, root_dir: &Path) -> VolumeInfo {
+    fn to_info(&self) -> VolumeInfo {
         let mut status = HashMap::new();
         status.insert("Mounts".to_string(), self.state.mount_ids.len().to_string());
         for (k, v) in &self.meta.options {
@@ -72,7 +72,7 @@ impl VolumeEntry {
         }
         VolumeInfo {
             name: self.meta.name.to_string(),
-            mountpoint: self.mountpoint(root_dir).to_string_lossy().to_string(),
+            mountpoint: self.mount.path().display().to_string(),
             created_at: self.meta.created_at.to_rfc3339(),
             status,
         }
@@ -129,7 +129,7 @@ impl VolumeRegistry {
                                 continue;
                             }
                         };
-                        let spec = match args.try_into() {
+                        let spec: VolumeSpec = match args.try_into() {
                             Ok(s) => s,
                             Err(e) => {
                                 error!("Invalid config for {}: {}", meta.name, e);
@@ -137,11 +137,19 @@ impl VolumeRegistry {
                             }
                         };
 
+                        let mountpoint = self.runtime_dir.join(meta.name.as_str());
+                        let mount = VolumeMount::new(
+                            mountpoint.clone(),
+                            spec.mount.clone(),
+                            spec.writer.get_user().cloned(),
+                        );
+
                         lock.insert(
                             meta.name.clone(),
                             VolumeEntry {
                                 meta,
                                 spec,
+                                mount,
                                 state: ActiveVolume::default(),
                             },
                         );
@@ -170,14 +178,10 @@ impl VolumeRegistry {
         Ok(())
     }
 
-    async fn provision(&self, name: &VolumeName, mountpoint: &Path) -> Result<(), PluginError> {
+    async fn provision(&self, name: &VolumeName, volume: VolumeMount) -> Result<(), PluginError> {
         info!(volume=%name, "Provisioning volume resources");
 
-        if !tokio::fs::try_exists(mountpoint).await.unwrap_or(false) {
-            tokio::fs::create_dir_all(mountpoint)
-                .await
-                .map_err(LocketError::Io)?;
-        }
+        volume.mount().await?;
 
         let spec = {
             let lock = self.entries.read().await;
@@ -185,36 +189,13 @@ impl VolumeRegistry {
         };
 
         let watch_enabled = spec.watch;
-        let target_mount = mountpoint.to_path_buf();
-        let data = format!("size={},mode={}", spec.mount.size, spec.mount.mode);
-        let flags: MsFlags = spec.mount.flags.clone().into();
-        tokio::task::spawn_blocking(move || {
-            let fstype = Some("tmpfs");
-            let src = Some("tmpfs");
-            mount(src, &target_mount, fstype, flags, Some(data.as_str()))
-        })
-        .await
-        .map_err(|e| PluginError::Internal(format!("Join error: {}", e)))?
-        .map_err(|e| PluginError::Internal(format!("Mount failed: {}", e)))?;
-        if let Some(user) = spec.writer.get_user() {
-            let (u, g) = user.as_nix();
-            let target_chown = mountpoint.to_path_buf();
-            tokio::task::spawn_blocking(move || {
-                nix::unistd::chown(&target_chown, Some(u), Some(g))
-            })
-            .await
-            .map_err(|_| PluginError::Internal("Join error".into()))?
-            .map_err(|e| PluginError::Internal(format!("Chown failed: {}", e)))?;
-        }
 
-        let manager = spec.into_manager(AbsolutePath::from(mountpoint), self.provider.clone())?;
+        let manager =
+            spec.into_manager(AbsolutePath::from(volume.path()), self.provider.clone())?;
 
         if let Err(e) = manager.inject_all().await {
             error!("Injection failed: {}", e);
-            let target_cleanup = mountpoint.to_path_buf();
-            let _ =
-                tokio::task::spawn_blocking(move || umount2(&target_cleanup, MntFlags::MNT_DETACH))
-                    .await;
+            let _ = volume.unmount().await;
             return Err(PluginError::Locket(LocketError::Secret(e)));
         }
 
@@ -241,32 +222,31 @@ impl VolumeRegistry {
         Ok(())
     }
 
-    async fn teardown(&self, name: &VolumeName, mountpoint: &Path) -> Result<(), PluginError> {
+    async fn teardown(&self, name: &VolumeName, volume: VolumeMount) -> Result<(), PluginError> {
         info!(volume=%name, "Tearing down volume");
 
-        let tx = {
+        let (tx, task) = {
             let mut lock = self.entries.write().await;
             if let Some(entry) = lock.get_mut(name) {
-                entry.state.shutdown_tx.take()
+                (
+                    entry.state.shutdown_tx.take(),
+                    entry.state.watcher_task.take(),
+                )
             } else {
-                None
+                (None, None)
             }
         };
         if let Some(tx) = tx {
             let _ = tx.send(true);
         }
 
-        let target = mountpoint.to_path_buf();
-        tokio::task::spawn_blocking(move || umount2(&target, MntFlags::MNT_DETACH))
-            .await
-            .map_err(|_| PluginError::Internal("Join error".into()))?
-            .map_err(|e| PluginError::Internal(format!("Unmount failed: {}", e)))?;
-
-        if tokio::fs::try_exists(mountpoint).await.unwrap_or(false)
-            && let Err(e) = tokio::fs::remove_dir_all(mountpoint).await
-        {
-            warn!("Failed to remove volume dir: {}", e);
+        if let Some(task) = task {
+            if let Err(e) = task.await {
+                error!("Watcher task join error: {}", e);
+            }
         }
+
+        volume.unmount().await?;
         Ok(())
     }
 }
@@ -292,11 +272,19 @@ impl VolumeDriver for VolumeRegistry {
             created_at: Utc::now(),
         };
 
+        let mountpoint = self.runtime_dir.join(name.as_str());
+        let mount = VolumeMount::new(
+            mountpoint.clone(),
+            spec.mount.clone(),
+            spec.writer.get_user().cloned(),
+        );
+
         lock.insert(
             name,
             VolumeEntry {
                 meta,
                 spec,
+                mount,
                 state: ActiveVolume::default(),
             },
         );
@@ -323,25 +311,26 @@ impl VolumeDriver for VolumeRegistry {
 
     async fn mount(&self, name: &VolumeName, id: &MountId) -> Result<PathBuf, PluginError> {
         loop {
-            let (mountpoint, action, notify) = {
+            let (volume, action, notify) = {
                 let mut lock = self.entries.write().await;
                 let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
-                let path = entry.mountpoint(&self.runtime_dir);
+
+                let vol = entry.mount.clone();
 
                 match entry.state.lifecycle {
                     VolumeLifecycle::Ready => {
                         entry.state.mount_ids.insert(id.clone());
-                        return Ok(path);
+                        return Ok(vol.path().to_path_buf());
                     }
                     VolumeLifecycle::Provisioning => (
-                        path,
+                        vol,
                         VolumeLifecycle::Provisioning,
                         entry.state.notify.clone(),
                     ),
                     VolumeLifecycle::Idle => {
                         entry.state.lifecycle = VolumeLifecycle::Provisioning;
                         entry.state.mount_ids.insert(id.clone());
-                        (path, VolumeLifecycle::Idle, entry.state.notify.clone())
+                        (vol, VolumeLifecycle::Idle, entry.state.notify.clone())
                     }
                 }
             };
@@ -355,14 +344,14 @@ impl VolumeDriver for VolumeRegistry {
                     continue;
                 }
 
-                VolumeLifecycle::Idle => match self.provision(name, &mountpoint).await {
+                VolumeLifecycle::Idle => match self.provision(name, volume.clone()).await {
                     Ok(_) => {
                         let mut lock = self.entries.write().await;
                         if let Some(entry) = lock.get_mut(name) {
                             entry.state.lifecycle = VolumeLifecycle::Ready;
                         }
                         notify.notify_waiters();
-                        return Ok(mountpoint);
+                        return Ok(volume.path().to_path_buf());
                     }
                     Err(e) => {
                         let mut lock = self.entries.write().await;
@@ -379,24 +368,23 @@ impl VolumeDriver for VolumeRegistry {
     }
 
     async fn unmount(&self, name: &VolumeName, id: &MountId) -> Result<(), PluginError> {
-        let (mountpoint, needs_teardown) = {
+        let (volume, needs_teardown) = {
             let mut lock = self.entries.write().await;
             let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
 
             entry.state.mount_ids.remove(id);
-
             let empty = entry.state.mount_ids.is_empty();
-            let path = entry.mountpoint(&self.runtime_dir);
+
+            let vol = entry.mount.clone();
 
             if empty {
                 entry.state.lifecycle = VolumeLifecycle::Provisioning;
             }
-
-            (path, empty)
+            (vol, empty)
         };
 
         if needs_teardown {
-            match self.teardown(name, &mountpoint).await {
+            match self.teardown(name, volume).await {
                 Ok(_) => {
                     let mut lock = self.entries.write().await;
                     if let Some(entry) = lock.get_mut(name) {
@@ -427,15 +415,12 @@ impl VolumeDriver for VolumeRegistry {
 
     async fn get(&self, name: &VolumeName) -> Result<Option<VolumeInfo>, PluginError> {
         let lock = self.entries.read().await;
-        Ok(lock.get(name).map(|entry| entry.to_info(&self.runtime_dir)))
+        Ok(lock.get(name).map(|entry| entry.to_info()))
     }
 
     async fn list(&self) -> Result<Vec<VolumeInfo>, PluginError> {
         let lock = self.entries.read().await;
-        Ok(lock
-            .values()
-            .map(|entry| entry.to_info(&self.runtime_dir))
-            .collect())
+        Ok(lock.values().map(|entry| entry.to_info()).collect())
     }
 }
 
