@@ -8,6 +8,7 @@ use nix::unistd::chown;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::str::FromStr;
 use tracing::{info, warn};
@@ -86,8 +87,8 @@ impl VolumeMount {
 
         // It is possible for the target to be mounted multiple times.
         // And then each mount needs to be successively unwound and unmounted.
-        // Instead of trying to check if the mount already exists during mount,
-        // we simply unmount repeatedly until the mount point is empty.
+        // This generally should not happen, but just in case
+        // we will simply unmount repeatedly until the mount point is empty.
         tokio::task::spawn_blocking(move || {
             let mut attempts = 0;
             loop {
@@ -119,6 +120,35 @@ impl VolumeMount {
         }
 
         Ok(())
+    }
+
+    pub async fn is_mounted(&self) -> bool {
+        let path = self.target.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let path = path.as_path();
+
+            let self_meta = match std::fs::metadata(path) {
+                Ok(m) => m,
+                Err(_) => return false, // If path doesn't exist, it can't be mounted
+            };
+
+            let parent = match path.parent() {
+                Some(p) => p,
+                None => return true,
+            };
+
+            let parent_meta = match std::fs::metadata(parent) {
+                Ok(m) => m,
+                Err(_) => return false, // Parent missing (shouldn't happen if child exists)
+            };
+
+            // On tmpfs mounts, the device id will be different
+            // this will not work in the future if bind mounts are supported
+            self_meta.dev() != parent_meta.dev()
+        })
+        .await
+        .unwrap_or(false)
     }
 }
 

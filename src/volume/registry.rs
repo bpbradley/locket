@@ -16,21 +16,17 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{RwLock, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum VolumeLifecycle {
-    /// Volume is created but not mounted on host
     #[default]
     Idle,
-    /// Currently mounting/injecting. Access is blocked for other containers.
     Provisioning,
-    /// Mounted, secrets injected, and ready for use.
     Ready,
 }
 
@@ -41,13 +37,35 @@ struct VolumeMetadata {
     created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ActiveVolume {
     mount_ids: HashSet<MountId>,
-    lifecycle: VolumeLifecycle,
-    notify: Arc<Notify>,
+    state_tx: watch::Sender<VolumeLifecycle>,
     watcher_task: Option<JoinHandle<()>>,
     shutdown_token: Option<CancellationToken>,
+}
+
+impl Default for ActiveVolume {
+    fn default() -> Self {
+        let (tx, _rx) = watch::channel(VolumeLifecycle::Idle);
+        Self {
+            mount_ids: HashSet::new(),
+            state_tx: tx,
+            watcher_task: None,
+            shutdown_token: None,
+        }
+    }
+}
+
+// Helper to get current state from the channel
+impl ActiveVolume {
+    fn lifecycle(&self) -> VolumeLifecycle {
+        *self.state_tx.borrow()
+    }
+
+    fn set_lifecycle(&self, state: VolumeLifecycle) {
+        let _ = self.state_tx.send(state);
+    }
 }
 
 #[derive(Debug)]
@@ -59,19 +77,20 @@ struct VolumeEntry {
 }
 
 impl VolumeEntry {
-    fn mountpoint(&self, root_dir: &Path) -> PathBuf {
-        root_dir.join(self.meta.name.as_str())
+    fn mountpoint(&self) -> std::path::PathBuf {
+        self.mount.path().to_path_buf()
     }
 
     fn to_info(&self) -> VolumeInfo {
         let mut status = HashMap::new();
         status.insert("Mounts".to_string(), self.state.mount_ids.len().to_string());
+        status.insert("State".to_string(), format!("{:?}", self.state.lifecycle()));
         for (k, v) in &self.meta.options {
             status.insert(format!("Option.{}", k), v.clone());
         }
         VolumeInfo {
             name: self.meta.name.to_string(),
-            mountpoint: self.mount.path().display().to_string(),
+            mountpoint: self.mountpoint().display().to_string(),
             created_at: self.meta.created_at.to_rfc3339(),
             status,
         }
@@ -82,7 +101,7 @@ pub struct VolumeRegistry {
     state_file: AbsolutePath,
     runtime_dir: CanonicalPath,
     provider: Arc<dyn SecretsProvider>,
-    entries: RwLock<HashMap<VolumeName, VolumeEntry>>,
+    entries: RwLock<HashMap<VolumeName, Arc<RwLock<VolumeEntry>>>>,
 }
 
 impl VolumeRegistry {
@@ -121,38 +140,21 @@ impl VolumeRegistry {
                     let mut lock = self.entries.write().await;
                     let mut loaded = 0;
                     for meta in list {
-                        let args = match VolumeArgs::try_from(meta.options.clone()) {
-                            Ok(a) => a,
-                            Err(e) => {
-                                error!("Failed to parse options for {}: {}", meta.name, e);
-                                continue;
-                            }
-                        };
-                        let spec: VolumeSpec = match args.try_into() {
-                            Ok(s) => s,
-                            Err(e) => {
-                                error!("Invalid config for {}: {}", meta.name, e);
-                                continue;
-                            }
-                        };
+                        if let Ok(entry) = self.rehydrate_entry(meta).await {
+                            let mut entry = entry;
 
-                        let mountpoint = self.runtime_dir.join(meta.name.as_str());
-                        let mount = VolumeMount::new(
-                            mountpoint.clone(),
-                            spec.mount.clone(),
-                            spec.writer.get_user().cloned(),
-                        );
+                            if entry.mount.is_mounted().await {
+                                info!(volume = %entry.meta.name, "Recovered existing mount during startup");
+                                if let Err(e) = self.provision_internal(&mut entry).await {
+                                    error!(volume = %entry.meta.name, "Failed to re-provision recovered volume: {}", e);
+                                } else {
+                                    entry.state.set_lifecycle(VolumeLifecycle::Ready);
+                                }
+                            }
 
-                        lock.insert(
-                            meta.name.clone(),
-                            VolumeEntry {
-                                meta,
-                                spec,
-                                mount,
-                                state: ActiveVolume::default(),
-                            },
-                        );
-                        loaded += 1;
+                            lock.insert(entry.meta.name.clone(), Arc::new(RwLock::new(entry)));
+                            loaded += 1;
+                        }
                     }
                     info!("Loaded {} volumes from state", loaded);
                 }
@@ -162,9 +164,37 @@ impl VolumeRegistry {
         }
     }
 
+    async fn rehydrate_entry(&self, meta: VolumeMetadata) -> Result<VolumeEntry, ()> {
+        let args = VolumeArgs::try_from(meta.options.clone()).map_err(|e| {
+            error!("Failed to parse options for {}: {}", meta.name, e);
+        })?;
+        let spec: VolumeSpec = args.try_into().map_err(|e| {
+            error!("Invalid config for {}: {}", meta.name, e);
+        })?;
+
+        let mountpoint = self.runtime_dir.join(meta.name.as_str());
+        let mount = VolumeMount::new(
+            mountpoint.clone(),
+            spec.mount.clone(),
+            spec.writer.get_user().cloned(),
+        );
+
+        Ok(VolumeEntry {
+            meta,
+            spec,
+            mount,
+            state: ActiveVolume::default(),
+        })
+    }
+
     async fn persist(&self) -> Result<(), PluginError> {
         let lock = self.entries.read().await;
-        let list: Vec<&VolumeMetadata> = lock.values().map(|v| &v.meta).collect();
+        let mut list = Vec::new();
+        for v in lock.values() {
+            let entry = v.read().await;
+            list.push(entry.meta.clone());
+        }
+
         let json = serde_json::to_string_pretty(&list).map_err(PluginError::Json)?;
 
         let tmp = self.state_file.with_extension("tmp");
@@ -177,72 +207,61 @@ impl VolumeRegistry {
         Ok(())
     }
 
-    async fn provision(&self, name: &VolumeName, volume: VolumeMount) -> Result<(), PluginError> {
+    async fn provision_internal(&self, entry: &mut VolumeEntry) -> Result<(), PluginError> {
+        let name = &entry.meta.name;
         info!(volume=%name, "Provisioning volume resources");
 
-        volume.mount().await?;
-
-        let spec = {
-            let lock = self.entries.read().await;
-            lock.get(name).ok_or(PluginError::NotFound)?.spec.clone()
+        let newly_mounted = if !entry.mount.is_mounted().await {
+            entry.mount.mount().await?;
+            true
+        } else {
+            info!(volume=%name, "Volume already mounted, skipping mount");
+            false
         };
 
-        let watch_enabled = spec.watch;
-
-        let manager =
-            spec.into_manager(AbsolutePath::from(volume.path()), self.provider.clone())?;
+        let manager = entry.spec.clone().into_manager(
+            AbsolutePath::from(entry.mount.path()),
+            self.provider.clone(),
+        )?;
 
         if let Err(e) = manager.inject_all().await {
             error!("Injection failed: {}", e);
-            let _ = volume.unmount().await;
+            if newly_mounted {
+                let _ = entry.mount.unmount().await;
+            }
             return Err(PluginError::Locket(LocketError::Secret(e)));
         }
 
-        if watch_enabled {
+        if entry.spec.watch {
             let token = CancellationToken::new();
-
             let handler = StoppableHandler::new(manager, token.clone());
-
             let watcher = FsWatcher::new(std::time::Duration::from_millis(500), handler);
+
             let task = tokio::spawn(async move {
                 if let Err(e) = watcher.run().await {
                     error!("Watcher failed: {}", e);
                 }
             });
 
-            let mut lock = self.entries.write().await;
-            if let Some(entry) = lock.get_mut(name) {
-                entry.state.watcher_task = Some(task);
-                entry.state.shutdown_token = Some(token);
-            }
+            entry.state.watcher_task = Some(task);
+            entry.state.shutdown_token = Some(token);
         }
 
         Ok(())
     }
 
-    async fn teardown(&self, name: &VolumeName, volume: VolumeMount) -> Result<(), PluginError> {
-        info!(volume=%name, "Tearing down volume");
+    async fn teardown_internal(&self, entry: &mut VolumeEntry) -> Result<(), PluginError> {
+        info!(volume=%entry.meta.name, "Tearing down volume");
 
-        let (token, task) = {
-            let mut lock = self.entries.write().await;
-            if let Some(entry) = lock.get_mut(name) {
-                (
-                    entry.state.shutdown_token.take(),
-                    entry.state.watcher_task.take(),
-                )
-            } else {
-                (None, None)
-            }
-        };
-        if let Some(token) = token {
+        if let Some(token) = entry.state.shutdown_token.take() {
             token.cancel();
         }
 
-        if let Some(task) = task {
+        if let Some(task) = entry.state.watcher_task.take() {
             let _ = task.await;
         }
 
-        volume.unmount().await?;
+        entry.mount.unmount().await?;
         Ok(())
     }
 }
@@ -277,12 +296,12 @@ impl VolumeDriver for VolumeRegistry {
 
         lock.insert(
             name,
-            VolumeEntry {
+            Arc::new(RwLock::new(VolumeEntry {
                 meta,
                 spec,
                 mount,
                 state: ActiveVolume::default(),
-            },
+            })),
         );
         drop(lock);
 
@@ -291,110 +310,95 @@ impl VolumeDriver for VolumeRegistry {
     }
 
     async fn remove(&self, name: &VolumeName) -> Result<(), PluginError> {
-        let mut lock = self.entries.write().await;
-        if let Some(entry) = lock.get(name) {
+        let entry_arc = {
+            let lock = self.entries.read().await;
+            lock.get(name).cloned().ok_or(PluginError::NotFound)?
+        };
+
+        {
+            let entry = entry_arc.read().await;
             if !entry.state.mount_ids.is_empty() {
                 return Err(PluginError::InUse);
             }
-        } else {
-            return Err(PluginError::NotFound);
+            if entry.mount.is_mounted().await {
+                return Err(PluginError::InUse);
+            }
         }
+
+        let mut lock = self.entries.write().await;
         lock.remove(name);
         drop(lock);
+
         self.persist().await?;
         Ok(())
     }
 
-    async fn mount(&self, name: &VolumeName, id: &MountId) -> Result<PathBuf, PluginError> {
+    async fn mount(
+        &self,
+        name: &VolumeName,
+        id: &MountId,
+    ) -> Result<std::path::PathBuf, PluginError> {
+        let entry_arc = {
+            let lock = self.entries.read().await;
+            lock.get(name).cloned().ok_or(PluginError::NotFound)?
+        };
+
         loop {
-            let (volume, action, notify) = {
-                let mut lock = self.entries.write().await;
-                let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
+            let mut entry = entry_arc.write().await;
 
-                let vol = entry.mount.clone();
-
-                match entry.state.lifecycle {
-                    VolumeLifecycle::Ready => {
-                        entry.state.mount_ids.insert(id.clone());
-                        return Ok(vol.path().to_path_buf());
-                    }
-                    VolumeLifecycle::Provisioning => (
-                        vol,
-                        VolumeLifecycle::Provisioning,
-                        entry.state.notify.clone(),
-                    ),
-                    VolumeLifecycle::Idle => {
-                        entry.state.lifecycle = VolumeLifecycle::Provisioning;
-                        entry.state.mount_ids.insert(id.clone());
-                        (vol, VolumeLifecycle::Idle, entry.state.notify.clone())
-                    }
+            match entry.state.lifecycle() {
+                VolumeLifecycle::Ready => {
+                    entry.state.mount_ids.insert(id.clone());
+                    return Ok(entry.mountpoint());
                 }
-            };
-
-            match action {
-                VolumeLifecycle::Ready => unreachable!(),
-
                 VolumeLifecycle::Provisioning => {
+                    let mut rx = entry.state.state_tx.subscribe();
+                    drop(entry);
+
                     info!(volume=%name, "Waiting for existing provisioning to complete...");
-                    notify.notified().await;
+                    let _ = rx.changed().await;
                     continue;
                 }
+                VolumeLifecycle::Idle => {
+                    entry.state.set_lifecycle(VolumeLifecycle::Provisioning);
+                    entry.state.mount_ids.insert(id.clone());
 
-                VolumeLifecycle::Idle => match self.provision(name, volume.clone()).await {
-                    Ok(_) => {
-                        let mut lock = self.entries.write().await;
-                        if let Some(entry) = lock.get_mut(name) {
-                            entry.state.lifecycle = VolumeLifecycle::Ready;
+                    match self.provision_internal(&mut entry).await {
+                        Ok(_) => {
+                            entry.state.set_lifecycle(VolumeLifecycle::Ready);
+                            return Ok(entry.mountpoint());
                         }
-                        notify.notify_waiters();
-                        return Ok(volume.path().to_path_buf());
-                    }
-                    Err(e) => {
-                        let mut lock = self.entries.write().await;
-                        if let Some(entry) = lock.get_mut(name) {
-                            entry.state.lifecycle = VolumeLifecycle::Idle;
+                        Err(e) => {
+                            entry.state.set_lifecycle(VolumeLifecycle::Idle);
                             entry.state.mount_ids.remove(id);
+                            return Err(e);
                         }
-                        notify.notify_waiters();
-                        return Err(e);
                     }
-                },
+                }
             }
         }
     }
 
     async fn unmount(&self, name: &VolumeName, id: &MountId) -> Result<(), PluginError> {
-        let (volume, needs_teardown) = {
-            let mut lock = self.entries.write().await;
-            let entry = lock.get_mut(name).ok_or(PluginError::NotFound)?;
-
-            entry.state.mount_ids.remove(id);
-            let empty = entry.state.mount_ids.is_empty();
-
-            let vol = entry.mount.clone();
-
-            if empty {
-                entry.state.lifecycle = VolumeLifecycle::Provisioning;
-            }
-            (vol, empty)
+        let entry_arc = {
+            let lock = self.entries.read().await;
+            lock.get(name).cloned().ok_or(PluginError::NotFound)?
         };
 
-        if needs_teardown {
-            match self.teardown(name, volume).await {
+        let mut entry = entry_arc.write().await;
+
+        entry.state.mount_ids.remove(id);
+
+        if entry.state.mount_ids.is_empty() {
+            entry.state.set_lifecycle(VolumeLifecycle::Provisioning);
+
+            match self.teardown_internal(&mut entry).await {
                 Ok(_) => {
-                    let mut lock = self.entries.write().await;
-                    if let Some(entry) = lock.get_mut(name) {
-                        entry.state.lifecycle = VolumeLifecycle::Idle;
-                        entry.state.notify.notify_waiters();
-                    }
+                    entry.state.set_lifecycle(VolumeLifecycle::Idle);
                 }
                 Err(e) => {
                     error!("Teardown failed: {}", e);
-                    let mut lock = self.entries.write().await;
-                    if let Some(entry) = lock.get_mut(name) {
-                        entry.state.lifecycle = VolumeLifecycle::Idle;
-                        entry.state.notify.notify_waiters();
-                    }
+                    entry.state.set_lifecycle(VolumeLifecycle::Idle);
                     return Err(e);
                 }
             }
@@ -403,19 +407,30 @@ impl VolumeDriver for VolumeRegistry {
         Ok(())
     }
 
-    async fn path(&self, name: &VolumeName) -> Result<PathBuf, PluginError> {
+    async fn path(&self, name: &VolumeName) -> Result<std::path::PathBuf, PluginError> {
         let lock = self.entries.read().await;
-        let entry = lock.get(name).ok_or(PluginError::NotFound)?;
-        Ok(entry.mountpoint(&self.runtime_dir))
+        let entry_arc = lock.get(name).ok_or(PluginError::NotFound)?;
+        let entry = entry_arc.read().await;
+        Ok(entry.mountpoint())
     }
 
     async fn get(&self, name: &VolumeName) -> Result<Option<VolumeInfo>, PluginError> {
         let lock = self.entries.read().await;
-        Ok(lock.get(name).map(|entry| entry.to_info()))
+        if let Some(entry_arc) = lock.get(name) {
+            let entry = entry_arc.read().await;
+            Ok(Some(entry.to_info()))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn list(&self) -> Result<Vec<VolumeInfo>, PluginError> {
         let lock = self.entries.read().await;
-        Ok(lock.values().map(|entry| entry.to_info()).collect())
+        let mut infos = Vec::new();
+        for entry_arc in lock.values() {
+            let entry = entry_arc.read().await;
+            infos.push(entry.to_info());
+        }
+        Ok(infos)
     }
 }
