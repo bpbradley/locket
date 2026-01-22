@@ -7,21 +7,20 @@ use super::{
 };
 use crate::{
     error::LocketError,
-    events::{EventHandler, FsEvent, HandlerError},
+    events::StoppableHandler,
     path::{AbsolutePath, CanonicalPath},
     provider::SecretsProvider,
-    secrets::SecretFileManager,
     watch::FsWatcher,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{Notify, RwLock, watch};
+use tokio::sync::{Notify, RwLock};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,7 +47,7 @@ struct ActiveVolume {
     lifecycle: VolumeLifecycle,
     notify: Arc<Notify>,
     watcher_task: Option<JoinHandle<()>>,
-    shutdown_tx: Option<watch::Sender<bool>>,
+    shutdown_token: Option<CancellationToken>,
 }
 
 #[derive(Debug)]
@@ -200,12 +199,11 @@ impl VolumeRegistry {
         }
 
         if watch_enabled {
-            let (tx, rx) = watch::channel(false);
-            let adapter = VolumeEventHandler {
-                inner: manager,
-                stop_rx: rx,
-            };
-            let watcher = FsWatcher::new(std::time::Duration::from_millis(500), adapter);
+            let token = CancellationToken::new();
+
+            let handler = StoppableHandler::new(manager, token.clone());
+
+            let watcher = FsWatcher::new(std::time::Duration::from_millis(500), handler);
             let task = tokio::spawn(async move {
                 if let Err(e) = watcher.run().await {
                     error!("Watcher failed: {}", e);
@@ -215,7 +213,7 @@ impl VolumeRegistry {
             let mut lock = self.entries.write().await;
             if let Some(entry) = lock.get_mut(name) {
                 entry.state.watcher_task = Some(task);
-                entry.state.shutdown_tx = Some(tx);
+                entry.state.shutdown_token = Some(token);
             }
         }
 
@@ -225,25 +223,23 @@ impl VolumeRegistry {
     async fn teardown(&self, name: &VolumeName, volume: VolumeMount) -> Result<(), PluginError> {
         info!(volume=%name, "Tearing down volume");
 
-        let (tx, task) = {
+        let (token, task) = {
             let mut lock = self.entries.write().await;
             if let Some(entry) = lock.get_mut(name) {
                 (
-                    entry.state.shutdown_tx.take(),
+                    entry.state.shutdown_token.take(),
                     entry.state.watcher_task.take(),
                 )
             } else {
                 (None, None)
             }
         };
-        if let Some(tx) = tx {
-            let _ = tx.send(true);
+        if let Some(token) = token {
+            token.cancel();
         }
 
         if let Some(task) = task {
-            if let Err(e) = task.await {
-                error!("Watcher task join error: {}", e);
-            }
+            let _ = task.await;
         }
 
         volume.unmount().await?;
@@ -421,29 +417,5 @@ impl VolumeDriver for VolumeRegistry {
     async fn list(&self) -> Result<Vec<VolumeInfo>, PluginError> {
         let lock = self.entries.read().await;
         Ok(lock.values().map(|entry| entry.to_info()).collect())
-    }
-}
-
-struct VolumeEventHandler {
-    inner: SecretFileManager,
-    stop_rx: watch::Receiver<bool>,
-}
-
-#[async_trait]
-impl EventHandler for VolumeEventHandler {
-    fn paths(&self) -> Vec<AbsolutePath> {
-        self.inner.paths()
-    }
-
-    async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
-        self.inner.handle(events).await
-    }
-
-    fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
-        let mut rx = self.stop_rx.clone();
-        Box::pin(async move {
-            let _ = rx.changed().await;
-            Ok(())
-        })
     }
 }

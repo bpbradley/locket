@@ -5,6 +5,7 @@ use tracing::info;
 
 pub async fn volume(config: PluginConfig) -> Result<(), LocketError> {
     config.logger.init()?;
-    info!("Initializing Global Provider...");
-    VolumePlugin::new(config).run().await
+    VolumePlugin::new(config).run().await?;
+    info!("Volume plugin exited successfully");
+    Ok(())
 }

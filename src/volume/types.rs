@@ -11,6 +11,7 @@ use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
 use tracing::{info, warn};
+
 pub enum VolumeType {
     Tmpfs,
 }
@@ -94,7 +95,7 @@ impl VolumeMount {
                     Ok(_) => {
                         attempts += 1;
                     }
-                    Err(e) if e == Errno::EINVAL => {
+                    Err(Errno::EINVAL) => {
                         if attempts > 0 {
                             info!("Volume unmounted with {} layers.", attempts);
                         }
@@ -111,10 +112,10 @@ impl VolumeMount {
         .map_err(|_| PluginError::Internal("Join error".into()))?
         .map_err(|e| PluginError::Internal(format!("Unmount failed: {}", e)))?;
 
-        if tokio::fs::try_exists(&self.target).await.unwrap_or(false) {
-            if let Err(e) = tokio::fs::remove_dir(&self.target).await {
-                warn!("Failed to remove directory {:?}: {}", self.target, e);
-            }
+        if tokio::fs::try_exists(&self.target).await.unwrap_or(false)
+            && let Err(e) = tokio::fs::remove_dir(&self.target).await
+        {
+            warn!("Failed to remove directory {:?}: {}", self.target, e);
         }
 
         Ok(())

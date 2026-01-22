@@ -1,10 +1,10 @@
+use crate::events::wait_for_signal;
 use crate::{error::LocketError, path::AbsolutePath};
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use std::sync::Arc;
 use tokio::net::UnixListener;
 use tracing::{error, info};
-
 pub mod api;
 pub mod config;
 pub mod driver;
@@ -32,7 +32,7 @@ impl VolumePlugin {
         self.ensure_socket_path(socket_path).await?;
         let listener = UnixListener::bind(socket_path).map_err(LocketError::Io)?;
 
-        let provider = self.config.provider.build().await?;
+        let provider = self.config.provider.clone().build().await?;
 
         let driver = Arc::new(
             VolumeRegistry::new(
@@ -47,21 +47,34 @@ impl VolumePlugin {
 
         info!(socket=?socket_path, "Docker Plugin listening");
 
-        loop {
-            match listener.accept().await {
-                Ok((stream, _addr)) => {
-                    let io = TokioIo::new(stream);
-                    let svc = service.clone();
+        let exit = wait_for_signal(false);
+        tokio::pin!(exit);
 
-                    tokio::task::spawn(async move {
-                        if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
-                            error!("Error serving connection: {:?}", err);
+        loop {
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, _addr)) => {
+                            let io = TokioIo::new(stream);
+                            let svc = service.clone();
+
+                            tokio::task::spawn(async move {
+                                if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
+                                    error!("Error serving connection: {:?}", err);
+                                }
+                            });
                         }
-                    });
+                        Err(e) => error!("Socket accept error: {}", e),
+                    }
                 }
-                Err(e) => error!("Socket accept error: {}", e),
+
+                _ = &mut exit => {
+                    break;
+                }
             }
         }
+
+        Ok(())
     }
 
     async fn ensure_socket_path(&self, path: &AbsolutePath) -> Result<(), LocketError> {
@@ -78,5 +91,11 @@ impl VolumePlugin {
                 .map_err(LocketError::Io)?;
         }
         Ok(())
+    }
+}
+
+impl Drop for VolumePlugin {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.config.socket);
     }
 }

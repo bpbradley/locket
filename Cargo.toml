@@ -52,6 +52,7 @@ async-trait = "0.1"
 sanitize-filename = "0.6"
 humantime = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 futures = { version = "0.3"}
 url = { version = "2", features = ["serde"]}
 toml = {version = "0.9"}
