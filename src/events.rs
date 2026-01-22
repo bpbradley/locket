@@ -135,10 +135,16 @@ impl<H: EventHandler> EventHandler for StoppableHandler<H> {
 
     fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
         let token = self.token.clone();
-
+        let inner_wait = self.inner.wait();
         Box::pin(async move {
-            token.cancelled().await;
-            Ok(())
+            tokio::select! {
+                res = inner_wait => {
+                    res
+                }
+                _ = token.cancelled() => {
+                    Ok(())
+                }
+            }
         })
     }
 
