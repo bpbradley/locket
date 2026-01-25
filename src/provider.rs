@@ -10,7 +10,7 @@ use crate::path::CanonicalPath;
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize, Serializer};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -33,11 +33,23 @@ pub mod config;
 mod connect;
 #[cfg(feature = "infisical")]
 mod infisical;
+pub mod managed;
 #[cfg(feature = "op")]
 mod op;
 mod references;
 
+use managed::{ManagedProvider, ProviderBuilder};
 pub use references::{ReferenceParseError, ReferenceParser, SecretReference};
+
+/// Trait for configuration structs that can produce a "signature" representing their content's freshness.
+#[async_trait]
+pub trait Signature: Send + Sync {
+    /// Returns a hash of the configuration's sensitive content.
+    ///
+    /// For static configuration, this may assume a constant or default.
+    /// For file-based configuration, this should check the file content.
+    async fn signature(&self) -> Result<u64, ProviderError>;
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -103,7 +115,7 @@ pub trait SecretsProvider: ReferenceParser + Send + Sync {
 }
 
 /// Provider backend configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Provider {
     #[cfg(feature = "op")]
     Op(config::op::OpConfig),
@@ -117,22 +129,70 @@ pub enum Provider {
 
 impl Provider {
     pub async fn build(self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
+        let managed = ManagedProvider::new(self).await?;
+        Ok(Arc::new(managed))
+    }
+}
+
+#[async_trait]
+impl Signature for Provider {
+    async fn signature(&self) -> Result<u64, ProviderError> {
+        match self {
+            #[cfg(feature = "op")]
+            Self::Op(c) => c.signature().await,
+            #[cfg(feature = "connect")]
+            Self::Connect(c) => c.signature().await,
+            #[cfg(feature = "bws")]
+            Self::Bws(c) => c.signature().await,
+            #[cfg(feature = "infisical")]
+            Self::Infisical(c) => c.signature().await,
+        }
+    }
+}
+
+impl ReferenceParser for Provider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        match self {
+            #[cfg(feature = "op")]
+            Self::Op(_) => references::OpReference::parse(raw)
+                .ok()
+                .map(SecretReference::OnePassword),
+            #[cfg(feature = "connect")]
+            Self::Connect(_) => references::OpReference::parse(raw)
+                .ok()
+                .map(SecretReference::OnePassword),
+            #[cfg(feature = "bws")]
+            Self::Bws(_) => references::BwsReference::from_str(raw)
+                .ok()
+                .map(SecretReference::Bws),
+            #[cfg(feature = "infisical")]
+            Self::Infisical(_) => references::InfisicalReference::from_str(raw)
+                .ok()
+                .map(SecretReference::Infisical),
+        }
+    }
+}
+
+#[async_trait]
+impl ProviderBuilder for Provider {
+    async fn connect(&self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
         let provider: Arc<dyn SecretsProvider> = match self {
             #[cfg(feature = "op")]
-            Self::Op(c) => Arc::new(op::OpProvider::new(c).await?),
+            Self::Op(c) => Arc::new(op::OpProvider::new(c.clone()).await?),
             #[cfg(feature = "connect")]
-            Self::Connect(c) => Arc::new(connect::OpConnectProvider::new(c).await?),
+            Self::Connect(c) => Arc::new(connect::OpConnectProvider::new(c.clone()).await?),
             #[cfg(feature = "bws")]
-            Self::Bws(c) => Arc::new(bws::BwsProvider::new(c).await?),
+            Self::Bws(c) => Arc::new(bws::BwsProvider::new(c.clone()).await?),
             #[cfg(feature = "infisical")]
-            Self::Infisical(c) => Arc::new(infisical::InfisicalProvider::new(c).await?),
+            Self::Infisical(c) => Arc::new(infisical::InfisicalProvider::new(c.clone()).await?),
         };
-
         Ok(provider)
     }
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
+#[derive(
+    Args, Debug, Clone, Hash, PartialEq, Eq, LayeredConfig, Deserialize, Serialize, Default,
+)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProviderArgs {
     /// Secrets provider backend to use.
@@ -171,7 +231,7 @@ impl TryFrom<ProviderArgs> for Provider {
     }
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, ValueEnum, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
     /// 1Password Service Account
@@ -188,7 +248,9 @@ pub enum ProviderKind {
     Infisical,
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
+#[derive(
+    Args, Debug, Clone, Hash, PartialEq, Eq, LayeredConfig, Deserialize, Serialize, Default,
+)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProviderConfigs {
     #[cfg(feature = "op")]
@@ -212,32 +274,104 @@ pub struct ProviderConfigs {
     pub infisical: config::infisical::InfisicalArgs,
 }
 
-/// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
-#[derive(Debug, Clone, Deserialize, Default)]
+/// A source for an authentication token.
+#[derive(Debug, Clone)]
+pub enum TokenSource {
+    Literal(SecretString),
+    File(CanonicalPath),
+}
+
+impl Eq for TokenSource {}
+
+impl PartialEq for TokenSource {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Literal(l), Self::Literal(r)) => {
+                use secrecy::ExposeSecret;
+                l.expose_secret() == r.expose_secret()
+            }
+            (Self::File(l), Self::File(r)) => l == r,
+            _ => false,
+        }
+    }
+}
+
+impl std::hash::Hash for TokenSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        use secrecy::ExposeSecret;
+        std::mem::discriminant(self).hash(state);
+
+        match self {
+            TokenSource::Literal(s) => {
+                // Must hash the secret content to use it as a cache identity.
+                // This is safe because the hasher state is opaque and not persisted.
+                // To avoid this completely, consider using a file-based token source
+                // which will hash the file path instead.
+                s.expose_secret().hash(state);
+            }
+            TokenSource::File(p) => {
+                p.hash(state);
+            }
+        }
+    }
+}
+
+/// A wrapper around `TokenSource` which allows constructing from either a direct token or a file path.
+#[derive(Debug, Clone, Deserialize, Hash, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(try_from = "String")]
-pub struct AuthToken(SecretString);
+pub struct AuthToken(TokenSource);
 
 impl AuthToken {
-    /// Simple wrapper for SecretString
+    /// Create a new AuthToken from a SecretString
     pub fn new(token: SecretString) -> Self {
-        Self(token)
+        Self(TokenSource::Literal(token))
     }
 
-    pub fn try_from_file(path: CanonicalPath) -> Result<Self, ProviderError> {
-        let content = std::fs::read_to_string(path.as_path()).map_err(|e| {
-            ProviderError::InvalidConfig(format!("failed to read token file {:?}: {}", path, e))
-        })?;
-
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
-            return Err(ProviderError::InvalidConfig(format!(
-                "token file {:?} is empty",
-                path
-            )));
+    /// Resolves the token source to the actual secret string.
+    pub async fn resolve(&self) -> Result<SecretString, ProviderError> {
+        match &self.0 {
+            TokenSource::Literal(s) => Ok(s.clone()),
+            TokenSource::File(path) => {
+                let content = tokio::fs::read_to_string(path.as_path())
+                    .await
+                    .map_err(|e| {
+                        ProviderError::InvalidConfig(format!(
+                            "failed to read token file {:?}: {}",
+                            path, e
+                        ))
+                    })?;
+                let trimmed = content.trim();
+                if trimmed.is_empty() {
+                    return Err(ProviderError::InvalidConfig(format!(
+                        "token file {:?} is empty",
+                        path
+                    )));
+                }
+                Ok(SecretString::new(trimmed.to_owned().into()))
+            }
         }
+    }
 
-        Ok(Self(SecretString::new(trimmed.to_owned().into())))
+    /// Returns a signature of the current state of the token source.
+    pub async fn signature(&self) -> Result<u64, ProviderError> {
+        match &self.0 {
+            TokenSource::Literal(_) => Ok(0),
+            TokenSource::File(path) => {
+                let content = tokio::fs::read_to_string(path.as_path())
+                    .await
+                    .map_err(|e| {
+                        ProviderError::InvalidConfig(format!(
+                            "failed to read token file for signature {:?}: {}",
+                            path, e
+                        ))
+                    })?;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                content.hash(&mut hasher);
+                Ok(hasher.finish())
+            }
+        }
     }
 }
 
@@ -248,18 +382,6 @@ impl Serialize for AuthToken {
     {
         // Do not expose the actual token.
         serializer.serialize_str("[REDACTED]")
-    }
-}
-
-impl From<AuthToken> for SecretString {
-    fn from(token: AuthToken) -> Self {
-        token.0
-    }
-}
-
-impl AsRef<SecretString> for AuthToken {
-    fn as_ref(&self) -> &SecretString {
-        &self.0
     }
 }
 
@@ -288,21 +410,16 @@ impl FromStr for AuthToken {
                     path, e
                 ))
             })?;
-            Self::try_from_file(canon)
+            Ok(Self(TokenSource::File(canon)))
         } else {
-            Ok(Self(SecretString::new(s.to_owned().into())))
+            Ok(Self(TokenSource::Literal(SecretString::new(
+                s.to_owned().into(),
+            ))))
         }
     }
 }
 
-/// Allows exposing the inner secret string using ExposeSecret from `secrecy` crate
-impl ExposeSecret<str> for AuthToken {
-    fn expose_secret(&self) -> &str {
-        self.0.expose_secret()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub struct ConcurrencyLimit(NonZeroUsize);
 

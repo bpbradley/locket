@@ -1,9 +1,10 @@
-use crate::provider::{AuthToken, ConcurrencyLimit, bws::BwsUrl};
+use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, Signature, bws::BwsUrl};
+use async_trait::async_trait;
 use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BwsConfig {
     pub bws_api_url: BwsUrl,
     pub bws_identity_url: BwsUrl,
@@ -12,7 +13,16 @@ pub struct BwsConfig {
     pub bws_token: AuthToken,
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
+#[async_trait]
+impl Signature for BwsConfig {
+    async fn signature(&self) -> Result<u64, ProviderError> {
+        self.bws_token.signature().await
+    }
+}
+
+#[derive(
+    Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default, PartialEq, Eq, Hash,
+)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "BwsConfig")]
 pub struct BwsArgs {

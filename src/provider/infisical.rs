@@ -35,7 +35,14 @@ pub struct InfisicalProvider {
 
 impl InfisicalProvider {
     pub async fn new(config: InfisicalConfig) -> Result<Self, ProviderError> {
-        let (auth_config, config) = config.into();
+        let secret = config.infisical_client_secret.resolve().await?;
+        let auth_config = AuthConfig {
+            url: config.infisical_url.clone(),
+            client_id: config.infisical_client_id,
+            client_secret: secret,
+        };
+
+        let provider_config = ProviderConfig::from(config);
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
@@ -46,7 +53,7 @@ impl InfisicalProvider {
 
         Ok(Self {
             client,
-            config,
+            config: provider_config,
             auth,
         })
     }
@@ -330,24 +337,16 @@ struct ProviderConfig {
     max_concurrent: ConcurrencyLimit,
 }
 
-impl From<InfisicalConfig> for (AuthConfig, ProviderConfig) {
+impl From<InfisicalConfig> for ProviderConfig {
     fn from(config: InfisicalConfig) -> Self {
-        let auth_config = AuthConfig {
-            url: config.infisical_url.clone(),
-            client_id: config.infisical_client_id,
-            client_secret: config.infisical_client_secret.into(),
-        };
-
-        let provider_config = ProviderConfig {
+        ProviderConfig {
             url: config.infisical_url,
             default_env: config.infisical_default_environment,
             default_project: config.infisical_default_project_id,
             default_path: config.infisical_default_path,
             default_secret_type: config.infisical_default_secret_type,
             max_concurrent: config.infisical_max_concurrent,
-        };
-
-        (auth_config, provider_config)
+        }
     }
 }
 

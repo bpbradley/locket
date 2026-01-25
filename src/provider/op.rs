@@ -11,7 +11,7 @@
 use super::references::{OpReference, ReferenceParser, SecretReference};
 use crate::path::AbsolutePath;
 use crate::provider::config::op::OpConfig;
-use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, SecretsProvider};
+use crate::provider::{ConcurrencyLimit, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
@@ -21,12 +21,14 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 pub struct OpProvider {
-    token: AuthToken,
+    token: SecretString,
     config: Option<AbsolutePath>,
 }
 
 impl OpProvider {
     pub async fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
+        let op_token = cfg.op_token.resolve().await?;
+
         // Try to authenticate with the provided token
         let mut cmd = Command::new("op");
         cmd.arg("whoami")
@@ -36,7 +38,7 @@ impl OpProvider {
                 "XDG_CONFIG_HOME",
                 std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
             )
-            .env("OP_SERVICE_ACCOUNT_TOKEN", cfg.op_token.expose_secret())
+            .env("OP_SERVICE_ACCOUNT_TOKEN", op_token.expose_secret())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -56,7 +58,7 @@ impl OpProvider {
         }
 
         Ok(Self {
-            token: cfg.op_token,
+            token: op_token,
             config: cfg.op_config_dir,
         })
     }

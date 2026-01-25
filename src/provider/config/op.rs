@@ -1,16 +1,26 @@
 use crate::path::AbsolutePath;
 use crate::provider::AuthToken;
+use async_trait::async_trait;
 use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OpConfig {
     pub op_token: AuthToken,
     pub op_config_dir: Option<AbsolutePath>,
 }
 
-#[derive(Args, Debug, Clone, Default, LayeredConfig, Deserialize, Serialize)]
+#[async_trait]
+impl crate::provider::Signature for OpConfig {
+    async fn signature(&self) -> Result<u64, crate::provider::ProviderError> {
+        self.op_token.signature().await
+    }
+}
+
+#[derive(
+    Args, Debug, Clone, Default, LayeredConfig, Deserialize, Serialize, PartialEq, Eq, Hash,
+)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "OpConfig")]
 pub struct OpArgs {

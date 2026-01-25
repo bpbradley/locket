@@ -6,10 +6,11 @@ use super::{
     types::{MountId, VolumeMount, VolumeName},
 };
 use crate::{
+    config::Overlay,
     error::LocketError,
     events::StoppableHandler,
     path::{AbsolutePath, CanonicalPath},
-    provider::SecretsProvider,
+    provider::{Provider, ProviderArgs, SecretsProvider},
     watch::FsWatcher,
 };
 use async_trait::async_trait;
@@ -100,7 +101,8 @@ impl Volume {
 pub struct VolumeRegistry {
     state_file: AbsolutePath,
     runtime_dir: CanonicalPath,
-    provider: Arc<dyn SecretsProvider>,
+    default_config: ProviderArgs,
+    provider_cache: RwLock<HashMap<ProviderArgs, Arc<dyn SecretsProvider>>>,
     volumes: RwLock<HashMap<VolumeName, Arc<RwLock<Volume>>>>,
 }
 
@@ -108,7 +110,7 @@ impl VolumeRegistry {
     pub async fn new(
         state_dir: AbsolutePath,
         runtime_dir: AbsolutePath,
-        provider: Arc<dyn SecretsProvider>,
+        default_config: ProviderArgs,
     ) -> Result<Self, LocketError> {
         if let Err(e) = tokio::fs::create_dir_all(&runtime_dir).await {
             warn!("Failed to create runtime dir {:?}: {}", runtime_dir, e);
@@ -117,7 +119,8 @@ impl VolumeRegistry {
         let registry = Self {
             state_file: state_dir.join("state.json"),
             runtime_dir: runtime_dir.canonicalize()?,
-            provider,
+            default_config,
+            provider_cache: RwLock::new(HashMap::new()),
             volumes: RwLock::new(HashMap::new()),
         };
         registry.load().await;
@@ -129,28 +132,28 @@ impl VolumeRegistry {
             return;
         }
 
-        if let Ok(data) = tokio::fs::read_to_string(&self.state_file).await {
-            if let Ok(configs) = serde_json::from_str::<Vec<VolumeConfig>>(&data) {
-                let mut lock = self.volumes.write().await;
-                for config in configs {
-                    let mountpoint = self.runtime_dir.join(config.name.as_str());
-                    let mount = VolumeMount::new(
-                        mountpoint,
-                        config.spec.mount.clone(),
-                        config.spec.writer.get_user().cloned(),
-                    );
+        if let Ok(data) = tokio::fs::read_to_string(&self.state_file).await
+            && let Ok(configs) = serde_json::from_str::<Vec<VolumeConfig>>(&data)
+        {
+            let mut lock = self.volumes.write().await;
+            for config in configs {
+                let mountpoint = self.runtime_dir.join(config.name.as_str());
+                let mount = VolumeMount::new(
+                    mountpoint,
+                    config.spec.mount.clone(),
+                    config.spec.writer.get_user().cloned(),
+                );
 
-                    let mut volume = Volume::new(config, mount);
+                let mut volume = Volume::new(config, mount);
 
-                    if volume.mount.is_mounted().await {
-                        info!(volume=%volume.config.name, "Recovered existing mount");
-                        if let Ok(resources) = self.provision_resources(&volume).await {
-                            volume.state = VolumeRuntime::Ready(resources);
-                        }
+                if volume.mount.is_mounted().await {
+                    info!(volume=%volume.config.name, "Recovered existing mount");
+                    if let Ok(resources) = self.provision_resources(&volume).await {
+                        volume.state = VolumeRuntime::Ready(resources);
                     }
-
-                    lock.insert(volume.config.name.clone(), Arc::new(RwLock::new(volume)));
                 }
+
+                lock.insert(volume.config.name.clone(), Arc::new(RwLock::new(volume)));
             }
         }
     }
@@ -185,11 +188,45 @@ impl VolumeRegistry {
             false
         };
 
+        let effective_args = self
+            .default_config
+            .clone()
+            .overlay(vol.config.spec.provider.clone());
+
+        let effective_config: Provider = effective_args
+            .clone()
+            .try_into()
+            .map_err(PluginError::Locket)?;
+
+        let provider = {
+            let cache = self.provider_cache.read().await;
+            if let Some(p) = cache.get(&effective_args) {
+                p.clone()
+            } else {
+                drop(cache);
+
+                let new_p: Arc<dyn SecretsProvider> = effective_config
+                    .build()
+                    .await
+                    .map_err(|e| PluginError::Locket(LocketError::Provider(e)))?;
+
+                let mut cache = self.provider_cache.write().await;
+
+                // re-check under write lock in case another thread built it first.
+                if let Some(existing_p) = cache.get(&effective_args) {
+                    existing_p.clone()
+                } else {
+                    cache.insert(effective_args, new_p.clone());
+                    new_p
+                }
+            }
+        };
+
         let manager = vol
             .config
             .spec
             .clone()
-            .into_manager(AbsolutePath::from(vol.mount.path()), self.provider.clone())?;
+            .into_manager(AbsolutePath::from(vol.mount.path()), provider)?;
 
         if let Err(e) = manager.inject_all().await {
             error!("Injection failed: {}", e);

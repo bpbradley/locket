@@ -4,9 +4,13 @@ services:
     demo:
         user: 1000:1000
         image: busybox
-        command: ["sh", "-c", "cat /run/secrets/locket/.env && sleep 120"]
+        command: 
+            - "sh"
+            - "-c"
+            - "cat /run/secrets/locket/.env && cat /run/secrets/locket-bws/secret && echo && sleep 120"
         volumes:
             - locket-volume:/run/secrets/locket:ro
+            - locket-volume-bws:/run/secrets/locket-bws:ro
 volumes:
     locket-volume:
         driver: locket
@@ -14,3 +18,10 @@ volumes:
             user: 1000:1000
             secret: /home/bbradley/git/locket/secrets/op/templates/.env
             watch: "true"
+    locket-volume-bws:
+        driver: locket
+        driver_opts:
+            user: 1000:1000
+            provider: bws
+            bws-token: file:/etc/tokens/bws
+            secret: secret={{814d7d9a-54a5-47a0-afc0-b3a7015213c4}}

@@ -41,8 +41,10 @@ impl BwsProvider {
 
         let client = Client::new(Some(settings));
 
+        let token = cfg.bws_token.resolve().await?;
+
         let auth_req = AccessTokenLoginRequest {
-            access_token: cfg.bws_token.expose_secret().to_string(),
+            access_token: token.expose_secret().to_string(),
             state_file: None, // We are stateless; no cache file
         };
 
@@ -117,7 +119,7 @@ impl SecretsProvider for BwsProvider {
 /// BWS SDK URL wrapper
 /// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
 /// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub struct BwsUrl(Url);
 

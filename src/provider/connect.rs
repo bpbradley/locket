@@ -14,7 +14,7 @@
 use super::references::{OpReference, ReferenceParser, SecretReference};
 use crate::provider::ConcurrencyLimit;
 use crate::provider::config::connect::ConnectConfig;
-use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use reqwest::{Client, StatusCode};
@@ -31,14 +31,14 @@ use url::Url;
 pub struct OpConnectProvider {
     client: Client,
     host: Url,
-    token: AuthToken,
+    token: SecretString,
     cache: Arc<Mutex<ResolutionCache>>,
     max_concurrent: ConcurrencyLimit,
 }
 
 impl OpConnectProvider {
     pub async fn new(cfg: ConnectConfig) -> Result<Self, ProviderError> {
-        let token = cfg.connect_token;
+        let token = cfg.connect_token.resolve().await?;
 
         let host = cfg.connect_host;
 

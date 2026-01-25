@@ -32,13 +32,11 @@ impl VolumePlugin {
         self.ensure_socket_path(socket_path).await?;
         let listener = UnixListener::bind(socket_path).map_err(LocketError::Io)?;
 
-        let provider = self.config.provider.clone().build().await?;
-
         let driver = Arc::new(
             VolumeRegistry::new(
                 self.config.state_dir.clone(),
                 self.config.runtime_dir.clone(),
-                provider,
+                self.config.provider.clone(),
             )
             .await?,
         );

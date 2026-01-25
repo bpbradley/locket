@@ -1,6 +1,6 @@
 use crate::logging::{Logger, LoggerArgs};
 use crate::path::AbsolutePath;
-use crate::provider::{Provider, ProviderArgs};
+use crate::provider::ProviderArgs;
 use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ pub struct PluginConfig {
     pub state_dir: AbsolutePath,
     pub runtime_dir: AbsolutePath,
     pub logger: Logger,
-    pub provider: Provider,
+    pub provider: ProviderArgs,
 }
 
 #[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]

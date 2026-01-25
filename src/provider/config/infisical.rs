@@ -1,13 +1,14 @@
 use crate::provider::{
-    AuthToken, ConcurrencyLimit,
+    AuthToken, ConcurrencyLimit, ProviderError, Signature,
     references::{InfisicalPath, InfisicalProjectId, InfisicalSecretType, InfisicalSlug},
 };
+use async_trait::async_trait;
 use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InfisicalConfig {
     pub infisical_url: url::Url,
     pub infisical_client_secret: AuthToken,
@@ -19,7 +20,16 @@ pub struct InfisicalConfig {
     pub infisical_max_concurrent: ConcurrencyLimit,
 }
 
-#[derive(Args, Debug, Clone, Default, LayeredConfig, Deserialize, Serialize)]
+#[async_trait]
+impl Signature for InfisicalConfig {
+    async fn signature(&self) -> Result<u64, ProviderError> {
+        self.infisical_client_secret.signature().await
+    }
+}
+
+#[derive(
+    Args, Debug, Clone, Default, LayeredConfig, Deserialize, Serialize, PartialEq, Eq, Hash,
+)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "InfisicalConfig")]
 pub struct InfisicalArgs {
