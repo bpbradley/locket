@@ -127,19 +127,6 @@ impl OpReference {
     }
 }
 
-impl<'a> TryFrom<&'a SecretReference> for &'a OpReference {
-    type Error = ();
-
-    #[allow(irrefutable_let_patterns)]
-    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
-        if let SecretReference::OnePassword(op) = value {
-            Ok(op)
-        } else {
-            Err(())
-        }
-    }
-}
-
 impl std::fmt::Display for OpReference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.raw)

@@ -173,19 +173,6 @@ pub struct InfisicalOptions {
     pub secret_type: Option<InfisicalSecretType>,
 }
 
-impl<'a> TryFrom<&'a SecretReference> for &'a InfisicalReference {
-    type Error = ();
-
-    #[allow(irrefutable_let_patterns)]
-    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
-        if let SecretReference::Infisical(inf) = value {
-            Ok(inf)
-        } else {
-            Err(())
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct InfisicalSlug(String);

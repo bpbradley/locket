@@ -56,19 +56,6 @@ impl From<BwsReference> for Uuid {
     }
 }
 
-impl<'a> TryFrom<&'a SecretReference> for &'a BwsReference {
-    type Error = ();
-
-    #[allow(irrefutable_let_patterns)]
-    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
-        if let SecretReference::Bws(bws) = value {
-            Ok(bws)
-        } else {
-            Err(())
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
