@@ -3,6 +3,8 @@ variable "IS_PRERELEASE" { default = false }
 variable "REGISTRY"      { default = "ghcr.io/bpbradley" }
 variable "IMAGE"         { default = "locket" }
 variable "PLATFORMS"     { default = "linux/amd64" }
+variable "CACHE_FROM"    { default = "" }
+variable "CACHE_TO"      { default = "" }
 
 group "release" {
   targets = ["connect", "op", "bws", "infisical", "aio"]
@@ -16,6 +18,8 @@ target "_common" {
   context   = ".."
   dockerfile = "docker/Dockerfile"
   platforms = [PLATFORMS]
+  cache-from = CACHE_FROM == "" ? [] : [CACHE_FROM]
+  cache-to   = CACHE_TO == ""   ? [] : [CACHE_TO]
 }
 
 # Helper to generate tags conditionally based on prerelease

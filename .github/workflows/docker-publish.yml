@@ -46,5 +46,8 @@ jobs:
 
             - name: Build / Push
               working-directory: docker
+              env:
+                  CACHE_FROM: type=gha
+                  CACHE_TO: type=gha,mode=max
               run: |
                   docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release --push

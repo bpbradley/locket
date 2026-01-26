@@ -21,6 +21,7 @@ impl ReferenceSyntax for BwsReference {
 
 impl Narrow for BwsReference {
     fn narrow(r: &SecretReference) -> Option<&Self> {
+        #[allow(unreachable_patterns)]
         match r {
             SecretReference::Bws(inner) => Some(inner),
             _ => None,

@@ -98,6 +98,7 @@ impl ReferenceSyntax for InfisicalReference {
 
 impl Narrow for InfisicalReference {
     fn narrow(r: &SecretReference) -> Option<&Self> {
+        #[allow(unreachable_patterns)]
         match r {
             SecretReference::Infisical(inner) => Some(inner),
             _ => None,

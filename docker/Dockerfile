@@ -2,16 +2,28 @@
 # check=skip=SecretsUsedInArgOrEnv
 
 ARG RUST_TAG=1.92-alpine3.22
-FROM rust:${RUST_TAG} AS build
-WORKDIR /src
-RUN apk add --no-cache musl-dev build-base pkgconfig \
-    && rustup target add x86_64-unknown-linux-musl
 
-COPY Cargo.toml Cargo.lock ./
+FROM rust:${RUST_TAG} AS chef
+USER root
+RUN apk add --no-cache musl-dev build-base pkgconfig \
+    && rustup target add x86_64-unknown-linux-musl \
+    && cargo install cargo-chef
+WORKDIR /src
+
+FROM chef AS planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /src/recipe.json recipe.json
 
 ARG FEATURES="op,connect,bws,infisical,exec"
 
+RUN cargo chef cook --release --target x86_64-unknown-linux-musl \
+    --recipe-path recipe.json \
+    --no-default-features --features "${FEATURES}"
+
+COPY . .
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
     --no-default-features --features "${FEATURES}" \
     && strip target/x86_64-unknown-linux-musl/release/locket
@@ -65,7 +77,7 @@ COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
 COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
 COPY --from=rootfs --chown=nonroot:nonroot /etc/locket /etc/locket
-COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
+COPY --from=builder /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 
 WORKDIR /
 USER nonroot:nonroot
@@ -116,6 +128,6 @@ RUN addgroup -g 65532 nonroot \
 
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
-COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
+COPY --from=builder /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 VOLUME ["/run/secrets/locket", "/templates"]
 ENTRYPOINT ["/bin/bash"]

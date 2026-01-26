@@ -62,7 +62,7 @@ jobs:
     docker:
         name: Docker build
         needs: filter
-        if: needs.filter.outputs.docker == 'true'
+        if: needs.filter.outputs.docker == 'true' || needs.filter.outputs.rust == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v6
@@ -72,6 +72,9 @@ jobs:
 
             - name: Build images
               working-directory: docker
+              env:
+                  CACHE_FROM: type=gha
+                  CACHE_TO: type=gha,mode=max
               run: |
                   docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release \
                     --load

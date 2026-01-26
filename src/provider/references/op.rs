@@ -113,6 +113,7 @@ impl ReferenceSyntax for OpReference {
 
 impl Narrow for OpReference {
     fn narrow(r: &SecretReference) -> Option<&Self> {
+        #[allow(unreachable_patterns)]
         match r {
             SecretReference::OnePassword(inner) => Some(inner),
             _ => None,
