@@ -11,7 +11,7 @@ use super::{
     config::infisical::InfisicalConfig,
     references::{
         InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference,
-        InfisicalSecretType, InfisicalSlug, ReferenceParser, SecretReference,
+        InfisicalSecretType, InfisicalSlug, Narrow, ReferenceParser, SecretReference,
     },
 };
 use async_trait::async_trait;
@@ -185,10 +185,7 @@ impl SecretsProvider for InfisicalProvider {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let refs: Vec<&InfisicalReference> = references
             .iter()
-            .filter_map(|r| match r {
-                SecretReference::Infisical(inner) => Some(inner),
-                _ => None,
-            })
+            .filter_map(InfisicalReference::narrow)
             .collect();
 
         if refs.is_empty() {

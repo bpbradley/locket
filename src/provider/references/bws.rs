@@ -1,5 +1,5 @@
 //! Defines the Bitwarden Secrets (BWS) reference type and its parsing logic.
-use super::{ReferenceParseError, ReferenceSyntax, SecretReference};
+use super::{Narrow, ReferenceParseError, ReferenceSyntax, SecretReference};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -16,6 +16,15 @@ impl From<BwsReference> for SecretReference {
 impl ReferenceSyntax for BwsReference {
     fn try_parse(raw: &str) -> Option<Self> {
         Self::from_str(raw).ok()
+    }
+}
+
+impl Narrow for BwsReference {
+    fn narrow(r: &SecretReference) -> Option<&Self> {
+        match r {
+            SecretReference::Bws(inner) => Some(inner),
+            _ => None,
+        }
     }
 }
 

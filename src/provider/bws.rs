@@ -7,7 +7,7 @@
 use super::ConcurrencyLimit;
 use super::references::SecretReference;
 use crate::provider::config::bws::BwsConfig;
-use crate::provider::references::{BwsReference, HasReference};
+use crate::provider::references::{BwsReference, HasReference, Narrow};
 use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
@@ -70,12 +70,10 @@ impl SecretsProvider for BwsProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        let refs: Vec<(SecretReference, Uuid)> = references
+        let refs: Vec<BwsReference> = references
             .iter()
-            .filter_map(|r| match r {
-                SecretReference::Bws(inner) => Some((r.clone(), Uuid::from(*inner))),
-                _ => None,
-            })
+            .filter_map(BwsReference::narrow)
+            .copied()
             .collect();
 
         if refs.is_empty() {
@@ -86,7 +84,8 @@ impl SecretsProvider for BwsProvider {
         let client = &self.client;
 
         let mut stream = stream::iter(refs)
-            .map(|(key, id)| async move {
+            .map(|reference| async move {
+                let id = Uuid::from(reference);
                 let req = SecretGetRequest { id };
 
                 let resp = client
@@ -95,7 +94,7 @@ impl SecretsProvider for BwsProvider {
                     .await
                     .map_err(|e| ProviderError::NotFound(format!("{} ({})", id, e)))?;
 
-                Ok((key, SecretString::new(resp.value.into())))
+                Ok((reference.into(), SecretString::new(resp.value.into())))
             })
             .buffer_unordered(self.max_concurrent.into_inner());
 

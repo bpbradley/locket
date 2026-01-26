@@ -9,7 +9,7 @@
 //! * The secret key is required and is encoded in the path component.
 //! * The environment slug, path, project ID, and secret type are optional query parameters, which override defaults.
 //!
-use super::{ReferenceSyntax, SecretReference};
+use super::{Narrow, ReferenceSyntax, SecretReference};
 use clap::ValueEnum;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
@@ -93,6 +93,15 @@ impl ReferenceSyntax for InfisicalReference {
                 }
             })
             .ok()
+    }
+}
+
+impl Narrow for InfisicalReference {
+    fn narrow(r: &SecretReference) -> Option<&Self> {
+        match r {
+            SecretReference::Infisical(inner) => Some(inner),
+            _ => None,
+        }
     }
 }
 

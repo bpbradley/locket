@@ -1,5 +1,5 @@
 //! Defines the 1Password (op) secret reference type and its parsing logic.
-use super::{ReferenceSyntax, SecretReference};
+use super::{Narrow, ReferenceSyntax, SecretReference};
 use percent_encoding::percent_decode_str;
 use std::str::FromStr;
 use thiserror::Error;
@@ -108,6 +108,15 @@ impl ReferenceSyntax for OpReference {
                 }
             })
             .ok()
+    }
+}
+
+impl Narrow for OpReference {
+    fn narrow(r: &SecretReference) -> Option<&Self> {
+        match r {
+            SecretReference::OnePassword(inner) => Some(inner),
+            _ => None,
+        }
     }
 }
 

@@ -69,8 +69,12 @@ pub trait ReferenceSyntax: Sized {
     fn try_parse(raw: &str) -> Option<Self>;
 }
 
+pub trait Narrow: Sized {
+    fn narrow(r: &SecretReference) -> Option<&Self>;
+}
+
 pub trait HasReference {
-    type Reference: ReferenceSyntax + Into<SecretReference>;
+    type Reference: ReferenceSyntax + Into<SecretReference> + Narrow;
 }
 
 impl<T> ReferenceParser for T
