@@ -34,7 +34,7 @@ pub enum LifecycleState {
 pub struct VolumeConfig {
     pub name: VolumeName,
     pub created_at: DateTime<Utc>,
-    pub spec: VolumeSpec,
+    pub args: VolumeArgs,
     pub raw_options: HashMap<String, String>,
 }
 
@@ -101,7 +101,7 @@ impl Volume {
 pub struct VolumeRegistry {
     state_file: AbsolutePath,
     runtime_dir: CanonicalPath,
-    default_config: ProviderArgs,
+    default_config: VolumeArgs,
     provider_cache: RwLock<HashMap<ProviderArgs, Arc<dyn SecretsProvider>>>,
     volumes: RwLock<HashMap<VolumeName, Arc<RwLock<Volume>>>>,
 }
@@ -110,7 +110,7 @@ impl VolumeRegistry {
     pub async fn new(
         state_dir: AbsolutePath,
         runtime_dir: AbsolutePath,
-        default_config: ProviderArgs,
+        default_config: VolumeArgs,
     ) -> Result<Self, LocketError> {
         if let Err(e) = tokio::fs::create_dir_all(&runtime_dir).await {
             warn!("Failed to create runtime dir {:?}: {}", runtime_dir, e);
@@ -137,11 +137,25 @@ impl VolumeRegistry {
         {
             let mut lock = self.volumes.write().await;
             for config in configs {
+                let effective_args = self.default_config.clone().overlay(config.args.clone());
+
+                let spec: VolumeSpec = match effective_args.try_into() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!(volume=%config.name, "Failed to reconstruct spec from args: {}. Falling back to defaults.", e);
+                        self.default_config.clone().try_into().unwrap_or_else(|e| {
+                            warn!("Failed to parse configuration {}", e);
+                            VolumeSpec::default()
+                        })
+                    }
+                };
+
                 let mountpoint = self.runtime_dir.join(config.name.as_str());
+
                 let mount = VolumeMount::new(
                     mountpoint,
-                    config.spec.mount.clone(),
-                    config.spec.writer.get_user().cloned(),
+                    spec.mount.clone(),
+                    spec.writer.get_user().cloned(),
                 );
 
                 let mut volume = Volume::new(config, mount);
@@ -188,24 +202,28 @@ impl VolumeRegistry {
             false
         };
 
-        let effective_args = self
-            .default_config
-            .clone()
-            .overlay(vol.config.spec.provider.clone());
+        let effective_args = self.default_config.clone().overlay(vol.config.args.clone());
 
-        let effective_config: Provider = effective_args
+        let effective_config: VolumeSpec = effective_args
             .clone()
             .try_into()
             .map_err(PluginError::Locket)?;
 
+        let provider_args = effective_config.provider.clone();
+
         let provider = {
             let cache = self.provider_cache.read().await;
-            if let Some(p) = cache.get(&effective_args) {
+            if let Some(p) = cache.get(&effective_config.provider) {
                 p.clone()
             } else {
                 drop(cache);
 
-                let new_p: Arc<dyn SecretsProvider> = effective_config
+                let provider_config: Provider = provider_args
+                    .clone()
+                    .try_into()
+                    .map_err(PluginError::Locket)?;
+
+                let new_p = provider_config
                     .build()
                     .await
                     .map_err(|e| PluginError::Locket(LocketError::Provider(e)))?;
@@ -213,18 +231,16 @@ impl VolumeRegistry {
                 let mut cache = self.provider_cache.write().await;
 
                 // re-check under write lock in case another thread built it first.
-                if let Some(existing_p) = cache.get(&effective_args) {
+                if let Some(existing_p) = cache.get(&effective_config.provider) {
                     existing_p.clone()
                 } else {
-                    cache.insert(effective_args, new_p.clone());
+                    cache.insert(provider_args, new_p.clone());
                     new_p
                 }
             }
         };
 
-        let manager = vol
-            .config
-            .spec
+        let manager = effective_config
             .clone()
             .into_manager(AbsolutePath::from(vol.mount.path()), provider)?;
 
@@ -236,7 +252,7 @@ impl VolumeRegistry {
             return Err(PluginError::Locket(LocketError::Secret(e)));
         }
 
-        let watcher = if vol.config.spec.watch {
+        let watcher = if effective_config.watch {
             let token = CancellationToken::new();
             let handler = StoppableHandler::new(manager, token.clone());
             let watcher_svc = FsWatcher::new(std::time::Duration::from_millis(500), handler);
@@ -266,7 +282,12 @@ impl VolumeDriver for VolumeRegistry {
         opts: HashMap<String, String>,
     ) -> Result<(), PluginError> {
         let args = VolumeArgs::try_from(opts.clone())?;
-        let spec: VolumeSpec = args.try_into()?;
+
+        let effective_args = self.default_config.clone().overlay(args.clone());
+
+        let spec: VolumeSpec = effective_args
+            .try_into()
+            .map_err(|e: LocketError| PluginError::Validation(e.to_string()))?;
 
         let mut lock = self.volumes.write().await;
         if lock.contains_key(&name) {
@@ -276,11 +297,12 @@ impl VolumeDriver for VolumeRegistry {
         let config = VolumeConfig {
             name: name.clone(),
             created_at: Utc::now(),
-            spec: spec.clone(),
+            args,
             raw_options: opts,
         };
 
         let mountpoint = self.runtime_dir.join(name.as_str());
+
         let mount = VolumeMount::new(
             mountpoint.clone(),
             spec.mount.clone(),

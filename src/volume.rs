@@ -36,7 +36,7 @@ impl VolumePlugin {
             VolumeRegistry::new(
                 self.config.state_dir.clone(),
                 self.config.runtime_dir.clone(),
-                self.config.provider.clone(),
+                self.config.volume_defaults.clone(),
             )
             .await?,
         );

@@ -7,12 +7,13 @@ use crate::secrets::{
     InjectFailurePolicy, MemSize, Secret, SecretFileManager, SecretManagerConfig,
 };
 use crate::write::{FileWriter, FileWriterArgs, FsMode};
+use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct VolumeSpec {
     pub secrets: Vec<Secret>,
     pub watch: bool,
@@ -30,45 +31,88 @@ pub struct MountConfig {
     pub flags: MountFlags,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
+impl Default for MountConfig {
+    fn default() -> Self {
+        MountConfig {
+            size: MemSize::from_mb(10),
+            mode: FsMode::new(0o700),
+            flags: MountFlags::default(),
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "MountConfig")]
 pub struct MountOptions {
-    #[locket(default = MemSize::from_mb(10))]
+    /// Default size of the in-memory filesystem
+    #[arg(long, env = "LOCKET_VOLUME_DEFAULT_MOUNT_SIZE")]
+    #[locket(default = MountConfig::default().size)]
     pub size: Option<MemSize>,
-    #[locket(default = FsMode::new(0o700))]
+    /// Default file mode for the mounted filesystem
+    #[arg(long, env = "LOCKET_VOLUME_DEFAULT_MOUNT_MODE")]
+    #[locket(default = MountConfig::default().mode)]
     pub mode: Option<FsMode>,
-    #[locket(default = MountFlags::default())]
+    /// Default mount flags for the in-memory filesystem
+    #[arg(long, env = "LOCKET_VOLUME_DEFAULT_MOUNT_FLAGS")]
+    #[locket(default = MountConfig::default().flags)]
     pub flags: Option<MountFlags>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
+#[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
 #[serde(rename_all = "kebab-case")]
 #[locket(try_into = "VolumeSpec")]
 pub struct VolumeArgs {
+    /// Default secrets to mount into the volume
+    ///
+    /// These will typically be specified in driver_opts for volume.
+    /// However, default secrets can be provided via CLI/ENV which would
+    /// be available to all volumes by default.
+    #[arg(
+        long,
+        alias = "secret",
+        env = "LOCKET_VOLUME_DEFAULT_SECRETS",
+        value_name = "label={{template}} or /path/to/template",
+        value_delimiter = ',',
+        hide_env_values = true
+    )]
     #[serde(default, deserialize_with = "polymorphic_vec")]
     pub secrets: Vec<Secret>,
 
+    /// Default behavior for file watching.
+    ///
+    /// If set to true, the volume will watch for changes in the secrets
+    /// and update the files accordingly.
+    #[arg(
+        long,
+        env = "LOCKET_VOLUME_DEFAULT_WATCH",
+        num_args = 0..=1,
+        require_equals = true
+    )]
     #[serde(default, deserialize_with = "parse_bool_opt")]
     #[locket(default = false)]
     pub watch: Option<bool>,
 
+    /// Default policy for handling failures when errors are encountered
+    #[arg(long, env = "LOCKET_VOLUME_DEFAULT_INJECT_POLICY", value_enum)]
     #[locket(default = InjectFailurePolicy::Passthrough)]
     pub inject_failure_policy: Option<InjectFailurePolicy>,
 
+    /// Default maximum size of individual secret files
+    #[arg(long, env = "LOCKET_VOLUME_DEFAULT_MAX_FILE_SIZE")]
     #[locket(default = MemSize::from_mb(10))]
     pub max_file_size: Option<MemSize>,
 
     #[serde(flatten)]
-    #[locket(allow_mismatched_flatten)]
+    #[clap(flatten)]
     pub writer: FileWriterArgs,
 
     #[serde(flatten)]
-    #[locket(allow_mismatched_flatten)]
+    #[clap(flatten)]
     pub mount: MountOptions,
 
     #[serde(flatten)]
-    #[locket(allow_mismatched_flatten)]
+    #[clap(flatten)]
     pub provider: ProviderArgs,
 }
 

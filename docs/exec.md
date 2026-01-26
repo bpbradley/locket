@@ -27,6 +27,7 @@ locket exec --provider bws --bws-token=file:/path/to/token \
 | `--env-overrides` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
 | `--map` | `SECRET_MAP` |  | Mapping of source paths to destination paths.<br><br>Maps sources (holding secret templates) to destination paths (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.<br><br>Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments.<br><br>Example: `--map /templates:/run/secrets/app`<br><br>**CLI Default:** No mappings <br>**Docker Default:** `/templates:/run/secrets/locket` |
 | `--secrets` | `LOCKET_SECRETS` |  | Additional secret values specified as LABEL=SECRET_TEMPLATE<br><br>Multiple values can be provided, separated by commas. Or supplied multiple times as arguments.<br><br>Loading from file is supported via `LABEL=@/path/to/file`.<br><br>Example:<br><br>```sh --secret db_password={{op://..}} --secret api_key={{op://..}} ``` |
+| `--user` | `LOCKET_FILE_OWNER` |  | Owner of the file/dir<br><br>Defaults to the running user/group. The running user must have write permissions on the directory to change the owner. |
 | `<cmd>` |  |  | Command to execute with secrets injected into environment<br><br>Must be the last argument(s), following a `--` separator.<br><br>Example: `locket exec -e locket.env -- docker compose up -d` |
 | `--watch` | `LOCKET_EXEC_WATCH` | `false` | Watch mode will monitor for changes to .env files and restart the command if changes are detected <br><br> **Choices:**<br>- `true`<br>- `false` |
 | `--out` | `DEFAULT_SECRET_DIR` | `/run/secrets/locket` | Directory where secret values (literals) are materialized |
@@ -150,6 +151,9 @@ file-mode = "0600"
 
 # Directory permission mode
 dir-mode = "0700"
+
+# Owner of the file/dir
+# user = ...
 
 # Timeout duration for process termination signals
 timeout = "30s"
