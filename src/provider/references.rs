@@ -60,23 +60,34 @@ pub enum SecretReference {
     Mock(String),
 }
 
-/// Defines how to identify and parse valid secret references from string literals.
-pub trait ReferenceParser: Send + Sync {
-    fn parse(&self, raw: &str) -> Option<SecretReference>;
-}
-
+/// Defines the strict syntax rules for a specific reference type.
+///
+/// This trait is a static factory that attempts to construct a concrete type (Self)
+/// from a raw string. It should contain the regex, prefix checking, or validation
+/// logic specific to a single provider
 pub trait ReferenceSyntax: Sized {
     fn try_parse(raw: &str) -> Option<Self>;
 }
 
+/// A runtime interface for providers or configurations that can detect secret references.
+///
+/// Unlike `ReferenceSyntax`, which is specific to a concrete type, this trait
+/// returns the unified `SecretReference`.
+pub trait ReferenceParser: Send + Sync {
+    fn parse(&self, raw: &str) -> Option<SecretReference>;
+}
+
+/// Downcasting trait which defines how to safely extract a concrete reference type from the generic `SecretReference` enum.
 pub trait Narrow: Sized {
     fn narrow(r: &SecretReference) -> Option<&Self>;
 }
 
+/// Links a provider to its specific reference implementation.
 pub trait HasReference {
     type Reference: ReferenceSyntax + Into<SecretReference> + Narrow;
 }
 
+/// Blanket implementation for `ReferenceParser` that implements the `HasReference` trait.
 impl<T> ReferenceParser for T
 where
     T: HasReference + Send + Sync,
