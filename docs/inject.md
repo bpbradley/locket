@@ -25,6 +25,7 @@ locket inject --provider bws --bws-token=file:/path/to/token \ # Select the BWS 
 | `--status-file` | `LOCKET_STATUS_FILE` |  | Status file path used for healthchecks.<br><br>If not provided, no status file is created.<br><br>**Docker Default:** `/dev/shm/locket/ready` |
 | `--map` | `SECRET_MAP` |  | Mapping of source paths to destination paths.<br><br>Maps sources (holding secret templates) to destination paths (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.<br><br>Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments.<br><br>Example: `--map /templates:/run/secrets/app`<br><br>**CLI Default:** No mappings <br>**Docker Default:** `/templates:/run/secrets/locket` |
 | `--secrets` | `LOCKET_SECRETS` |  | Additional secret values specified as LABEL=SECRET_TEMPLATE<br><br>Multiple values can be provided, separated by commas. Or supplied multiple times as arguments.<br><br>Loading from file is supported via `LABEL=@/path/to/file`.<br><br>Example:<br><br>```sh --secret db_password={{op://..}} --secret api_key={{op://..}} ``` |
+| `--user` | `LOCKET_FILE_OWNER` |  | Owner of the file/dir<br><br>Defaults to the running user/group. The running user must have write permissions on the directory to change the owner. |
 | `--mode` | `LOCKET_INJECT_MODE` | `one-shot` | Mode of operation <br><br> **Choices:**<br>- `one-shot`: **Default** Materialize all secrets once and exit<br>- `watch`: **Docker Default** Watch for changes on templates and reinject<br>- `park`: Inject once and then park to keep the process alive |
 | `--out` | `DEFAULT_SECRET_DIR` | `/run/secrets/locket` | Directory where secret values (literals) are materialized |
 | `--inject-failure-policy` | `INJECT_POLICY` | `passthrough` | Policy for handling injection failures <br><br> **Choices:**<br>- `error`: Failures are treated as errors and will abort the process<br>- `passthrough`: On failure, copy the unmodified secret to destination<br>- `ignore`: On failure, ignore the secret and log a warning |
@@ -130,6 +131,9 @@ file-mode = "0600"
 
 # Directory permission mode
 dir-mode = "0700"
+
+# Owner of the file/dir
+# user = ...
 
 # Debounce duration for filesystem events in watch mode
 debounce = "500ms"

@@ -18,6 +18,7 @@ use indexmap::IndexMap;
 use std::process::ExitStatus;
 use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
 /// A unified error type for the event loop.
@@ -108,6 +109,48 @@ pub trait EventHandler: Send + Sync {
     /// This hook allows the reactor to perform graceful shutdown operations (e.g.,
     /// sending SIGTERM to children, removing lockfiles) before the application exits.
     async fn cleanup(&mut self) {}
+}
+
+/// A wrapper that allows an EventHandler to be cancelled via a CancellationToken.
+pub struct StoppableHandler<H> {
+    inner: H,
+    token: CancellationToken,
+}
+
+impl<H: EventHandler> StoppableHandler<H> {
+    pub fn new(inner: H, token: CancellationToken) -> Self {
+        Self { inner, token }
+    }
+}
+
+#[async_trait]
+impl<H: EventHandler> EventHandler for StoppableHandler<H> {
+    fn paths(&self) -> Vec<crate::path::AbsolutePath> {
+        self.inner.paths()
+    }
+
+    async fn handle(&mut self, events: Vec<FsEvent>) -> Result<(), HandlerError> {
+        self.inner.handle(events).await
+    }
+
+    fn wait(&self) -> BoxFuture<'static, Result<(), HandlerError>> {
+        let token = self.token.clone();
+        let inner_wait = self.inner.wait();
+        Box::pin(async move {
+            tokio::select! {
+                res = inner_wait => {
+                    res
+                }
+                _ = token.cancelled() => {
+                    Ok(())
+                }
+            }
+        })
+    }
+
+    async fn cleanup(&mut self) {
+        self.inner.cleanup().await
+    }
 }
 
 /// Represents an actionable change in the monitored environment.

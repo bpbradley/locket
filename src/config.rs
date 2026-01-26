@@ -35,6 +35,15 @@ pub enum ConfigError {
     #[cfg(feature = "exec")]
     #[error(transparent)]
     Process(#[from] crate::process::ProcessError),
+
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+}
+
+impl From<String> for ConfigError {
+    fn from(s: String) -> Self {
+        ConfigError::Validation(s)
+    }
 }
 
 /// Defines how two partial configuration states are merged.
