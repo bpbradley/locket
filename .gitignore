@@ -1,7 +1,7 @@
 /target/
 **/*.swp
 **/*.swo
-/secrets/
+**/secrets/
 compose.debug.yaml
 docker/compose.test.yaml
 tests/docker/.env

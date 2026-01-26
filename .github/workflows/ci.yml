@@ -36,6 +36,7 @@ jobs:
                         - 'rust-toolchain.*'
                       docker:
                         - 'docker/**'
+                        - '!docker/tests/**'
                         - 'compose*.yml'
                         - 'compose*.yaml'
     locket:
