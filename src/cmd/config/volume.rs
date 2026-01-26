@@ -23,12 +23,18 @@ pub struct PluginArgs {
     #[locket(default = "/run/docker/plugins/locket.sock")]
     pub socket: Option<AbsolutePath>,
 
+    /// Path to directory where state configuration is stored.
+    ///
+    /// This is where the plugin will store necessary data to reload configured volumes from cold start
     #[arg(long, env = "LOCKET_PLUGIN_STATE_DIR")]
     #[locket(default = "/var/lib/locket")]
     pub state_dir: Option<AbsolutePath>,
 
+    /// Path to directory where runtime data is stored.
+    ///
+    /// This is where volumes are physically mounted on the host filesystem.
     #[arg(long, env = "LOCKET_PLUGIN_RUNTIME_DIR")]
-    #[locket(default = "/run/locket/volumes")]
+    #[locket(default = "/var/lib/locket")]
     pub runtime_dir: Option<AbsolutePath>,
 
     #[command(flatten)]
