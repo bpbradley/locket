@@ -12,14 +12,14 @@ Run as a Docker Volume Plugin
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--config` | `LOCKET_CONFIG` |  | Path to configuration files<br><br>Can be specified multiple times to layer multiple files. Each file is loaded in the order specified, with later files overriding earlier ones. |
-| `--socket` | `LOCKET_PLUGIN_SOCKET` |  | Path to the listening socket |
-| `--state-dir` | `LOCKET_PLUGIN_STATE_DIR` |  |  |
-| `--runtime-dir` | `LOCKET_PLUGIN_RUNTIME_DIR` |  |  |
-| `--log-format` | `LOCKET_LOG_FORMAT` |  | Log format <br><br> **Choices:**<br>- `text`: Plain text log format<br>- `json`: JSON log format<br>- `compose`: Special format for Docker Compose Provider specification |
-| `--log-level` | `LOCKET_LOG_LEVEL` |  | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
 | `--secrets` | `LOCKET_VOLUME_DEFAULT_SECRETS` |  | Default secrets to mount into the volume<br><br>These will typically be specified in driver_opts for volume. However, default secrets can be provided via CLI/ENV which would be available to all volumes by default. |
 | `--user` | `LOCKET_FILE_OWNER` |  | Owner of the file/dir<br><br>Defaults to the running user/group. The running user must have write permissions on the directory to change the owner. |
 | `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
+| `--socket` | `LOCKET_PLUGIN_SOCKET` | `/run/docker/plugins/locket.sock` | Path to the listening socket |
+| `--state-dir` | `LOCKET_PLUGIN_STATE_DIR` | `/var/lib/locket` |  |
+| `--runtime-dir` | `LOCKET_PLUGIN_RUNTIME_DIR` | `/run/locket/volumes` |  |
+| `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br><br> **Choices:**<br>- `text`: Plain text log format<br>- `json`: JSON log format<br>- `compose`: Special format for Docker Compose Provider specification |
+| `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
 | `--watch` | `LOCKET_VOLUME_DEFAULT_WATCH` | `false` | Default behavior for file watching.<br><br>If set to true, the volume will watch for changes in the secrets and update the files accordingly. <br><br> **Choices:**<br>- `true`<br>- `false` |
 | `--inject-failure-policy` | `LOCKET_VOLUME_DEFAULT_INJECT_POLICY` | `passthrough` | Default policy for handling failures when errors are encountered <br><br> **Choices:**<br>- `error`: Failures are treated as errors and will abort the process<br>- `passthrough`: On failure, copy the unmodified secret to destination<br>- `ignore`: On failure, ignore the secret and log a warning |
 | `--max-file-size` | `LOCKET_VOLUME_DEFAULT_MAX_FILE_SIZE` | `10M` | Default maximum size of individual secret files |
@@ -70,6 +70,19 @@ Run as a Docker Volume Plugin
 > Provided is the reference configuration in TOML format
 
 ```toml
+# Path to the listening socket
+socket = "/run/docker/plugins/locket.sock"
+
+state-dir = "/var/lib/locket"
+
+runtime-dir = "/run/locket/volumes"
+
+# Log format
+log-format = "text"
+
+# Log level
+log-level = "info"
+
 # Default secrets to mount into the volume
 secrets = []
 

@@ -1,9 +1,8 @@
 use clap::{Arg, Args, Command, CommandFactory};
 use indexmap::IndexMap;
 use locket::cmd::Cli;
-use locket::cmd::{ExecArgs, InjectArgs};
+use locket::cmd::{ExecArgs, InjectArgs, PluginArgs};
 use locket::config::{ApplyDefaults, LocketDocDefaults};
-use locket::volume::config::VolumeArgs;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -53,7 +52,7 @@ impl DocGenerator {
         }
 
         if let Some(sub) = cmd.find_subcommand_mut("volume") {
-            let defaults = VolumeArgs::get_defaults();
+            let defaults = PluginArgs::get_defaults();
             patch_defaults(sub, &defaults);
         }
 
@@ -125,7 +124,7 @@ impl DocGenerator {
             } else if name == "exec" {
                 write_toml_section::<ExecArgs>(&mut sub_buffer, sub)?;
             } else if name == "volume" {
-                write_toml_section::<VolumeArgs>(&mut sub_buffer, sub)?;
+                write_toml_section::<PluginArgs>(&mut sub_buffer, sub)?;
             }
 
             if has_visible_subcommands(sub) {
