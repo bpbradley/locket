@@ -1,4 +1,8 @@
-use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, Signature, bws::BwsUrl};
+use crate::provider::{
+    AuthToken, ConcurrencyLimit, ProviderError, Signature,
+    bws::BwsUrl,
+    references::{BwsReference, HasReference},
+};
 use async_trait::async_trait;
 use clap::Args;
 use locket_derive::LayeredConfig;
@@ -11,6 +15,10 @@ pub struct BwsConfig {
     pub bws_max_concurrent: ConcurrencyLimit,
     pub bws_user_agent: String,
     pub bws_token: AuthToken,
+}
+
+impl HasReference for BwsConfig {
+    type Reference = BwsReference;
 }
 
 #[async_trait]

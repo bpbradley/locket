@@ -1,6 +1,9 @@
 use crate::provider::{
     AuthToken, ConcurrencyLimit, ProviderError, Signature,
-    references::{InfisicalPath, InfisicalProjectId, InfisicalSecretType, InfisicalSlug},
+    references::{
+        HasReference, InfisicalPath, InfisicalProjectId, InfisicalReference, InfisicalSecretType,
+        InfisicalSlug,
+    },
 };
 use async_trait::async_trait;
 use clap::Args;
@@ -18,6 +21,10 @@ pub struct InfisicalConfig {
     pub infisical_default_environment: Option<InfisicalSlug>,
     pub infisical_default_project_id: Option<InfisicalProjectId>,
     pub infisical_max_concurrent: ConcurrencyLimit,
+}
+
+impl HasReference for InfisicalConfig {
+    type Reference = InfisicalReference;
 }
 
 #[async_trait]

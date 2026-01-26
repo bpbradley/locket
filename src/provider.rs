@@ -154,21 +154,16 @@ impl ReferenceParser for Provider {
     fn parse(&self, raw: &str) -> Option<SecretReference> {
         match self {
             #[cfg(feature = "op")]
-            Self::Op(_) => references::OpReference::parse(raw)
-                .ok()
-                .map(SecretReference::OnePassword),
+            Self::Op(cfg) => cfg.parse(raw),
+
             #[cfg(feature = "connect")]
-            Self::Connect(_) => references::OpReference::parse(raw)
-                .ok()
-                .map(SecretReference::OnePassword),
+            Self::Connect(cfg) => cfg.parse(raw),
+
             #[cfg(feature = "bws")]
-            Self::Bws(_) => references::BwsReference::from_str(raw)
-                .ok()
-                .map(SecretReference::Bws),
+            Self::Bws(cfg) => cfg.parse(raw),
+
             #[cfg(feature = "infisical")]
-            Self::Infisical(_) => references::InfisicalReference::from_str(raw)
-                .ok()
-                .map(SecretReference::Infisical),
+            Self::Infisical(cfg) => cfg.parse(raw),
         }
     }
 }

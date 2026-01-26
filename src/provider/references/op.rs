@@ -1,9 +1,8 @@
 //! Defines the 1Password (op) secret reference type and its parsing logic.
-use super::SecretReference;
+use super::{ReferenceSyntax, SecretReference};
 use percent_encoding::percent_decode_str;
 use std::str::FromStr;
 use thiserror::Error;
-use tracing::warn;
 
 #[cfg(any(feature = "op", feature = "connect"))]
 #[derive(Debug, Error)]
@@ -94,16 +93,27 @@ impl FromStr for OpReference {
     }
 }
 
+impl From<OpReference> for SecretReference {
+    fn from(r: OpReference) -> Self {
+        Self::OnePassword(r)
+    }
+}
+
+impl ReferenceSyntax for OpReference {
+    fn try_parse(raw: &str) -> Option<Self> {
+        Self::from_str(raw)
+            .inspect_err(|e| {
+                if !matches!(e, OpParseError::InvalidScheme) {
+                    tracing::warn!("Invalid Infisical reference '{}': {}", raw, e);
+                }
+            })
+            .ok()
+    }
+}
+
 impl OpReference {
     pub fn as_str(&self) -> &str {
         &self.raw
-    }
-    pub fn parse(raw: &str) -> Result<Self, OpParseError> {
-        Self::from_str(raw).inspect_err(|e| {
-            if !matches!(e, OpParseError::InvalidScheme) {
-                warn!("Invalid reference '{}': {}", raw, e);
-            }
-        })
     }
 }
 

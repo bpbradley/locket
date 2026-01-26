@@ -1,4 +1,7 @@
-use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, Signature};
+use crate::provider::{
+    AuthToken, ConcurrencyLimit, ProviderError, Signature,
+    references::{HasReference, OpReference},
+};
 use async_trait::async_trait;
 use clap::Args;
 use locket_derive::LayeredConfig;
@@ -10,6 +13,10 @@ pub struct ConnectConfig {
     pub connect_host: Url,
     pub connect_token: AuthToken,
     pub connect_max_concurrent: ConcurrencyLimit,
+}
+
+impl HasReference for ConnectConfig {
+    type Reference = OpReference;
 }
 
 #[async_trait]

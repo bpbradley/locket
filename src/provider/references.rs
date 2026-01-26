@@ -65,6 +65,24 @@ pub trait ReferenceParser: Send + Sync {
     fn parse(&self, raw: &str) -> Option<SecretReference>;
 }
 
+pub trait ReferenceSyntax: Sized {
+    fn try_parse(raw: &str) -> Option<Self>;
+}
+
+pub trait HasReference {
+    type Reference: ReferenceSyntax + Into<SecretReference>;
+}
+
+impl<T> ReferenceParser for T
+where
+    T: HasReference + Send + Sync,
+{
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        let parsed = T::Reference::try_parse(raw)?;
+        Some(parsed.into())
+    }
+}
+
 impl std::fmt::Display for SecretReference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

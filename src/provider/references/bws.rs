@@ -1,12 +1,23 @@
 //! Defines the Bitwarden Secrets (BWS) reference type and its parsing logic.
-use super::ReferenceParseError;
-use super::SecretReference;
+use super::{ReferenceParseError, ReferenceSyntax, SecretReference};
 use std::str::FromStr;
 use uuid::Uuid;
 
 /// Represents a syntactically valid Bitwarden Secrets Manager secret reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BwsReference(Uuid);
+
+impl From<BwsReference> for SecretReference {
+    fn from(r: BwsReference) -> Self {
+        Self::Bws(r)
+    }
+}
+
+impl ReferenceSyntax for BwsReference {
+    fn try_parse(raw: &str) -> Option<Self> {
+        Self::from_str(raw).ok()
+    }
+}
 
 impl FromStr for BwsReference {
     type Err = ReferenceParseError;

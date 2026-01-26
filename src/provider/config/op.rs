@@ -1,5 +1,8 @@
 use crate::path::AbsolutePath;
-use crate::provider::AuthToken;
+use crate::provider::{
+    AuthToken, ProviderError, Signature,
+    references::{HasReference, OpReference},
+};
 use async_trait::async_trait;
 use clap::Args;
 use locket_derive::LayeredConfig;
@@ -11,9 +14,13 @@ pub struct OpConfig {
     pub op_config_dir: Option<AbsolutePath>,
 }
 
+impl HasReference for OpConfig {
+    type Reference = OpReference;
+}
+
 #[async_trait]
-impl crate::provider::Signature for OpConfig {
-    async fn signature(&self) -> Result<u64, crate::provider::ProviderError> {
+impl Signature for OpConfig {
+    async fn signature(&self) -> Result<u64, ProviderError> {
         self.op_token.signature().await
     }
 }

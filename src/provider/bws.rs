@@ -5,9 +5,9 @@
 //! It uses the official Bitwarden SDK
 
 use super::ConcurrencyLimit;
-use super::references::{ReferenceParser, SecretReference};
+use super::references::SecretReference;
 use crate::provider::config::bws::BwsConfig;
-use crate::provider::references::BwsReference;
+use crate::provider::references::{BwsReference, HasReference};
 use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
@@ -21,7 +21,6 @@ use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
 
@@ -61,10 +60,8 @@ impl BwsProvider {
     }
 }
 
-impl ReferenceParser for BwsProvider {
-    fn parse(&self, raw: &str) -> Option<SecretReference> {
-        BwsReference::from_str(raw).ok().map(SecretReference::Bws)
-    }
+impl HasReference for BwsProvider {
+    type Reference = BwsReference;
 }
 
 #[async_trait]
@@ -75,10 +72,9 @@ impl SecretsProvider for BwsProvider {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let refs: Vec<(SecretReference, Uuid)> = references
             .iter()
-            .filter_map(|r| {
-                r.try_into()
-                    .ok()
-                    .map(|bws_ref: &BwsReference| (r.clone(), Uuid::from(*bws_ref)))
+            .filter_map(|r| match r {
+                SecretReference::Bws(inner) => Some((r.clone(), Uuid::from(*inner))),
+                _ => None,
             })
             .collect();
 

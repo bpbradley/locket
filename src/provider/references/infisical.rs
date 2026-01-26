@@ -9,7 +9,7 @@
 //! * The secret key is required and is encoded in the path component.
 //! * The environment slug, path, project ID, and secret type are optional query parameters, which override defaults.
 //!
-use super::SecretReference;
+use super::{ReferenceSyntax, SecretReference};
 use clap::ValueEnum;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
@@ -76,6 +76,24 @@ pub enum ValidationError {
 pub struct InfisicalReference {
     pub key: InfisicalSecretKey,
     pub options: InfisicalOptions,
+}
+
+impl From<InfisicalReference> for SecretReference {
+    fn from(r: InfisicalReference) -> Self {
+        Self::Infisical(r)
+    }
+}
+
+impl ReferenceSyntax for InfisicalReference {
+    fn try_parse(raw: &str) -> Option<Self> {
+        Self::from_str(raw)
+            .inspect_err(|e| {
+                if !matches!(e, InfisicalParseError::InvalidScheme) {
+                    tracing::warn!("Invalid Infisical reference '{}': {}", raw, e);
+                }
+            })
+            .ok()
+    }
 }
 
 impl FromStr for InfisicalReference {

@@ -185,7 +185,10 @@ impl SecretsProvider for InfisicalProvider {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let refs: Vec<&InfisicalReference> = references
             .iter()
-            .filter_map(|r| r.try_into().ok())
+            .filter_map(|r| match r {
+                SecretReference::Infisical(inner) => Some(inner),
+                _ => None,
+            })
             .collect();
 
         if refs.is_empty() {
