@@ -11,6 +11,7 @@
 //! * `bws`: Enables the Bitwarden Secrets Manager provider.
 //! * `compose`: Enables Docker CLI Plugin for use as a Docker Compose Provider service
 //! * `exec`: Enables the `exec` command for process environment injection into a child process
+//! * `volume`: Enables the `volume` command for use as a Docker volume driver.
 pub mod cmd;
 #[cfg(feature = "compose")]
 pub mod compose;

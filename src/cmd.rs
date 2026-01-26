@@ -7,6 +7,7 @@
 //! * **Exec**: Process injection wrapper (`locket exec`).
 //! * **Healthcheck**: Health probe for sidecar
 //! * **Compose**: Docker Compose provider integration.
+//! * **Volume**: Docker Volume driver integration.
 
 use clap::{Parser, Subcommand};
 #[cfg(feature = "compose")]
