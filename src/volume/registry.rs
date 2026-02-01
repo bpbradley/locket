@@ -28,9 +28,10 @@ use tracing::{error, info, warn};
 pub struct VolumeConfig {
     pub name: VolumeName,
     pub created_at: DateTime<Utc>,
+    pub options: DockerOptions,
+    // Skip serializing args; reconstruct from options on load
     #[serde(skip)]
     pub args: VolumeArgs,
-    pub options: DockerOptions,
 }
 
 pub struct WatcherHandle {

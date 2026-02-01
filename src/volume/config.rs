@@ -190,8 +190,8 @@ where
     match v {
         Some(BoolOrString::Bool(b)) => Ok(Some(b)),
         Some(BoolOrString::String(s)) => match s.to_lowercase().as_str() {
-            "true" | "1" | "yes" | "on" => Ok(Some(true)),
-            "false" | "0" | "no" | "off" => Ok(Some(false)),
+            "true" | "1" | "yes" | "on" | "y" => Ok(Some(true)),
+            "false" | "0" | "no" | "off" | "n" => Ok(Some(false)),
             _ => Err(serde::de::Error::custom(format!(
                 "Expected boolean (true/false, 1/0, yes/no), got '{}'",
                 s

@@ -5,11 +5,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// A trait that can build a secrets provider from configuration.
-/// It must also be able to identify itself (signature) and parse references.
+/// A factory trait that creates specific backend clients from configuration.
 #[async_trait]
-pub trait ProviderBuilder: Signature + ReferenceParser + Send + Sync + Sized + Clone {
-    async fn connect(&self) -> Result<Arc<dyn SecretsProvider>, ProviderError>;
+pub trait ProviderFactory: Signature + ReferenceParser + Send + Sync + Sized + Clone {
+    async fn create(&self) -> Result<Arc<dyn SecretsProvider>, ProviderError>;
 }
 
 /// A wrapper that handles automatic rotation of the underlying provider.
@@ -25,11 +24,11 @@ struct ProviderState {
 
 impl<C> ManagedProvider<C>
 where
-    C: ProviderBuilder + 'static,
+    C: ProviderFactory + 'static,
 {
     pub async fn new(config: C) -> Result<Self, ProviderError> {
         let signature = config.signature().await?;
-        let inner = config.connect().await?;
+        let inner = config.create().await?;
         Ok(Self {
             config,
             state: RwLock::new(ProviderState { inner, signature }),
@@ -40,7 +39,7 @@ where
 #[async_trait]
 impl<C> SecretsProvider for ManagedProvider<C>
 where
-    C: ProviderBuilder + 'static,
+    C: ProviderFactory + 'static,
 {
     async fn fetch_map(
         &self,
@@ -70,7 +69,7 @@ where
         if state.signature != new_signature {
             // The config has changed, which may be the cause of the prior failure.
             // Rebuild the inner provider and swap it in.
-            let new_inner = match self.config.connect().await {
+            let new_inner = match self.config.create().await {
                 Ok(bg) => bg,
                 Err(e) => return Err(e), // Failed to rebuild
             };
@@ -90,7 +89,7 @@ where
 
 impl<C> ReferenceParser for ManagedProvider<C>
 where
-    C: ProviderBuilder + 'static,
+    C: ProviderFactory + 'static,
 {
     fn parse(&self, raw: &str) -> Option<SecretReference> {
         self.config.parse(raw)

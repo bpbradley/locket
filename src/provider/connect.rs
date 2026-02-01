@@ -11,7 +11,7 @@
 //! The provider uses the reqwest HTTP client
 //! and handles authentication via bearer tokens.
 
-use super::references::{HasReference, Narrow, OpReference, SecretReference};
+use super::references::{Extract, HasReference, OpReference, SecretReference};
 use crate::provider::ConcurrencyLimit;
 use crate::provider::config::connect::ConnectConfig;
 use crate::provider::{ProviderError, SecretsProvider};
@@ -288,7 +288,7 @@ impl SecretsProvider for OpConnectProvider {
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let op_refs: Vec<&OpReference> =
-            references.iter().filter_map(OpReference::narrow).collect();
+            references.iter().filter_map(OpReference::extract).collect();
 
         if op_refs.is_empty() {
             return Ok(HashMap::new());

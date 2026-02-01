@@ -8,7 +8,7 @@
 //! The provider supports authentication via service account tokens
 //! and can be configured with an optional config directory.
 
-use super::references::{HasReference, Narrow, OpReference, SecretReference};
+use super::references::{Extract, HasReference, OpReference, SecretReference};
 use crate::path::AbsolutePath;
 use crate::provider::config::op::OpConfig;
 use crate::provider::{ConcurrencyLimit, ProviderError, SecretsProvider};
@@ -76,7 +76,7 @@ impl SecretsProvider for OpProvider {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         const MAX_CONCURRENT_OPS: ConcurrencyLimit = ConcurrencyLimit::new(10);
         let op_refs: Vec<&OpReference> =
-            references.iter().filter_map(OpReference::narrow).collect();
+            references.iter().filter_map(OpReference::extract).collect();
 
         if op_refs.is_empty() {
             return Ok(HashMap::new());

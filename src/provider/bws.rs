@@ -7,7 +7,7 @@
 use super::ConcurrencyLimit;
 use super::references::SecretReference;
 use crate::provider::config::bws::BwsConfig;
-use crate::provider::references::{BwsReference, HasReference, Narrow};
+use crate::provider::references::{BwsReference, Extract, HasReference};
 use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
@@ -72,7 +72,7 @@ impl SecretsProvider for BwsProvider {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let refs: Vec<BwsReference> = references
             .iter()
-            .filter_map(BwsReference::narrow)
+            .filter_map(BwsReference::extract)
             .copied()
             .collect();
 

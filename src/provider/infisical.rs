@@ -10,8 +10,8 @@ use super::{
     ConcurrencyLimit, ProviderError, SecretsProvider,
     config::infisical::InfisicalConfig,
     references::{
-        InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference,
-        InfisicalSecretType, InfisicalSlug, Narrow, ReferenceParser, SecretReference,
+        Extract, InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference,
+        InfisicalSecretType, InfisicalSlug, ReferenceParser, SecretReference,
     },
 };
 use async_trait::async_trait;
@@ -185,7 +185,7 @@ impl SecretsProvider for InfisicalProvider {
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         let refs: Vec<&InfisicalReference> = references
             .iter()
-            .filter_map(InfisicalReference::narrow)
+            .filter_map(InfisicalReference::extract)
             .collect();
 
         if refs.is_empty() {

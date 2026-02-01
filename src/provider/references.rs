@@ -78,13 +78,13 @@ pub trait ReferenceParser: Send + Sync {
 }
 
 /// Downcasting trait which defines how to safely extract a concrete reference type from the generic `SecretReference` enum.
-pub trait Narrow: Sized {
-    fn narrow(r: &SecretReference) -> Option<&Self>;
+pub trait Extract: Sized {
+    fn extract(r: &SecretReference) -> Option<&Self>;
 }
 
 /// Links a provider to its specific reference implementation.
 pub trait HasReference {
-    type Reference: ReferenceSyntax + Into<SecretReference> + Narrow;
+    type Reference: ReferenceSyntax + Into<SecretReference> + Extract;
 }
 
 /// Blanket implementation for `ReferenceParser` that implements the `HasReference` trait.
