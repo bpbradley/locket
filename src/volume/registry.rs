@@ -24,13 +24,6 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LifecycleState {
-    Idle,
-    Provisioning,
-    Ready,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolumeConfig {
     pub name: VolumeName,
@@ -50,16 +43,16 @@ pub struct ActiveResources {
     watcher: Option<WatcherHandle>,
 }
 
-pub enum VolumeRuntime {
+pub enum VolumeLifecycle {
     Idle,
-    Provisioning(watch::Sender<LifecycleState>),
+    Provisioning(watch::Sender<()>),
     Ready(ActiveResources),
 }
 
 pub struct Volume {
     pub config: VolumeConfig,
     pub mount: VolumeMount,
-    pub state: VolumeRuntime,
+    pub state: VolumeLifecycle,
 }
 
 impl Volume {
@@ -67,7 +60,7 @@ impl Volume {
         Self {
             config,
             mount,
-            state: VolumeRuntime::Idle,
+            state: VolumeLifecycle::Idle,
         }
     }
 
@@ -152,7 +145,7 @@ impl VolumeRegistry {
                 if volume.mount.is_mounted().await {
                     info!(volume=%volume.config.name, "Recovered existing mount");
                     if let Ok(resources) = self.provision_resources(&volume).await {
-                        volume.state = VolumeRuntime::Ready(resources);
+                        volume.state = VolumeLifecycle::Ready(resources);
                     }
                 }
 
@@ -311,10 +304,10 @@ impl VolumeDriver for VolumeRegistry {
         {
             let vol = vol_arc.read().await;
             match &vol.state {
-                VolumeRuntime::Ready(active) if !active.mounts.is_empty() => {
+                VolumeLifecycle::Ready(active) if !active.mounts.is_empty() => {
                     return Err(PluginError::InUse);
                 }
-                VolumeRuntime::Provisioning(_) => {
+                VolumeLifecycle::Provisioning(_) => {
                     return Err(PluginError::InUse);
                 }
                 _ => {}
@@ -347,32 +340,32 @@ impl VolumeDriver for VolumeRegistry {
             let mut vol = vol_arc.write().await;
 
             match &mut vol.state {
-                VolumeRuntime::Ready(active) => {
+                VolumeLifecycle::Ready(active) => {
                     active.mounts.insert(id.clone());
                     return Ok(vol.mountpoint());
                 }
 
-                VolumeRuntime::Provisioning(tx) => {
+                VolumeLifecycle::Provisioning(tx) => {
                     let mut rx = tx.subscribe();
                     drop(vol); // Release lock
                     let _ = rx.changed().await;
                     continue; // Retry loop
                 }
 
-                VolumeRuntime::Idle => {
-                    let (tx, _) = watch::channel(LifecycleState::Provisioning);
-                    vol.state = VolumeRuntime::Provisioning(tx);
+                VolumeLifecycle::Idle => {
+                    let (tx, _) = watch::channel(());
+                    vol.state = VolumeLifecycle::Provisioning(tx);
 
                     match self.provision_resources(&vol).await {
                         Ok(mut resources) => {
                             resources.mounts.insert(id.clone());
-                            vol.state = VolumeRuntime::Ready(resources);
+                            vol.state = VolumeLifecycle::Ready(resources);
                             return Ok(vol.mountpoint());
                         }
                         Err(e) => {
                             // Revert to Idle on failure
                             // The Provisioning channel implicitly closes here, notifying waiters
-                            vol.state = VolumeRuntime::Idle;
+                            vol.state = VolumeLifecycle::Idle;
                             return Err(e);
                         }
                     }
@@ -389,7 +382,7 @@ impl VolumeDriver for VolumeRegistry {
 
         let mut vol = vol_arc.write().await;
 
-        let should_teardown = if let VolumeRuntime::Ready(ref mut active) = vol.state {
+        let should_teardown = if let VolumeLifecycle::Ready(ref mut active) = vol.state {
             active.mounts.remove(id);
             active.mounts.is_empty()
         } else {
@@ -399,10 +392,10 @@ impl VolumeDriver for VolumeRegistry {
         if should_teardown {
             // Extract the active resources to destroy them.
             // replace state with Provisioning to block others while we tear down
-            let (tx, _) = watch::channel(LifecycleState::Provisioning);
-            let old_state = std::mem::replace(&mut vol.state, VolumeRuntime::Provisioning(tx));
+            let (tx, _) = watch::channel(());
+            let old_state = std::mem::replace(&mut vol.state, VolumeLifecycle::Provisioning(tx));
 
-            if let VolumeRuntime::Ready(active) = old_state {
+            if let VolumeLifecycle::Ready(active) = old_state {
                 info!(volume=%vol.config.name, "Tearing down volume");
 
                 if let Some(w) = active.watcher {
@@ -413,7 +406,7 @@ impl VolumeDriver for VolumeRegistry {
                 if let Err(e) = vol.mount.unmount().await {
                     error!("Unmount failed: {}", e);
                 }
-                vol.state = VolumeRuntime::Idle;
+                vol.state = VolumeLifecycle::Idle;
             }
         }
 
