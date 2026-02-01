@@ -1,8 +1,5 @@
-use std::collections::HashMap;
-
-use serde::{Deserialize, Serialize};
-
 use crate::volume::types::DockerOptions;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -30,7 +27,6 @@ pub struct MountRequest {
 pub struct VolumeInfo {
     pub name: String,
     pub mountpoint: String,
-    pub status: HashMap<String, String>,
     pub created_at: String,
 }
 

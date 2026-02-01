@@ -76,22 +76,10 @@ impl Volume {
     }
 
     fn to_info(&self) -> VolumeInfo {
-        let mut status = HashMap::new();
-
-        let (count, state_str) = match &self.state {
-            VolumeRuntime::Ready(active) => (active.mounts.len(), "Ready"),
-            VolumeRuntime::Provisioning(_) => (0, "Provisioning"),
-            VolumeRuntime::Idle => (0, "Idle"),
-        };
-
-        status.insert("Mounts".to_string(), count.to_string());
-        status.insert("State".to_string(), state_str.to_string());
-
         VolumeInfo {
             name: self.config.name.to_string(),
             mountpoint: self.mountpoint().display().to_string(),
             created_at: self.config.created_at.to_rfc3339(),
-            status,
         }
     }
 }
