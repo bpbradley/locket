@@ -6,6 +6,7 @@ use nix::errno::Errno;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::unistd::chown;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
 use std::os::unix::fs::MetadataExt;
@@ -149,6 +150,62 @@ impl VolumeMount {
         })
         .await
         .unwrap_or(false)
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DockerOptions(HashMap<String, String>);
+
+impl DockerOptions {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub fn insert<S: Into<String>>(&mut self, key: S, value: S) {
+        self.0.insert(key.into(), value.into());
+    }
+
+    pub fn get<S: AsRef<str>>(&self, key: S) -> Option<&String> {
+        self.0.get(key.as_ref())
+    }
+
+    pub fn as_map(&self) -> &HashMap<String, String> {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> HashMap<String, String> {
+        self.0
+    }
+}
+
+impl From<HashMap<String, String>> for DockerOptions {
+    fn from(map: HashMap<String, String>) -> Self {
+        Self(map)
+    }
+}
+
+impl<'a> IntoIterator for &'a DockerOptions {
+    type Item = (&'a String, &'a String);
+    type IntoIter = std::collections::hash_map::Iter<'a, String, String>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl IntoIterator for DockerOptions {
+    type Item = (String, String);
+    type IntoIter = std::collections::hash_map::IntoIter<String, String>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl FromIterator<(String, String)> for DockerOptions {
+    fn from_iter<T: IntoIterator<Item = (String, String)>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 

@@ -6,11 +6,12 @@ use crate::provider::{ProviderArgs, SecretsProvider};
 use crate::secrets::{
     InjectFailurePolicy, MemSize, Secret, SecretFileManager, SecretManagerConfig,
 };
+use crate::volume::types::DockerOptions;
 use crate::write::{FileWriter, FileWriterArgs, FsMode};
 use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
+use serde_json::{Map, Value};
 use std::sync::Arc;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -76,7 +77,7 @@ pub struct VolumeArgs {
         value_delimiter = ',',
         hide_env_values = true
     )]
-    #[serde(default, deserialize_with = "polymorphic_vec")]
+    #[serde(default, deserialize_with = "polymorphic_vec", alias = "secret")]
     pub secrets: Vec<Secret>,
 
     /// Default behavior for file watching.
@@ -131,30 +132,46 @@ impl VolumeSpec {
     }
 }
 
-//TODO: Need to refactor how I am handling configs as it is messy at this point
-impl TryFrom<HashMap<String, String>> for VolumeArgs {
+impl TryFrom<DockerOptions> for VolumeArgs {
     type Error = LocketError;
 
-    fn try_from(map: HashMap<String, String>) -> Result<Self, Self::Error> {
-        let val = serde_json::to_value(&map).map_err(|e| LocketError::Config(e.into()))?;
+    fn try_from(opts: DockerOptions) -> Result<Self, Self::Error> {
+        let json_val = expand_docker_options(opts);
 
-        let mut args: VolumeArgs = serde_json::from_value(val)
-            .map_err(|e| LocketError::Config(format!("Invalid options: {}", e).into()))?;
-
-        for (k, v) in map {
-            if k == "secret" || k.starts_with("secret.") {
-                let s = if k == "secret" {
-                    v.parse()?
-                } else {
-                    let name = k.strip_prefix("secret.").unwrap();
-                    format!("{}={}", name, v).parse()?
-                };
-                args.secrets.push(s);
-            }
-        }
+        let args: VolumeArgs = serde_json::from_value(json_val).map_err(|e| {
+            LocketError::Config(format!("Invalid volume configuration: {}", e).into())
+        })?;
 
         Ok(args)
     }
+}
+
+fn expand_docker_options(opts: DockerOptions) -> Value {
+    let mut root = Map::new();
+
+    for (k, v) in opts {
+        let (key, val) = if let Some((prefix, remainder)) = k.split_once('.') {
+            (prefix, format!("{}={}", remainder, v))
+        } else {
+            (k.as_str(), v)
+        };
+
+        match root.entry(key.to_string()) {
+            serde_json::map::Entry::Vacant(e) => {
+                e.insert(Value::String(val));
+            }
+            serde_json::map::Entry::Occupied(mut e) => {
+                let mut list = match e.get_mut().take() {
+                    Value::Array(vec) => vec,
+                    other => vec![other],
+                };
+                list.push(Value::String(val));
+                e.insert(Value::Array(list));
+            }
+        }
+    }
+
+    Value::Object(root)
 }
 
 pub fn parse_bool_opt<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>

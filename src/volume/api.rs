@@ -1,11 +1,14 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::volume::types::DockerOptions;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct CreateRequest {
     pub name: String,
-    pub opts: HashMap<String, String>,
+    pub opts: DockerOptions,
 }
 
 #[derive(Debug, Deserialize)]

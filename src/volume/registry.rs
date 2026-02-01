@@ -11,6 +11,7 @@ use crate::{
     events::StoppableHandler,
     path::{AbsolutePath, CanonicalPath},
     provider::{Provider, ProviderArgs, SecretsProvider},
+    volume::types::DockerOptions,
     watch::FsWatcher,
 };
 use async_trait::async_trait;
@@ -34,8 +35,9 @@ pub enum LifecycleState {
 pub struct VolumeConfig {
     pub name: VolumeName,
     pub created_at: DateTime<Utc>,
+    #[serde(skip)]
     pub args: VolumeArgs,
-    pub raw_options: HashMap<String, String>,
+    pub options: DockerOptions,
 }
 
 pub struct WatcherHandle {
@@ -85,10 +87,6 @@ impl Volume {
         status.insert("Mounts".to_string(), count.to_string());
         status.insert("State".to_string(), state_str.to_string());
 
-        for (k, v) in &self.config.raw_options {
-            status.insert(format!("Option.{}", k), v.clone());
-        }
-
         VolumeInfo {
             name: self.config.name.to_string(),
             mountpoint: self.mountpoint().display().to_string(),
@@ -136,9 +134,12 @@ impl VolumeRegistry {
             && let Ok(configs) = serde_json::from_str::<Vec<VolumeConfig>>(&data)
         {
             let mut lock = self.volumes.write().await;
-            for config in configs {
+            for mut config in configs {
                 let effective_args = self.default_config.clone().overlay(config.args.clone());
-
+                config.args = VolumeArgs::try_from(config.options.clone()).unwrap_or_else(|e| {
+                    tracing::warn!(volume=%config.name, "Failed to parse volume config: {}", e);
+                    VolumeArgs::default()
+                });
                 let spec: VolumeSpec = match effective_args.try_into() {
                     Ok(s) => s,
                     Err(e) => {
@@ -276,11 +277,7 @@ impl VolumeRegistry {
 
 #[async_trait]
 impl VolumeDriver for VolumeRegistry {
-    async fn create(
-        &self,
-        name: VolumeName,
-        opts: HashMap<String, String>,
-    ) -> Result<(), PluginError> {
+    async fn create(&self, name: VolumeName, opts: DockerOptions) -> Result<(), PluginError> {
         let args = VolumeArgs::try_from(opts.clone())?;
 
         let effective_args = self.default_config.clone().overlay(args.clone());
@@ -298,7 +295,7 @@ impl VolumeDriver for VolumeRegistry {
             name: name.clone(),
             created_at: Utc::now(),
             args,
-            raw_options: opts,
+            options: opts,
         };
 
         let mountpoint = self.runtime_dir.join(name.as_str());

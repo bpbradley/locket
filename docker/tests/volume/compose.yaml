@@ -4,7 +4,7 @@ services:
     demo:
         user: 1000:1000
         image: busybox
-        command: 
+        command:
             - "sh"
             - "-c"
             - "cat /run/secrets/locket/.env && cat /run/secrets/locket-bws/secret && echo && sleep 120"
@@ -17,6 +17,7 @@ volumes:
         driver_opts:
             user: 1000:1000
             secret: /home/bbradley/git/locket/secrets/op/templates/.env
+            secret.template: "{{op://Mordin/SecretPassword/Test Section/text"
             watch: "true"
     locket-volume-bws:
         driver: locket
