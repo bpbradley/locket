@@ -8,6 +8,9 @@
 .git
 .gitignore
 docker/tests
+docker/plugin-build
+docker/plugin
+docker/dist
 docker/compose.*
 docs
 tests

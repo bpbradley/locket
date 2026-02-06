@@ -16,7 +16,7 @@ pub struct PluginConfig {
 
 #[derive(Args, Debug, Clone, Default, Serialize, Deserialize, LayeredConfig)]
 #[serde(rename_all = "kebab-case")]
-#[locket(try_into = "PluginConfig")]
+#[locket(try_into = "PluginConfig", section = "volume")]
 pub struct PluginArgs {
     /// Path to the listening socket.
     #[arg(long, env = "LOCKET_PLUGIN_SOCKET")]

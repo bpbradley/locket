@@ -1,0 +1,90 @@
+{
+    "description": "Locket: Secret management Docker Volume Driver",
+    "documentation": "https://github.com/bpbradley/locket",
+    "interface": {
+        "types": ["docker.volumedriver/1.0"],
+        "socket": "locket.sock"
+    },
+    "entrypoint": [
+        "/usr/local/bin/locket",
+        "volume",
+        "--socket",
+        "/run/docker/plugins/locket.sock",
+        "--state-dir",
+        "/var/lib/locket/state",
+        "--runtime-dir",
+        "/var/lib/locket/mounts"
+    ],
+    "workdir": "/",
+    "network": {
+        "type": "host"
+    },
+    "linux": {
+        "capabilities": ["CAP_SYS_ADMIN"],
+        "devices": null
+    },
+    "propagatedMount": "/var/lib/locket/mounts",
+    "mounts": [
+        {
+            "name": "state",
+            "description": "Persistence for volume metadata",
+            "source": "/var/lib/locket/state",
+            "destination": "/var/lib/locket/state",
+            "type": "bind",
+            "options": ["rbind", "rw"],
+            "settable": ["source"]
+        },
+        {
+            "name": "config",
+            "description": "Config directory. Place locket.toml or token files here.",
+            "source": "",
+            "destination": "/etc/locket",
+            "type": "bind",
+            "options": ["ro", "rbind"],
+            "settable": ["source"]
+        }
+    ],
+    "env": [
+        {
+            "name": "SECRETS_PROVIDER",
+            "description": "Backend to use (op, op-connect, bws, infisical)",
+            "settable": ["value"]
+        },
+        {
+            "name": "LOCKET_LOG_LEVEL",
+            "description": "Log level (trace, debug, info, warn, error)",
+            "settable": ["value"],
+            "value": "info"
+        },
+        {
+            "name": "OP_SERVICE_ACCOUNT_TOKEN",
+            "description": "1Password Service Account Token",
+            "settable": ["value"]
+        },
+        {
+            "name": "OP_CONNECT_HOST",
+            "description": "1Password Connect Host URL",
+            "settable": ["value"]
+        },
+        {
+            "name": "OP_CONNECT_TOKEN",
+            "description": "1Password Connect Token",
+            "settable": ["value"]
+        },
+        {
+            "name": "BWS_MACHINE_TOKEN",
+            "description": "Bitwarden Machine Token",
+            "settable": ["value"]
+        },
+        {
+            "name": "INFISICAL_CLIENT_SECRET",
+            "description": "Infisical Client Secret",
+            "settable": ["value"]
+        },
+        {
+            "name": "INFISICAL_CLIENT_ID",
+            "description": "Infisical Client ID",
+            "settable": ["value"]
+        }
+    ]
+}

@@ -9,3 +9,5 @@ tests/docker/.env
 tests/docker/secrets/
 /*.dev.toml
 notes.md
+docker/plugin-build
+docker/dist

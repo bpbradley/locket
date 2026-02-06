@@ -7,22 +7,22 @@ services:
         command:
             - "sh"
             - "-c"
-            - "cat /run/secrets/locket/.env && cat /run/secrets/locket-bws/secret && echo && sleep 120"
+            - "cat /run/secrets/locket/template && cat /run/secrets/locket-bws/secret && echo && sleep 120"
         volumes:
-            - locket-volume:/run/secrets/locket:ro
+            - locket-volume-op:/run/secrets/locket:ro
             - locket-volume-bws:/run/secrets/locket-bws:ro
 volumes:
-    locket-volume:
-        driver: locket
+    locket-volume-op:
+        driver: ghcr.io/bpbradley/locket:plugin # Can use locket if installed with --alias locket
         driver_opts:
             user: 1000:1000
-            secret: /home/bbradley/git/locket/secrets/op/templates/.env
-            secret.template: "{{op://Mordin/SecretPassword/Test Section/text"
-            watch: "true"
+            provider: op
+            op-token: file:/etc/locket/tokens/op
+            secret.template: "{{ op://Mordin/TestKey/private key?ssh-format=openssh }}"
     locket-volume-bws:
-        driver: locket
+        driver: ghcr.io/bpbradley/locket:plugin
         driver_opts:
             user: 1000:1000
             provider: bws
-            bws-token: file:/etc/tokens/bws
+            bws-token: file:/etc/locket/tokens/bws
             secret: secret={{814d7d9a-54a5-47a0-afc0-b3a7015213c4}}

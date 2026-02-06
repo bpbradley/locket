@@ -7,11 +7,15 @@ variable "CACHE_FROM"    { default = "" }
 variable "CACHE_TO"      { default = "" }
 
 group "release" {
-  targets = ["connect", "op", "bws", "infisical", "aio"]
+  targets = ["connect", "op", "bws", "infisical", "aio", "plugin"]
 }
 
 group "all" {
-  targets = ["connect", "op", "bws", "infisical", "aio", "debug"]
+  targets = ["connect", "op", "bws", "infisical", "aio", "debug", "plugin"]
+}
+
+group "plugin-build" {
+    targets = ["plugin"]
 }
 
 target "_common" {
@@ -98,6 +102,16 @@ target "aio" {
     FEATURES = "op,connect,bws,infisical,exec"
   }
   tags = tags_main()
+  labels = { "org.opencontainers.image.version" = VERSION }
+}
+
+target "plugin" {
+  inherits = ["_common"]
+  target = "plugin"
+  args = {
+    FEATURES = "op,connect,bws,infisical,volume"
+  }
+  tags = tags_for("plugin")
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
