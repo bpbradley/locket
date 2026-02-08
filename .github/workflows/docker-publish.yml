@@ -69,7 +69,7 @@ jobs:
                       --push \
                       --metadata-file metadata.json
 
-            - name: Create and Push Managed Plugins
+            - name: Create and Push Plugin
               working-directory: docker
               run: |
                   ./build-plugin.sh ./metadata.json --push
