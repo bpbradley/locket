@@ -3,8 +3,6 @@ variable "IS_PRERELEASE" { default = false }
 variable "REGISTRIES"    { default = "bpbradley" }
 variable "IMAGE"         { default = "locket" }
 variable "PLATFORMS"     { default = "linux/amd64" }
-variable "CACHE_FROM"    { default = "" }
-variable "CACHE_TO"      { default = "" }
 
 group "release" {
   targets = ["connect", "op", "bws", "infisical", "aio", "plugin"]
@@ -22,8 +20,6 @@ target "_common" {
   context   = ".."
   dockerfile = "docker/Dockerfile"
   platforms = [PLATFORMS]
-  cache-from = CACHE_FROM == "" ? [] : [CACHE_FROM]
-  cache-to   = CACHE_TO == ""   ? [] : [CACHE_TO]
 }
 
 function "get_registries" {
@@ -60,6 +56,14 @@ function "tags_main" {
   ])
 }
 
+function "gha_cache" {
+  params = [scope_name]
+  result = {
+    cache-to   = ["type=gha,mode=max,scope=${scope_name}"]
+    cache-from = ["type=gha,scope=${scope_name}"]
+  }
+}
+
 target "op" {
   inherits = ["_common"]
   target = "op"
@@ -68,6 +72,8 @@ target "op" {
     DEFAULT_PROVIDER = "op"
   }
   tags = tags_for("op")
+  cache-from = gha_cache("op").cache-from
+  cache-to   = gha_cache("op").cache-to
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
@@ -79,6 +85,8 @@ target "connect" {
     DEFAULT_PROVIDER = "op-connect"
   }
   tags = tags_for("connect")
+  cache-from = gha_cache("connect").cache-from
+  cache-to   = gha_cache("connect").cache-to
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
@@ -90,7 +98,10 @@ target "bws" {
     DEFAULT_PROVIDER = "bws"
   }
   tags = tags_for("bws")
+  cache-from = gha_cache("bws").cache-from
+  cache-to   = gha_cache("bws").cache-to
   labels = { "org.opencontainers.image.version" = VERSION }
+
 }
 
 target "infisical" {
@@ -101,6 +112,8 @@ target "infisical" {
     DEFAULT_PROVIDER = "infisical"
   }
   tags = tags_for("infisical")
+  cache-from = gha_cache("infisical").cache-from
+  cache-to   = gha_cache("infisical").cache-to
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
@@ -111,6 +124,8 @@ target "aio" {
     FEATURES = "op,connect,bws,infisical,exec"
   }
   tags = tags_main()
+  cache-from = gha_cache("aio").cache-from
+  cache-to   = gha_cache("aio").cache-to
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
@@ -121,6 +136,8 @@ target "plugin" {
     FEATURES = "op,connect,bws,infisical,volume"
   }
   tags = tags_for("volume")
+  cache-from = gha_cache("volume").cache-from
+  cache-to   = gha_cache("volume").cache-to
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
@@ -131,5 +148,7 @@ target "debug" {
     FEATURES = "op,connect,bws,infisical,exec"
   }
   tags = tags_for("debug")
+  cache-from = gha_cache("debug").cache-from
+  cache-to   = gha_cache("debug").cache-to
   labels = { "org.opencontainers.image.version" = VERSION }
 }

@@ -66,8 +66,6 @@ jobs:
             - name: Build / Push
               working-directory: docker
               env:
-                  CACHE_FROM: type=gha
-                  CACHE_TO: type=gha,mode=max
                   REGISTRIES: ${{ env.REGISTRIES }}
               run: |
                   docker buildx bake \
