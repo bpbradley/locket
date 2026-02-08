@@ -9,6 +9,7 @@ on:
 permissions:
     contents: read
     pull-requests: read
+    actions: write
 
 jobs:
     filter:
@@ -75,5 +76,4 @@ jobs:
             - name: Build images
               working-directory: docker
               run: |
-                  docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release \
-                    --load
+                  docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release

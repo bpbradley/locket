@@ -35,7 +35,7 @@ path = "docker/tests/sidecar"
 cmd = "docker compose -f compose.tests.yaml -p tests up"
 
 [docker-plugin-config]
-cmd = 'docker plugin disable -f bpbradley/locket:plugin && docker plugin set bpbradley/locket:plugin config.source="/etc/locket" && docker plugin enable bpbradley/locket:plugin'
+cmd = 'docker plugin set bpbradley/locket:plugin config.source="/etc/locket" && docker plugin enable bpbradley/locket:plugin'
 
 [docker-provider]
 description = "Run test of docker provider"
