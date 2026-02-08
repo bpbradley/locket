@@ -72,8 +72,9 @@ jobs:
               uses: docker/setup-buildx-action@v3
               with:
                   driver: docker-container
+                  buildkitd-flags: --debug
 
             - name: Build images
               working-directory: docker
               run: |
-                  docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release
+                  docker buildx bake --allow=fs.read=.. -f docker-bake.hcl --set "*.output=type=cacheonly" release
