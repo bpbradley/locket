@@ -11,3 +11,4 @@ tests/docker/secrets/
 notes.md
 docker/plugin-build
 docker/dist
+**bake-meta.json

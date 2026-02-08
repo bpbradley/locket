@@ -19,7 +19,7 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 [docker-build]
 description = "docker build dev image"
 path = "docker"
-cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake --allow=fs.read=.. -f docker-bake.hcl all --load"
+cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake --allow=fs.read=.. -f docker-bake.hcl all --load --metadata-file ./bake-meta.json && ./build-plugin.sh ./bake-meta.json"
 
 [docker-op]
 path = "docker"
@@ -33,6 +33,9 @@ cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoi
 description = "Run test of docker image"
 path = "docker/tests/sidecar"
 cmd = "docker compose -f compose.tests.yaml -p tests up"
+
+[docker-plugin-config]
+cmd = 'docker plugin disable -f bpbradley/locket:plugin && docker plugin set bpbradley/locket:plugin config.source="/etc/locket" && docker plugin enable bpbradley/locket:plugin'
 
 [docker-provider]
 description = "Run test of docker provider"

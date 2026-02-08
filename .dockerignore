@@ -21,3 +21,4 @@ tests
 /*.md
 runfile.toml
 release.toml
+**bake-meta.json

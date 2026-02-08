@@ -34,6 +34,16 @@ jobs:
                      echo "IS_PRERELEASE=false" >> $GITHUB_ENV
                   fi
 
+            - name: Setup Registries
+              run: |
+                  REGS="ghcr.io/${{ github.repository_owner }}"
+
+                  if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+                    REGS="${REGS},docker.io/${{ secrets.DOCKERHUB_USERNAME }}"
+                  fi
+
+                  echo "REGISTRIES=$REGS" >> $GITHUB_ENV
+
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
               with:
@@ -46,10 +56,28 @@ jobs:
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
+            - name: Login to Docker Hub
+              if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+              uses: docker/login-action@v3
+              with:
+                  username: ${{ secrets.DOCKERHUB_USERNAME }}
+                  password: ${{ secrets.DOCKERHUB_TOKEN }}
+
             - name: Build / Push
               working-directory: docker
               env:
                   CACHE_FROM: type=gha
                   CACHE_TO: type=gha,mode=max
+                  REGISTRIES: ${{ env.REGISTRIES }}
               run: |
-                  docker buildx bake --allow=fs.read=.. -f docker-bake.hcl release --push
+                  docker buildx bake \
+                      --allow=fs.read=.. \
+                      -f docker-bake.hcl \
+                      release \
+                      --push \
+                      --metadata-file metadata.json
+
+            - name: Create and Push Managed Plugins
+              working-directory: docker
+              run: |
+                  ./build-plugin.sh ./metadata.json --push

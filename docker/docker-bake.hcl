@@ -1,6 +1,6 @@
 variable "VERSION"       { default = "0.0.0" }
 variable "IS_PRERELEASE" { default = false }
-variable "REGISTRY"      { default = "ghcr.io/bpbradley" }
+variable "REGISTRIES"    { default = "bpbradley" }
 variable "IMAGE"         { default = "locket" }
 variable "PLATFORMS"     { default = "linux/amd64" }
 variable "CACHE_FROM"    { default = "" }
@@ -26,29 +26,38 @@ target "_common" {
   cache-to   = CACHE_TO == ""   ? [] : [CACHE_TO]
 }
 
+function "get_registries" {
+  params = []
+  result = split(",", REGISTRIES)
+}
+
 # Helper to generate tags conditionally based on prerelease
 function "tags_for" {
   params = [suffix]
-  result = concat(
-    ["${REGISTRY}/${IMAGE}:${VERSION}-${suffix}"],
-    IS_PRERELEASE ? [] : [
-      "${REGISTRY}/${IMAGE}:${split(".", VERSION)[0]}.${split(".", VERSION)[1]}-${suffix}",
-      "${REGISTRY}/${IMAGE}:${split(".", VERSION)[0]}-${suffix}",
-      "${REGISTRY}/${IMAGE}:${suffix}"
-    ]
-  )
+  result = flatten([
+    for reg in get_registries() : concat(
+      ["${reg}/${IMAGE}:${VERSION}-${suffix}"],
+      IS_PRERELEASE ? [] : [
+        "${reg}/${IMAGE}:${split(".", VERSION)[0]}.${split(".", VERSION)[1]}-${suffix}",
+        "${reg}/${IMAGE}:${split(".", VERSION)[0]}-${suffix}",
+        "${reg}/${IMAGE}:${suffix}"
+      ]
+    )
+  ])
 }
 
 function "tags_main" {
   params = []
-  result = concat(
-    ["${REGISTRY}/${IMAGE}:${VERSION}"],
-    IS_PRERELEASE ? [] : [
-      "${REGISTRY}/${IMAGE}:${split(".", VERSION)[0]}.${split(".", VERSION)[1]}",
-      "${REGISTRY}/${IMAGE}:${split(".", VERSION)[0]}",
-      "${REGISTRY}/${IMAGE}:latest"
-    ]
-  )
+  result = flatten([
+    for reg in get_registries() : concat(
+      ["${reg}/${IMAGE}:${VERSION}"],
+      IS_PRERELEASE ? [] : [
+        "${reg}/${IMAGE}:${split(".", VERSION)[0]}.${split(".", VERSION)[1]}",
+        "${reg}/${IMAGE}:${split(".", VERSION)[0]}",
+        "${reg}/${IMAGE}:latest"
+      ]
+    )
+  ])
 }
 
 target "op" {
@@ -111,7 +120,7 @@ target "plugin" {
   args = {
     FEATURES = "op,connect,bws,infisical,volume"
   }
-  tags = tags_for("plugin")
+  tags = tags_for("volume")
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
@@ -121,9 +130,6 @@ target "debug" {
   args = {
     FEATURES = "op,connect,bws,infisical,exec"
   }
-  tags = [
-    "${REGISTRY}/${IMAGE}:${VERSION}-debug",
-    "${REGISTRY}/${IMAGE}:debug"
-  ]
+  tags = tags_for("debug")
   labels = { "org.opencontainers.image.version" = VERSION }
 }

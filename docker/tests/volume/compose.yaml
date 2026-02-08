@@ -13,14 +13,14 @@ services:
             - locket-volume-bws:/run/secrets/locket-bws:ro
 volumes:
     locket-volume-op:
-        driver: ghcr.io/bpbradley/locket:plugin # Can use locket if installed with --alias locket
+        driver: bpbradley/locket:plugin # Can use locket if installed with --alias locket
         driver_opts:
             user: 1000:1000
             provider: op
             op-token: file:/etc/locket/tokens/op
             secret.template: "{{ op://Mordin/TestKey/private key?ssh-format=openssh }}"
     locket-volume-bws:
-        driver: ghcr.io/bpbradley/locket:plugin
+        driver: bpbradley/locket:plugin
         driver_opts:
             user: 1000:1000
             provider: bws

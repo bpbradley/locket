@@ -1,53 +1,61 @@
 #!/bin/bash
 set -euo pipefail
 
-REGISTRY="${REGISTRY:-ghcr.io/bpbradley}"
-PLUGIN_NAME="${PLUGIN_NAME:-locket}"
-VERSION="${VERSION:-$(cargo run --quiet -- --version | cut -d' ' -f2)}"
-
-PLUGIN_TAG="${REGISTRY}/${PLUGIN_NAME}:plugin"
-BAKED_IMAGE_TAG="${REGISTRY}/${PLUGIN_NAME}:${VERSION}-plugin"
-
+METADATA_FILE="${1:-bake-metadata.json}"
+CONFIG_SRC="${CONFIG_SRC:-./plugin/config.json}"
 BUILD_DIR="./dist/plugin-build"
 ROOTFS_DIR="${BUILD_DIR}/rootfs"
-CONFIG_SRC="./plugin/config.json"
+IS_PUSHING=false
+
+if [[ "${2:-}" == "--push" ]]; then IS_PUSHING=true; fi
 
 log() { echo -e "\033[1;34m[INFO]\033[0m $1"; }
 err() { echo -e "\033[1;31m[ERROR]\033[0m $1"; exit 1; }
-
-cleanup() {
-    if [ -n "${TEMP_CONTAINER_ID:-}" ]; then
-        docker rm -vf "$TEMP_CONTAINER_ID" >/dev/null 2>&1 || true
-    fi
-}
+cleanup() { [ -n "${TEMP_CONTAINER_ID:-}" ] && docker rm -vf "$TEMP_CONTAINER_ID" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-[ -f "$CONFIG_SRC" ] || err "Config file not found at $CONFIG_SRC"
+command -v jq >/dev/null 2>&1 || err "jq is required."
+[ -f "$CONFIG_SRC" ] || err "Config file not found: $CONFIG_SRC"
+[ -f "$METADATA_FILE" ] || err "Metadata file not found: $METADATA_FILE"
 
-log "Starting Plugin Build for ${PLUGIN_TAG} (Version: ${VERSION})"
+log "Reading build metadata from $METADATA_FILE..."
+mapfile -t ARTIFACT_TAGS < <(jq -r '.plugin."image.name" | split(",")[]' "$METADATA_FILE")
 
-log "Baking plugin image..."
-export VERSION
-docker buildx bake --allow=fs.read=.. -f ./docker-bake.hcl plugin --load
+if [ ${#ARTIFACT_TAGS[@]} -eq 0 ]; then
+    err "No tags found in metadata for target 'plugin'."
+fi
 
-log "Extracting RootFS..."
+SRC_IMAGE="${ARTIFACT_TAGS[0]}"
+log "Source Artifact: $SRC_IMAGE"
+
 rm -rf "$BUILD_DIR"
 mkdir -p "$ROOTFS_DIR"
 
-TEMP_CONTAINER_ID=$(docker create "$BAKED_IMAGE_TAG" true)
+if docker image inspect "$SRC_IMAGE" >/dev/null 2>&1; then
+    log "Image found locally."
+else
+    log "Pulling $SRC_IMAGE..."
+    docker pull "$SRC_IMAGE"
+fi
 
+TEMP_CONTAINER_ID=$(docker create "$SRC_IMAGE" true)
 docker export "$TEMP_CONTAINER_ID" | tar -x -C "$ROOTFS_DIR"
-
-log "Applying configuration..."
 cp "$CONFIG_SRC" "$BUILD_DIR/"
 
-log "Creating Docker Plugin..."
+for ARTIFACT_TAG in "${ARTIFACT_TAGS[@]}"; do
+    if [[ "$ARTIFACT_TAG" == *":volume" ]]; then
+        PLUGIN_TAG="${ARTIFACT_TAG%:volume}:plugin"
+    else
+        PLUGIN_TAG="${ARTIFACT_TAG%-volume}"
+    fi
 
-docker plugin rm -f "$PLUGIN_TAG" 2>/dev/null || true
-docker plugin create "$PLUGIN_TAG" "$BUILD_DIR"
+    echo "$PLUGIN_TAG - $(date +%s)" > "$ROOTFS_DIR/.docker-plugin-build-meta"
+    docker plugin rm -f "$PLUGIN_TAG" 2>/dev/null || true
+    docker plugin create "$PLUGIN_TAG" "$BUILD_DIR"
 
-log "Plugin created successfully: ${PLUGIN_TAG}"
-
-if [[ "${1:-}" == "--push" ]]; then
-    docker plugin push "$PLUGIN_TAG"
-fi
+    if [ "$IS_PUSHING" = true ]; then
+        log "Pushing $PLUGIN_TAG..."
+        docker plugin push "$PLUGIN_TAG"
+        docker plugin rm -f "$PLUGIN_TAG"
+    fi
+done
