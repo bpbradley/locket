@@ -11,7 +11,12 @@ RUN apk add --no-cache musl-dev build-base pkgconfig \
 WORKDIR /src
 
 FROM chef AS planner
-COPY . .
+
+# Copy manifests only first to help put dependencies in cache
+COPY Cargo.toml Cargo.lock ./
+COPY locket_derive/Cargo.toml locket_derive/Cargo.toml
+COPY xtask/Cargo.toml xtask/Cargo.toml
+
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
