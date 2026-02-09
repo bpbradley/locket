@@ -18,11 +18,12 @@ usage() {
     echo "  --metadata FILE   Path to metadata file (default: bake-metadata.json)"
     echo "  --config FILE     Path to config.json (default: ./plugin/config.json)"
     echo "  --push            Push the plugin after building"
-    echo "  --enable STR      Enable the plugin tag matching this string"
+    echo "  --enable STR      Enable plugin tag ending with this string"
     echo "  --set KEY=VAL     Set a plugin configuration option (can be used multiple times)"
     exit 1
 }
 trap cleanup EXIT
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --metadata)
@@ -40,7 +41,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --enable)
-      if [[ -z "${2:-}" ]]; then err "--enable requires a string argument (e.g., 'dev' or 'latest')"; fi
+      if [[ -z "${2:-}" ]]; then err "--enable requires a string argument (e.g., ':plugin')"; fi
       ENABLE_FILTER="$2"
       shift 2
       ;;
@@ -87,15 +88,14 @@ docker export "$TEMP_CONTAINER_ID" | tar -x -C "$ROOTFS_DIR"
 cp "$CONFIG_SRC" "$BUILD_DIR/"
 
 for ARTIFACT_TAG in "${ARTIFACT_TAGS[@]}"; do
-    if [[ "$ARTIFACT_TAG" == *":volume" ]]; then
-        PLUGIN_TAG="${ARTIFACT_TAG%:volume}:plugin"
-    else
-        PLUGIN_TAG="${ARTIFACT_TAG%-volume}"
-    fi
+    PLUGIN_TAG="${ARTIFACT_TAG%volume}plugin"
 
     SHOULD_ENABLE=false
-    if [[ -n "$ENABLE_FILTER" ]] && [[ "$PLUGIN_TAG" == *"$ENABLE_FILTER"* ]]; then
-        SHOULD_ENABLE=true
+
+    if [[ -n "$ENABLE_FILTER" ]]; then
+        if [[ "$PLUGIN_TAG" == *"$ENABLE_FILTER" ]]; then
+             SHOULD_ENABLE=true
+        fi
     fi
 
     echo "$PLUGIN_TAG - $(date +%s)" > "$ROOTFS_DIR/.docker-plugin-build-meta"
