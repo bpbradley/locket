@@ -19,7 +19,12 @@ cmd = "cargo clippy --all-targets -- -D warnings"
 [docker-build]
 description = "docker build dev image"
 path = "docker"
-cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake --allow=fs.read=.. -f docker-bake.hcl all --load --metadata-file ./bake-meta.json && ./build-plugin.sh ./bake-meta.json"
+cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buildx bake --allow=fs.read=.. -f docker-bake.hcl all --load --metadata-file ./bake-meta.json && ./build-plugin.sh --metadata ./bake-meta.json --set config.source=\"/etc/locket\" --enable plugin"
+
+[docker-plugin-test]
+description = "docker plugin test"
+path = "docker/tests/volume"
+cmd = "docker compose down -v && docker compose up"
 
 [docker-op]
 path = "docker"
