@@ -72,4 +72,4 @@ jobs:
             - name: Create and Push Plugin
               working-directory: docker
               run: |
-                  ./build-plugin.sh ./metadata.json --push
+                  ./build-plugin.sh --metadata ./metadata.json --push
