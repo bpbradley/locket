@@ -61,6 +61,7 @@ jobs:
               working-directory: docker
               env:
                   REGISTRIES: ${{ env.REGISTRIES }}
+                  CI: true
               run: |
                   docker buildx bake \
                       --allow=fs.read=.. \

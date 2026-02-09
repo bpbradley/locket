@@ -27,11 +27,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 COPY --from=planner /src/recipe.json recipe.json
 
-ARG FEATURES="op,connect,bws,infisical,exec"
+ARG CACHE_FEATURES="full"
 
 RUN cargo chef cook --release --target x86_64-unknown-linux-musl \
     --recipe-path recipe.json \
-    --no-default-features --features "${FEATURES}"
+    --no-default-features --features "${CACHE_FEATURES}"
+
+ARG FEATURES="full"
 
 COPY . .
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
