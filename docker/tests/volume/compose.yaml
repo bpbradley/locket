@@ -7,10 +7,11 @@ services:
         command:
             - "sh"
             - "-c"
-            - "cat /run/secrets/locket/template && cat /run/secrets/locket-bws/secret && echo && sleep 120"
+            - "cat /run/secrets/locket/template && cat /run/secrets/locket-bws/secret && cat /run/secrets/locket-default/template && echo && sleep 120"
         volumes:
             - locket-volume-op:/run/secrets/locket:ro
             - locket-volume-bws:/run/secrets/locket-bws:ro
+            - locket-volume-default:/run/secrets/locket-default:ro
 volumes:
     locket-volume-op:
         driver: bpbradley/locket:plugin # Can use locket if installed with --alias locket
@@ -26,3 +27,9 @@ volumes:
             provider: bws
             bws-token: file:/etc/locket/tokens/bws
             secret: secret={{814d7d9a-54a5-47a0-afc0-b3a7015213c4}}
+    locket-volume-default:
+        driver: bpbradley/locket:plugin
+        driver_opts:
+            # No provider selected, as it will use the defaults I set in /etc/locket/locket.toml
+            user: 1000:1000
+            secret.template: "{{ op://Mordin/TestKey/private key }}"
