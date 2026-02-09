@@ -24,7 +24,7 @@ cmd = "VERSION=$(cargo run --quiet -- --version | cut -d' ' -f2)-dev docker buil
 [docker-plugin-test]
 description = "docker plugin test"
 path = "docker/tests/volume"
-cmd = "docker compose down -v && docker compose up"
+cmd = "docker compose down && docker compose down -v && docker compose up"
 
 [docker-op]
 path = "docker"

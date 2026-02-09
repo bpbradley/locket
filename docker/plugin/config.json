@@ -15,7 +15,9 @@
         "--state-dir",
         "/var/lib/locket/state",
         "--runtime-dir",
-        "/var/lib/locket/mounts"
+        "/var/lib/locket/mounts",
+        "--config",
+        "/etc/locket/locket.toml"
     ],
     "workdir": "/",
     "network": {
