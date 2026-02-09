@@ -17,6 +17,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY locket_derive/Cargo.toml locket_derive/Cargo.toml
 COPY xtask/Cargo.toml xtask/Cargo.toml
 
+RUN mkdir -p src locket_derive/src xtask/src \
+    && touch src/lib.rs src/main.rs \
+    && touch locket_derive/src/lib.rs \
+    && touch xtask/src/main.rs
+
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
