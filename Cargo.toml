@@ -55,7 +55,7 @@ futures = { version = "0.3"}
 url = { version = "2", features = ["serde"]}
 toml = {version = "0.9"}
 percent-encoding = { version = "2.3", optional = true }
-bitwarden = { version = "1", features=["secrets"], optional = true }
+bitwarden = { version = "2", features=["secrets"], optional = true }
 uuid = { version = "1", features=["serde"], optional = true }
 dotenvy = {version = "0.15", optional = true}
 nix = { version = "0.30", features = ["signal", "term"], optional = true}
