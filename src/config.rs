@@ -14,7 +14,7 @@
 //! Necessary traits to support layering can be derived using the `#[derive(LayeredConfig)]` attribute
 
 use crate::error::LocketError;
-use crate::path::CanonicalPath;
+use crate::path::AbsolutePath;
 use clap::Args;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -35,6 +35,15 @@ pub enum ConfigError {
     #[cfg(feature = "exec")]
     #[error(transparent)]
     Process(#[from] crate::process::ProcessError),
+
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+}
+
+impl From<String> for ConfigError {
+    fn from(s: String) -> Self {
+        ConfigError::Validation(s)
+    }
 }
 
 /// Defines how two partial configuration states are merged.
@@ -82,7 +91,7 @@ pub trait Layered<C>:
     Overlay + DeserializeOwned + Default + ApplyDefaults + ConfigSection + Sized
 {
     /// Resolves the layered configuration into the target domain type `C`.
-    fn resolve(self, configs: &[CanonicalPath]) -> Result<C, LocketError>;
+    fn resolve(self, configs: &[AbsolutePath]) -> Result<C, LocketError>;
 }
 
 impl<T, C> Layered<C> for T
@@ -91,10 +100,17 @@ where
     T: TryInto<C>,
     <T as TryInto<C>>::Error: Into<LocketError>,
 {
-    fn resolve(self, configs: &[CanonicalPath]) -> Result<C, LocketError> {
+    fn resolve(self, configs: &[AbsolutePath]) -> Result<C, LocketError> {
         let mut base = Self::default();
 
         for path in configs {
+            if !path.exists() {
+                tracing::info!(
+                    "Skipping config file because it does not exist: {}",
+                    path.display()
+                );
+                continue;
+            }
             let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
             let root: toml::Value = toml::from_str(&content).map_err(ConfigError::Parse)?;
 
@@ -132,7 +148,7 @@ pub struct LayeredArgs<T: Args> {
     /// Each file is loaded in the order specified, with later files
     /// overriding earlier ones.
     #[arg(long, env = "LOCKET_CONFIG", action = clap::ArgAction::Append)]
-    pub config: Vec<CanonicalPath>,
+    pub config: Vec<AbsolutePath>,
 
     #[command(flatten)]
     pub inner: T,
@@ -184,7 +200,7 @@ pub trait ConfigStructure {
 #[cfg(test)]
 mod tests {
     use crate::config::{ApplyDefaults, LayeredArgs, Overlay};
-    use crate::path::CanonicalPath;
+    use crate::path::AbsolutePath;
     use clap::{Args, Parser};
     use locket_derive::LayeredConfig;
     use serde::{Deserialize, Serialize};
@@ -277,7 +293,7 @@ mod tests {
         )
         .unwrap();
 
-        let config_path = CanonicalPath::try_new(tmp.path()).unwrap();
+        let config_path = AbsolutePath::new(tmp.path());
 
         let args = TestArgs {
             name: None,

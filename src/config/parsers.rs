@@ -20,6 +20,21 @@ where
     <T as FromStr>::Err: Display,
     <T as TryFromKv>::Err: Display,
 {
+    fn resolve_list<T, E>(items: Vec<Item<T>>) -> Result<Vec<T>, E>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: Display,
+        E: serde::de::Error,
+    {
+        items
+            .into_iter()
+            .map(|item| match item {
+                Item::Obj(val) => Ok(val),
+                Item::Str(s) => s.parse().map_err(serde::de::Error::custom),
+            })
+            .collect()
+    }
+
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Item<T> {
@@ -32,20 +47,16 @@ where
     enum Container<T> {
         List(Vec<Item<T>>),
         Map(HashMap<String, String>),
+        Single(Item<T>),
     }
 
     let vec = match Container::<T>::deserialize(deserializer)? {
-        Container::List(items) => items
-            .into_iter()
-            .map(|item| match item {
-                Item::Obj(val) => Ok(val),
-                Item::Str(s) => s.parse().map_err(serde::de::Error::custom),
-            })
-            .collect::<Result<Vec<T>, _>>()?,
+        Container::List(items) => resolve_list(items)?,
         Container::Map(map) => map
             .into_iter()
             .map(|(k, v)| T::try_from_kv(k, v).map_err(serde::de::Error::custom))
             .collect::<Result<Vec<T>, _>>()?,
+        Container::Single(item) => resolve_list(vec![item])?,
     };
 
     Ok(C::from(vec))

@@ -1,9 +1,14 @@
 /target/
 **/*.swp
 **/*.swo
-/secrets/
+**/secrets/
+!src/secrets
 compose.debug.yaml
 docker/compose.test.yaml
 tests/docker/.env
 tests/docker/secrets/
 /*.dev.toml
+notes.md
+docker/plugin-build
+docker/dist
+**bake-meta.json

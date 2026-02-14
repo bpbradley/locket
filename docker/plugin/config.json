@@ -1,0 +1,310 @@
+{
+    "description": "Locket: Secret management Docker Volume Driver",
+    "documentation": "https://github.com/bpbradley/locket",
+    "interface": {
+        "types": [
+            "docker.volumedriver/1.0"
+        ],
+        "socket": "locket.sock"
+    },
+    "entrypoint": [
+        "/usr/local/bin/locket",
+        "volume",
+        "--socket",
+        "/run/docker/plugins/locket.sock",
+        "--state-dir",
+        "/var/lib/locket/state",
+        "--runtime-dir",
+        "/var/lib/locket/mounts",
+        "--config",
+        "/etc/locket/locket.toml"
+    ],
+    "workdir": "/",
+    "network": {
+        "type": "host"
+    },
+    "linux": {
+        "capabilities": [
+            "CAP_SYS_ADMIN"
+        ],
+        "devices": null
+    },
+    "propagatedMount": "/var/lib/locket/mounts",
+    "mounts": [
+        {
+            "name": "state",
+            "description": "Persistence for volume metadata",
+            "source": "/var/lib/locket/state",
+            "destination": "/var/lib/locket/state",
+            "type": "bind",
+            "options": [
+                "rbind",
+                "rw"
+            ],
+            "settable": [
+                "source"
+            ]
+        },
+        {
+            "name": "config",
+            "description": "Config directory. Place locket.toml or token files here.",
+            "source": "",
+            "destination": "/etc/locket",
+            "type": "bind",
+            "options": [
+                "ro",
+                "rbind"
+            ],
+            "settable": [
+                "source"
+            ]
+        }
+    ],
+    "env": [
+        {
+            "name": "BWS_API_URL",
+            "description": "Bitwarden API URL",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "BWS_IDENTITY_URL",
+            "description": "Bitwarden Identity URL",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "BWS_MACHINE_TOKEN",
+            "description": "Bitwarden Machine Token",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "BWS_MAX_CONCURRENT",
+            "description": "Maximum number of concurrent requests to Bitwarden Secrets Manager",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "BWS_USER_AGENT",
+            "description": "BWS User Agent",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_CLIENT_ID",
+            "description": "The client ID for Universal Auth to authenticate with Infisical",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_CLIENT_SECRET",
+            "description": "The client secret for Universal Auth to authenticate with Infisical",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_DEFAULT_ENVIRONMENT",
+            "description": "The default environment slug to use when one is not specified",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_DEFAULT_PATH",
+            "description": "The default path to use when one is not specified",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_DEFAULT_PROJECT_ID",
+            "description": "The default project ID to use when one is not specified",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_DEFAULT_SECRET_TYPE",
+            "description": "The default secret type to use when one is not specified",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_MAX_CONCURRENT",
+            "description": "Maximum allowed concurrent requests to Infisical API",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "INFISICAL_URL",
+            "description": "The URL of the Infisical instance to connect to",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_CONFIG",
+            "description": "Path to configuration files",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_DIR_MODE",
+            "description": "Directory permission mode",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_FILE_MODE",
+            "description": "File permission mode",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_FILE_OWNER",
+            "description": "Owner of the file/dir",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_LOG_FORMAT",
+            "description": "Log format",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_LOG_LEVEL",
+            "description": "Log level",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_PLUGIN_RUNTIME_DIR",
+            "description": "Path to directory where runtime data is stored",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_PLUGIN_SOCKET",
+            "description": "Path to the listening socket",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_PLUGIN_STATE_DIR",
+            "description": "Path to directory where state configuration is stored",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_VOLUME_DEFAULT_INJECT_POLICY",
+            "description": "Default policy for handling failures when errors are encountered",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_VOLUME_DEFAULT_MAX_FILE_SIZE",
+            "description": "Default maximum size of individual secret files",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_VOLUME_DEFAULT_MOUNT_FLAGS",
+            "description": "Default mount flags for the in-memory filesystem",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_VOLUME_DEFAULT_MOUNT_MODE",
+            "description": "Default file mode for the mounted filesystem",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_VOLUME_DEFAULT_MOUNT_SIZE",
+            "description": "Default size of the in-memory filesystem",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_VOLUME_DEFAULT_SECRETS",
+            "description": "Default secrets to mount into the volume",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "LOCKET_VOLUME_DEFAULT_WATCH",
+            "description": "Default behavior for file watching",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "OP_CONFIG_DIR",
+            "description": "Optional: Path to 1Password config directory",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "OP_CONNECT_HOST",
+            "description": "1Password Connect Host HTTP(S) URL",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "OP_CONNECT_MAX_CONCURRENT",
+            "description": "Maximum allowed concurrent requests to Connect API",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "OP_CONNECT_TOKEN",
+            "description": "1Password Connect Token",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "OP_SERVICE_ACCOUNT_TOKEN",
+            "description": "1Password Service Account Token",
+            "settable": [
+                "value"
+            ]
+        },
+        {
+            "name": "SECRETS_PROVIDER",
+            "description": "Secrets provider backend to use",
+            "settable": [
+                "value"
+            ]
+        }
+    ]
+}

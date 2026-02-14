@@ -6,15 +6,14 @@
 //!
 //! It also provides implementations for specific providers
 //! and a selection mechanism to choose the provider at runtime
-use crate::path::CanonicalPath;
+
 use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use locket_derive::LayeredConfig;
-use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize, Serializer};
-use std::num::NonZeroUsize;
+use secrecy::SecretString;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::{collections::HashMap, str::FromStr};
 
 #[cfg(not(any(
     feature = "op",
@@ -33,11 +32,25 @@ pub mod config;
 mod connect;
 #[cfg(feature = "infisical")]
 mod infisical;
+pub mod managed;
 #[cfg(feature = "op")]
 mod op;
 mod references;
+mod types;
 
+use managed::{ManagedProvider, ProviderFactory};
 pub use references::{ReferenceParseError, ReferenceParser, SecretReference};
+pub use types::{AuthToken, ConcurrencyLimit, TokenSource};
+
+/// Trait for configuration structs that can produce a "signature" representing their content's freshness.
+#[async_trait]
+pub trait Signature: Send + Sync {
+    /// Returns a hash of the configuration's sensitive content.
+    ///
+    /// For static configuration, this may assume a constant or default.
+    /// For file-based configuration, this should check the file content.
+    async fn signature(&self) -> Result<u64, ProviderError>;
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -103,7 +116,7 @@ pub trait SecretsProvider: ReferenceParser + Send + Sync {
 }
 
 /// Provider backend configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Provider {
     #[cfg(feature = "op")]
     Op(config::op::OpConfig),
@@ -117,22 +130,62 @@ pub enum Provider {
 
 impl Provider {
     pub async fn build(self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
+        let managed = ManagedProvider::new(self).await?;
+        Ok(Arc::new(managed))
+    }
+}
+
+#[async_trait]
+impl Signature for Provider {
+    async fn signature(&self) -> Result<u64, ProviderError> {
+        match self {
+            #[cfg(feature = "op")]
+            Self::Op(c) => c.signature().await,
+            #[cfg(feature = "connect")]
+            Self::Connect(c) => c.signature().await,
+            #[cfg(feature = "bws")]
+            Self::Bws(c) => c.signature().await,
+            #[cfg(feature = "infisical")]
+            Self::Infisical(c) => c.signature().await,
+        }
+    }
+}
+
+impl ReferenceParser for Provider {
+    fn parse(&self, raw: &str) -> Option<SecretReference> {
+        match self {
+            #[cfg(feature = "op")]
+            Self::Op(cfg) => cfg.parse(raw),
+            #[cfg(feature = "connect")]
+            Self::Connect(cfg) => cfg.parse(raw),
+            #[cfg(feature = "bws")]
+            Self::Bws(cfg) => cfg.parse(raw),
+            #[cfg(feature = "infisical")]
+            Self::Infisical(cfg) => cfg.parse(raw),
+        }
+    }
+}
+
+#[async_trait]
+impl ProviderFactory for Provider {
+    async fn create(&self) -> Result<Arc<dyn SecretsProvider>, ProviderError> {
         let provider: Arc<dyn SecretsProvider> = match self {
             #[cfg(feature = "op")]
-            Self::Op(c) => Arc::new(op::OpProvider::new(c).await?),
+            Self::Op(c) => Arc::new(op::OpProvider::new(c.clone()).await?),
             #[cfg(feature = "connect")]
-            Self::Connect(c) => Arc::new(connect::OpConnectProvider::new(c).await?),
+            Self::Connect(c) => Arc::new(connect::OpConnectProvider::new(c.clone()).await?),
             #[cfg(feature = "bws")]
-            Self::Bws(c) => Arc::new(bws::BwsProvider::new(c).await?),
+            Self::Bws(c) => Arc::new(bws::BwsProvider::new(c.clone()).await?),
             #[cfg(feature = "infisical")]
-            Self::Infisical(c) => Arc::new(infisical::InfisicalProvider::new(c).await?),
+            Self::Infisical(c) => Arc::new(infisical::InfisicalProvider::new(c.clone()).await?),
         };
-
         Ok(provider)
     }
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
+#[derive(
+    Args, Debug, Clone, Hash, PartialEq, Eq, LayeredConfig, Deserialize, Serialize, Default,
+)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProviderArgs {
     /// Secrets provider backend to use.
@@ -171,7 +224,7 @@ impl TryFrom<ProviderArgs> for Provider {
     }
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, ValueEnum, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
     /// 1Password Service Account
@@ -188,7 +241,9 @@ pub enum ProviderKind {
     Infisical,
 }
 
-#[derive(Args, Debug, Clone, LayeredConfig, Deserialize, Serialize, Default)]
+#[derive(
+    Args, Debug, Clone, Hash, PartialEq, Eq, LayeredConfig, Deserialize, Serialize, Default,
+)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProviderConfigs {
     #[cfg(feature = "op")]
@@ -210,133 +265,4 @@ pub struct ProviderConfigs {
     #[command(flatten, next_help_heading = "Infisical Secrets Provider")]
     #[serde(flatten)]
     pub infisical: config::infisical::InfisicalArgs,
-}
-
-/// A wrapper around `SecretString` which allows constructing from either a direct token or a file path.
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
-#[serde(try_from = "String")]
-pub struct AuthToken(SecretString);
-
-impl AuthToken {
-    /// Simple wrapper for SecretString
-    pub fn new(token: SecretString) -> Self {
-        Self(token)
-    }
-
-    pub fn try_from_file(path: CanonicalPath) -> Result<Self, ProviderError> {
-        let content = std::fs::read_to_string(path.as_path()).map_err(|e| {
-            ProviderError::InvalidConfig(format!("failed to read token file {:?}: {}", path, e))
-        })?;
-
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
-            return Err(ProviderError::InvalidConfig(format!(
-                "token file {:?} is empty",
-                path
-            )));
-        }
-
-        Ok(Self(SecretString::new(trimmed.to_owned().into())))
-    }
-}
-
-impl Serialize for AuthToken {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Do not expose the actual token.
-        serializer.serialize_str("[REDACTED]")
-    }
-}
-
-impl From<AuthToken> for SecretString {
-    fn from(token: AuthToken) -> Self {
-        token.0
-    }
-}
-
-impl AsRef<SecretString> for AuthToken {
-    fn as_ref(&self) -> &SecretString {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for AuthToken {
-    type Error = ProviderError;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse()
-    }
-}
-
-impl FromStr for AuthToken {
-    type Err = ProviderError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
-        if s.is_empty() {
-            return Err(ProviderError::InvalidConfig(
-                "auth token is empty".to_string(),
-            ));
-        }
-        // If token path starts with "file:", treat it as a file path
-        if let Some(path) = s.strip_prefix("file:") {
-            let cleaned = path.strip_prefix("//").unwrap_or(path);
-            let canon = CanonicalPath::try_new(cleaned).map_err(|e| {
-                ProviderError::InvalidConfig(format!(
-                    "failed to resolve token file '{:?}': {}",
-                    path, e
-                ))
-            })?;
-            Self::try_from_file(canon)
-        } else {
-            Ok(Self(SecretString::new(s.to_owned().into())))
-        }
-    }
-}
-
-/// Allows exposing the inner secret string using ExposeSecret from `secrecy` crate
-impl ExposeSecret<str> for AuthToken {
-    fn expose_secret(&self) -> &str {
-        self.0.expose_secret()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct ConcurrencyLimit(NonZeroUsize);
-
-impl ConcurrencyLimit {
-    pub const fn new(limit: usize) -> Self {
-        if limit == 0 {
-            // Static string panic is supported in const fn
-            panic!("ConcurrencyLimit: value must be greater than 0");
-        }
-        Self(NonZeroUsize::new(limit).unwrap())
-    }
-    pub fn into_inner(self) -> usize {
-        self.0.get()
-    }
-}
-
-impl Default for ConcurrencyLimit {
-    fn default() -> Self {
-        Self::new(20)
-    }
-}
-
-impl std::str::FromStr for ConcurrencyLimit {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let val: usize = s.parse().map_err(|_| "not a number")?;
-        NonZeroUsize::new(val)
-            .map(Self)
-            .ok_or_else(|| "Concurrency must be > 0".to_string())
-    }
-}
-
-impl std::fmt::Display for ConcurrencyLimit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }

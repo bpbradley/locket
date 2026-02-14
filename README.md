@@ -21,6 +21,7 @@ locket is a versatile tool and it supports various forms of secrets injection.
 1. [Container Sidecar](#sidecar-mode): Inject secrets into configuration files stored in a shared, ephemeral tmpfs volume. locket will render files with secret references replaced with actual secrets so that dependent services can use them.
 1. [Provider](#provider-mode): locket can be installed as a Docker CLI plugin, and it will inject secrets directly into the dependent process enviornment before it starts.
 1. [Orchestrator](#orchestration): `locket exec` is able to manage a specified subcommand, injecting secrets into its process environment. It can also watch for changes to environment files, and restart the dependent service automatically.
+1. [Docker Volume Driver](#docker-volume-driver): locket can be installed as a Docker Enginer Plugin. In this mode, locket can be used as a Volume Driver, where secrets are injected directly into tmpfs-backed volumes that can be mounted by dependent containers. This allows the Docker daemon to manage the lifecycle of secrets and their injection directly, without needing a sidecar container.
 
 ## Providers
 
@@ -162,7 +163,7 @@ services:
 
 > [!NOTE]
 > The environment variables are injected with the providers service name prefixed.
-> This is behavior managed by Docker directly, and cannot be changed. So in some cases it may be necessary to expand the environment variable in the container like `$$APPLICATION_SECRET`.
+> This is behavior managed by Docker directly, and cannot be changed. So in some cases it may be necessary to get creative with the service names to ensure the secrets are namespaced as desired.
 
 In order to use the Provider mode, `locket` must be installed on the host system directly as a Docker CLI plugin. The simplest way to do this is to install the binary directly from GitHub, and symlink it to the appropriate directory for docker to access it as a cli-plugin.
 
@@ -239,6 +240,131 @@ Type "help", "copyright", "credits" or "license" for more information.
 'ABB80C10E50A96B3CE9480D880B2CAED1A7D205A'
 >>> 
 ```
+
+## Docker Volume Driver
+
+locket can run as a managed Docker Engine Plugin. This allows you to offload the lifecycle of secret injection to the Docker Daemon. Volumes created with this driver are `tmpfs` (in-memory) filesystems, ensuring secrets are never written to disk. When a volume is unmounted and no references to it remain, the secrets are automatically removed from memory.
+
+## Installation
+
+You can configure the plugin using environment variables or, **recommended**, by mounting a configuration directory. The full configuration reference is available at [docs/volume.md](./docs/volume.md). Note that these configurations can be placed in the global plugin config, or they can be overridden on a per-volume basis using `driver_opts`.
+
+### File-Based Configuration
+
+This method is more secure as it prevents tokens from appearing in `docker plugin inspect`. It also
+allows you to much more easily rotate credentials without needing to restart the plugin, by simply updating the token file on the host.
+
+1.  **Prepare Host Directory**
+    Create a directory on your host (e.g., `/etc/locket`) to hold your configuration and secret tokens.
+
+    ```bash
+    sudo mkdir -p /etc/locket/tokens
+    echo "your-bws-token" | sudo tee /etc/locket/tokens/bws
+    sudo chmod 600 /etc/locket/tokens/bws
+    ```
+
+2.  **Create locket.toml**
+    Create `/etc/locket/locket.toml`. When configuring paths in this file, remember they are relative to the *plugin's* view of the mount, which is `/etc/locket`.
+
+    ```toml
+    [volume]
+    # Select the default provider. This can be overridden per volume using driver_opts.
+    provider = "bws"
+
+    # Default settings for providers
+    bws-token = "file:/etc/locket/tokens/bws"
+    # Configure defaults for other providers if needed.
+    connect-host = "https://connect.example.com"
+    connect-token = "file:/etc/locket/tokens/connect"
+
+    # Optional: Set global defaults for all volumes created. Can also be overridden per volume.
+    user = "1000:1000"
+    log-level = "info"
+    ```
+
+3.  **Install the Plugin**
+    Install the plugin and map your host directory to the plugin's config source.
+
+    ```bash
+    docker plugin install bpbradley/locket:plugin \
+      --alias locket \
+      config.source=/etc/locket
+    ```
+
+### Environment Variable Based Configuration
+
+Useful for quick testing or simple setups.
+
+```bash
+docker plugin install bpbradley/locket:plugin \
+  --alias locket \
+  SECRETS_PROVIDER=op-connect \
+  OP_CONNECT_HOST=https://connect.example.com \
+  OP_CONNECT_TOKEN="your-token"
+```
+
+> [!WARNING]
+> This method will expose your tokens in `docker plugin inspect`. Use file based configuration instead to avoid this.
+
+### Example usage
+
+```yaml
+---
+name: volume-demo
+services:
+    demo:
+        user: 1000:1000
+        image: busybox
+        command:
+            - "sh"
+            - "-c"
+            - "cat /run/secrets/locket/template && echo && sleep 30"
+        volumes:
+            - locket-volume:/run/secrets/locket:ro
+volumes:
+    locket-volume:
+        driver: locket
+        driver_opts:
+            # Can set provider options here, or leave empty if they were set in default config.
+            provider: op
+            op-token: file:/etc/locket/tokens/op
+            user: 1000:1000 # Make sure the container has permissions to access the volume
+            mode: 0700 # Sets permissions for the mounted tmpfs volume on the host
+            secret.template: "{{ op://Mordin/TestKey/private key }}"
+```
+
+### Limitations
+
+#### File-Based Templates
+
+While locket generally supports loading templates from files (e.g., `-o secret.config="/path/to/template.yaml"`), this is not going to be easy to leverage when running as a managed Docker Plugin (`docker plugin install ...`)
+
+Managed plugins run in an isolated rootfs and do not have access to the host filesystem. Therefore, they cannot read template files residing on the host without placing the files somewhere the plugin can access them, (such as `/etc/locket` if following the recommended installation).
+
+If you require file-backed templates (and the ability to watch them for changes), you must run locket as a standalone binary on the host (ideally managed via systemd, in a manner described [here](https://docs.docker.com/engine/extend/plugin_api/#plugin-lifecycle)) rather than as a managed Docker Plugin. When running as a native process, locket volume has full access to the host filesystem to read templates and watch them for changes. You will still need to specify them by absolute path though.
+
+Example running directly on host via systemd
+
+```ini
+[Unit]
+Description=Locket Docker Volume Plugin
+Documentation=https://github.com/bpbradley/locket
+# Start before Docker so that volumes are resolvable immediately on boot
+Before=docker.service
+After=network.target
+
+[Service]
+Type=simple
+# Ensure the binary can be invoked directly, or provide the full path to the binary here
+ExecStart=locket volume --config /etc/locket/locket.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Refer to [these instructions](#install-prebuilt-binaries) for installing the locket binary on the host.
 
 ## Example: Hot-Reloading Traefik configurations with Secrets
 
@@ -321,5 +447,4 @@ volumes:
 ## Roadmap
 
 1. **Templating Engine**: Adding attributes to the secret reference which can transform secrets before injection. For example `{{ secret_reference | base64 }}` to encode the secret as base64, or `{{ secret_reference | totp }}` to interpret the secret as a totp code.
-1. **Docker Engine Plugin**: Support for locket as a native Docker Engine plugin will allow direct creation of Docker volumes using locket.
 1. **Swarm Operator**: Native integration for Docker Swarm secrets.

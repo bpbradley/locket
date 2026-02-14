@@ -11,3 +11,4 @@ indexmap = "2"
 locket = { path = "..", features = ["dev"]}
 toml = "0.9"
 serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }

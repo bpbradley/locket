@@ -8,7 +8,15 @@
 .git
 .gitignore
 docker/tests
+docker/plugin-build
+docker/plugin
+docker/dist
 docker/compose.*
+docker/docker-bake.hcl
+docker/Dockerfile
+docker/build-plugin.sh
+dist-workspace.toml
+rust-toolchain.toml
 docs
 tests
 .github
@@ -18,3 +26,6 @@ tests
 /*.md
 runfile.toml
 release.toml
+**bake-meta.json
+.env
+.envrc

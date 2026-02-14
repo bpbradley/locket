@@ -3,47 +3,31 @@
 > [!TIP]
 > All configuration options can be set via command line arguments OR environment variables. CLI arguments take precedence.
 
-## `locket exec`
+## `locket volume`
 
-Execute a command with secrets injected into the process environment.
-and optionally materialize secrets from template files.
-
-Example:
-
-```sh
-locket exec --provider bws --bws-token=file:/path/to/token \
-    -e locket.env -e OVERRIDE={{ reference }}
-    --map ./tpl/config:/app/config \
-    -- docker compose up -d
-```
+Run as a Docker Volume Plugin
 
 ### Options
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--config` | `LOCKET_CONFIG` |  | Path to configuration files<br><br>Can be specified multiple times to layer multiple files. Each file is loaded in the order specified, with later files overriding earlier ones. |
-| `--interactive` | `LOCKET_EXEC_INTERACTIVE` |  | Run the command in interactive mode, attaching stdin/stdout/stderr.<br><br>If not specified, defaults to true in non-watch mode and false in watch mode. <br><br> **Choices:**<br>- `true`<br>- `false` |
-| `--env-files` | `LOCKET_ENV_FILE` |  | Files containing environment variables which may contain secret references |
-| `--env-overrides` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
-| `--map` | `SECRET_MAP` |  | Mapping of source paths to destination paths.<br><br>Maps sources (holding secret templates) to destination paths (where secrets are materialized) in the form `SRC:DST` or `SRC=DST`.<br><br>Multiple mappings can be provided, separated by commas, or supplied multiple times as arguments.<br><br>Example: `--map /templates:/run/secrets/app`<br><br>**CLI Default:** No mappings <br>**Docker Default:** `/templates:/run/secrets/locket` |
-| `--secrets` | `LOCKET_SECRETS` |  | Additional secret values specified as LABEL=SECRET_TEMPLATE<br><br>Multiple values can be provided, separated by commas. Or supplied multiple times as arguments.<br><br>Loading from file is supported via `LABEL=@/path/to/file`.<br><br>Example:<br><br>```sh --secret db_password={{op://..}} --secret api_key={{op://..}} ``` |
+| `--secrets` | `LOCKET_VOLUME_DEFAULT_SECRETS` |  | Default secrets to mount into the volume<br><br>These will typically be specified in driver_opts for volume. However, default secrets can be provided via CLI/ENV which would be available to all volumes by default. |
 | `--user` | `LOCKET_FILE_OWNER` |  | Owner of the file/dir<br><br>Defaults to the running user/group. The running user must have write permissions on the directory to change the owner. |
-| `<cmd>` |  |  | Command to execute with secrets injected into environment<br><br>Must be the last argument(s), following a `--` separator.<br><br>Example: `locket exec -e locket.env -- docker compose up -d` |
-| `--watch` | `LOCKET_EXEC_WATCH` | `false` | Watch mode will monitor for changes to .env files and restart the command if changes are detected <br><br> **Choices:**<br>- `true`<br>- `false` |
-| `--out` | `DEFAULT_SECRET_DIR` | `/run/secrets/locket` | Directory where secret values (literals) are materialized |
-| `--inject-failure-policy` | `INJECT_POLICY` | `passthrough` | Policy for handling injection failures <br><br> **Choices:**<br>- `error`: Failures are treated as errors and will abort the process<br>- `passthrough`: On failure, copy the unmodified secret to destination<br>- `ignore`: On failure, ignore the secret and log a warning |
-| `--max-file-size` | `MAX_FILE_SIZE` | `10M` | Maximum allowable size for a template file. Files larger than this will be rejected.<br><br>Supports human-friendly suffixes like K, M, G (e.g. 10M = 10 Megabytes). |
-| `--file-mode` | `LOCKET_FILE_MODE` | `0600` | File permission mode |
-| `--dir-mode` | `LOCKET_DIR_MODE` | `0700` | Directory permission mode |
-| `--timeout` | `LOCKET_EXEC_TIMEOUT` | `30s` | Timeout duration for process termination signals.<br><br>Unitless numbers are interpreted as seconds. |
-| `--debounce` | `WATCH_DEBOUNCE` | `500ms` | Debounce duration for filesystem events in watch mode.<br><br>Events occurring within this duration will be coalesced into a single update so as to not overwhelm the secrets manager with rapid successive updates from filesystem noise.<br><br>Handles human-readable strings like "100ms", "2s", etc. Unitless numbers are interpreted as milliseconds. |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
+| `--socket` | `LOCKET_PLUGIN_SOCKET` | `/run/docker/plugins/locket.sock` | Path to the listening socket |
+| `--state-dir` | `LOCKET_PLUGIN_STATE_DIR` | `/var/lib/locket` | Path to directory where state configuration is stored.<br><br>This is where the plugin will store necessary data to reload configured volumes from cold start |
+| `--runtime-dir` | `LOCKET_PLUGIN_RUNTIME_DIR` | `/var/lib/locket` | Path to directory where runtime data is stored.<br><br>This is where volumes are physically mounted on the host filesystem. |
 | `--log-format` | `LOCKET_LOG_FORMAT` | `text` | Log format <br><br> **Choices:**<br>- `text`: Plain text log format<br>- `json`: JSON log format<br>- `compose`: Special format for Docker Compose Provider specification |
 | `--log-level` | `LOCKET_LOG_LEVEL` | `info` | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
-### Provider Configuration
-
-| Command | Env | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
+| `--watch` | `LOCKET_VOLUME_DEFAULT_WATCH` | `false` | Default behavior for file watching.<br><br>If set to true, the volume will watch for changes in the secrets and update the files accordingly. <br><br> **Choices:**<br>- `true`<br>- `false` |
+| `--inject-failure-policy` | `LOCKET_VOLUME_DEFAULT_INJECT_POLICY` | `passthrough` | Default policy for handling failures when errors are encountered <br><br> **Choices:**<br>- `error`: Failures are treated as errors and will abort the process<br>- `passthrough`: On failure, copy the unmodified secret to destination<br>- `ignore`: On failure, ignore the secret and log a warning |
+| `--max-file-size` | `LOCKET_VOLUME_DEFAULT_MAX_FILE_SIZE` | `10M` | Default maximum size of individual secret files |
+| `--file-mode` | `LOCKET_FILE_MODE` | `0600` | File permission mode |
+| `--dir-mode` | `LOCKET_DIR_MODE` | `0700` | Directory permission mode |
+| `--size` | `LOCKET_VOLUME_DEFAULT_MOUNT_SIZE` | `10M` | Default size of the in-memory filesystem |
+| `--mode` | `LOCKET_VOLUME_DEFAULT_MOUNT_MODE` | `0700` | Default file mode for the mounted filesystem |
+| `--flags` | `LOCKET_VOLUME_DEFAULT_MOUNT_FLAGS` | `rw,noexec,nosuid,nodev` | Default mount flags for the in-memory filesystem |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
@@ -86,64 +70,31 @@ locket exec --provider bws --bws-token=file:/path/to/token \
 > Provided is the reference configuration in TOML format
 
 ```toml
-# Watch mode will monitor for changes to .env files and restart the command if changes are detected
-watch = false
+# Path to the listening socket
+socket = "/run/docker/plugins/locket.sock"
 
-# Run the command in interactive mode, attaching stdin/stdout/stderr
-# interactive = ...
+# Path to directory where state configuration is stored
+state-dir = "/var/lib/locket"
 
-# Files containing environment variables which may contain secret references
-env-files = []
+# Path to directory where runtime data is stored
+runtime-dir = "/var/lib/locket"
 
-# Environment variable overrides which may contain secret references
-# 
-# TOML syntax supports list of strings or map form:
-# List form:
-# env = ["db_password={{..}}", "api_key={{..}}"]
-# 
-# Map form:
-# [env]
-# db_password = "{{..}}"
-# api_key = "{{..}}"
-# 
-env-overrides = []
+# Log format
+log-format = "text"
 
-# Mapping of source paths to destination paths
-# 
-# TOML syntax supports list of strings or map form:
-# List form:
-# map = ["/templates:/run/secrets/app", "/config:/run/secrets/config"]
-# 
-# Map form:
-# [map]
-# source = "/templates"
-# destination = "/run/secrets/app"
-# [map]
-# source = "/config"
-# destination = "/run/secrets/config"
-# 
-map = []
+# Log level
+log-level = "info"
 
-# Additional secret values specified as LABEL=SECRET_TEMPLATE
-# 
-# TOML syntax supports list of strings or map form:
-# List form:
-# secrets = ["db_password={{..}}", "api_key={{..}}"]
-# 
-# Map form:
-# [secrets]
-# db_password = "{{..}}"
-# api_key = "{{..}}"
-# 
+# Default secrets to mount into the volume
 secrets = []
 
-# Directory where secret values (literals) are materialized
-out = "/run/secrets/locket"
+# Default behavior for file watching
+watch = false
 
-# Policy for handling injection failures
+# Default policy for handling failures when errors are encountered
 inject-failure-policy = "passthrough"
 
-# Maximum allowable size for a template file. Files larger than this will be rejected
+# Default maximum size of individual secret files
 max-file-size = "10M"
 
 # File permission mode
@@ -155,17 +106,14 @@ dir-mode = "0700"
 # Owner of the file/dir
 # user = ...
 
-# Timeout duration for process termination signals
-timeout = "30s"
+# Default size of the in-memory filesystem
+size = "10M"
 
-# Debounce duration for filesystem events in watch mode
-debounce = "500ms"
+# Default file mode for the mounted filesystem
+mode = "0700"
 
-# Log format
-log-format = "text"
-
-# Log level
-log-level = "info"
+# Default mount flags for the in-memory filesystem
+flags = "rw,noexec,nosuid,nodev"
 
 # Secrets provider backend to use
 # provider = ...
@@ -223,7 +171,5 @@ infisical-default-secret-type = "shared"
 
 # Maximum allowed concurrent requests to Infisical API
 infisical-max-concurrent = 20
-
-cmd = []
 
 ```

@@ -8,10 +8,10 @@
 //! The provider supports authentication via service account tokens
 //! and can be configured with an optional config directory.
 
-use super::references::{OpReference, ReferenceParser, SecretReference};
+use super::references::{Extract, HasReference, OpReference, SecretReference};
 use crate::path::AbsolutePath;
 use crate::provider::config::op::OpConfig;
-use crate::provider::{AuthToken, ConcurrencyLimit, ProviderError, SecretsProvider};
+use crate::provider::{ConcurrencyLimit, ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use secrecy::ExposeSecret;
@@ -21,12 +21,14 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 pub struct OpProvider {
-    token: AuthToken,
+    token: SecretString,
     config: Option<AbsolutePath>,
 }
 
 impl OpProvider {
     pub async fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
+        let op_token = cfg.op_token.resolve().await?;
+
         // Try to authenticate with the provided token
         let mut cmd = Command::new("op");
         cmd.arg("whoami")
@@ -36,7 +38,7 @@ impl OpProvider {
                 "XDG_CONFIG_HOME",
                 std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
             )
-            .env("OP_SERVICE_ACCOUNT_TOKEN", cfg.op_token.expose_secret())
+            .env("OP_SERVICE_ACCOUNT_TOKEN", op_token.expose_secret())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -56,18 +58,14 @@ impl OpProvider {
         }
 
         Ok(Self {
-            token: cfg.op_token,
+            token: op_token,
             config: cfg.op_config_dir,
         })
     }
 }
 
-impl ReferenceParser for OpProvider {
-    fn parse(&self, raw: &str) -> Option<SecretReference> {
-        OpReference::parse(raw)
-            .ok()
-            .map(SecretReference::OnePassword)
-    }
+impl HasReference for OpProvider {
+    type Reference = OpReference;
 }
 
 #[async_trait]
@@ -77,22 +75,17 @@ impl SecretsProvider for OpProvider {
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
         const MAX_CONCURRENT_OPS: ConcurrencyLimit = ConcurrencyLimit::new(10);
-        let op_refs: Vec<OpReference> = references
-            .iter()
-            .filter_map(|r| {
-                let op: &OpReference = r.try_into().ok()?;
-                Some(op.clone())
-            })
-            .collect();
+        let op_refs: Vec<&OpReference> =
+            references.iter().filter_map(OpReference::extract).collect();
 
         if op_refs.is_empty() {
             return Ok(HashMap::new());
         }
 
         let results: Vec<Result<Option<(SecretReference, SecretString)>, ProviderError>> =
-            stream::iter(op_refs)
-                .map(|op_ref| async move {
-                    let key = op_ref.as_str();
+            stream::iter(op_refs.into_iter().cloned())
+                .map(|reference| async move {
+                    let key = reference.as_str();
                     let mut cmd = Command::new("op");
                     cmd.arg("read")
                         .arg("--no-newline")
@@ -121,7 +114,7 @@ impl SecretsProvider for OpProvider {
                         })?;
 
                         Ok(Some((
-                            SecretReference::OnePassword(op_ref),
+                            SecretReference::OnePassword(reference),
                             SecretString::new(secret.into()),
                         )))
                     } else {

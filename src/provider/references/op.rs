@@ -1,9 +1,8 @@
 //! Defines the 1Password (op) secret reference type and its parsing logic.
-use super::SecretReference;
+use super::{Extract, ReferenceSyntax, SecretReference};
 use percent_encoding::percent_decode_str;
 use std::str::FromStr;
 use thiserror::Error;
-use tracing::warn;
 
 #[cfg(any(feature = "op", feature = "connect"))]
 #[derive(Debug, Error)]
@@ -94,29 +93,37 @@ impl FromStr for OpReference {
     }
 }
 
-impl OpReference {
-    pub fn as_str(&self) -> &str {
-        &self.raw
-    }
-    pub fn parse(raw: &str) -> Result<Self, OpParseError> {
-        Self::from_str(raw).inspect_err(|e| {
-            if !matches!(e, OpParseError::InvalidScheme) {
-                warn!("Invalid reference '{}': {}", raw, e);
-            }
-        })
+impl From<OpReference> for SecretReference {
+    fn from(r: OpReference) -> Self {
+        Self::OnePassword(r)
     }
 }
 
-impl<'a> TryFrom<&'a SecretReference> for &'a OpReference {
-    type Error = ();
+impl ReferenceSyntax for OpReference {
+    fn try_parse(raw: &str) -> Option<Self> {
+        Self::from_str(raw)
+            .inspect_err(|e| {
+                if !matches!(e, OpParseError::InvalidScheme) {
+                    tracing::warn!("Invalid Infisical reference '{}': {}", raw, e);
+                }
+            })
+            .ok()
+    }
+}
 
-    #[allow(irrefutable_let_patterns)]
-    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
-        if let SecretReference::OnePassword(op) = value {
-            Ok(op)
-        } else {
-            Err(())
+impl Extract for OpReference {
+    fn extract(r: &SecretReference) -> Option<&Self> {
+        #[allow(unreachable_patterns)]
+        match r {
+            SecretReference::OnePassword(inner) => Some(inner),
+            _ => None,
         }
+    }
+}
+
+impl OpReference {
+    pub fn as_str(&self) -> &str {
+        &self.raw
     }
 }
 

@@ -2,16 +2,40 @@
 # check=skip=SecretsUsedInArgOrEnv
 
 ARG RUST_TAG=1.92-alpine3.22
-FROM rust:${RUST_TAG} AS build
-WORKDIR /src
+
+FROM rust:${RUST_TAG} AS chef
+USER root
 RUN apk add --no-cache musl-dev build-base pkgconfig \
-    && rustup target add x86_64-unknown-linux-musl
+    && rustup target add x86_64-unknown-linux-musl \
+    && cargo install cargo-chef
+WORKDIR /src
 
+FROM chef AS planner
+
+# Copy manifests only first to help put dependencies in cache
 COPY Cargo.toml Cargo.lock ./
+COPY locket_derive/Cargo.toml locket_derive/Cargo.toml
+COPY xtask/Cargo.toml xtask/Cargo.toml
+
+RUN mkdir -p src locket_derive/src xtask/src \
+    && touch src/lib.rs src/main.rs \
+    && touch locket_derive/src/lib.rs \
+    && touch xtask/src/main.rs
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /src/recipe.json recipe.json
+
+ARG CACHE_FEATURES="full"
+
+RUN cargo chef cook --release --target x86_64-unknown-linux-musl \
+    --recipe-path recipe.json \
+    --no-default-features --features "${CACHE_FEATURES}"
+
+ARG FEATURES="full"
+
 COPY . .
-
-ARG FEATURES="op,connect,bws,infisical,exec"
-
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
     --no-default-features --features "${FEATURES}" \
     && strip target/x86_64-unknown-linux-musl/release/locket
@@ -34,20 +58,20 @@ RUN install -d -m 0755 skeleton \
     && install -d -m 0700 /config/op && chown nonroot:nonroot /config/op \
     && apk add --no-cache ca-certificates
 
+RUN install -d -m 0755 -o root -g root /plugin-fs/run/docker/plugins \
+    && install -d -m 0755 -o root -g root /plugin-fs/var/lib/locket/state \
+    && install -d -m 0755 -o root -g root /plugin-fs/var/lib/locket/mounts \
+    && install -d -m 0755 -o root -g root /plugin-fs/etc/locket
+
 COPY docker/locket.toml /staging/locket.toml
 
-RUN mv /staging/locket.toml /etc/locket/locket.toml \
-    && chown nonroot:nonroot /etc/locket/locket.toml \
-    && chmod 644 /etc/locket/locket.toml \
-    && rmdir /staging
-
+RUN install -m 644 -o nonroot -g nonroot /staging/locket.toml /etc/locket/locket.toml
+RUN install -m 644 -o root -g root /staging/locket.toml /plugin-fs/etc/locket/locket.toml
+RUN rm -rf /staging
 RUN cp /etc/ssl/certs/ca-certificates.crt /ca-certificates.crt
 
-FROM scratch AS base
-LABEL org.opencontainers.image.title="locket (base)"
-
-ARG DEFAULT_PROVIDER
-ENV SECRETS_PROVIDER=${DEFAULT_PROVIDER}
+FROM scratch AS runtime
+LABEL org.opencontainers.image.title="locket"
 
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
@@ -65,7 +89,7 @@ COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
 COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
 COPY --from=rootfs --chown=nonroot:nonroot /etc/locket /etc/locket
-COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
+COPY --from=builder /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 
 WORKDIR /
 USER nonroot:nonroot
@@ -84,18 +108,23 @@ RUN set -eux; \
     apk update; \
     apk add --no-cache 1password-cli=${OP_VERSION}-r0 || apk add --no-cache 1password-cli
 
+FROM runtime AS base
+ARG DEFAULT_PROVIDER
+ENV SECRETS_PROVIDER=${DEFAULT_PROVIDER}
+
 FROM base AS op
 LABEL org.opencontainers.image.title="locket (op)"
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
 
-# Redundant right now as `op` is the only provider which requires extra tools.
-# But eventually the idea is that we would copy extra tools neeeded
-# for all the different providers here, so that one image can be used for
-# any provider.
-FROM base AS aio
+FROM runtime AS aio
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
+
+FROM aio AS plugin
+USER root
+
+COPY --from=rootfs /plugin-fs /
 
 # Debug image with full distro, extra tools, and shell access
 FROM alpine:3.23 AS debug
@@ -116,6 +145,6 @@ RUN addgroup -g 65532 nonroot \
 
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
-COPY --from=build /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
+COPY --from=builder /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
 VOLUME ["/run/secrets/locket", "/templates"]
 ENTRYPOINT ["/bin/bash"]

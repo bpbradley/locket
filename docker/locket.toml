@@ -1,6 +1,13 @@
+[inject]
 mode = "watch"
 status-file = "/dev/shm/locket/ready"
 
-[[map]]
+[[inject.map]]
 source = "/templates"
 dest = "/run/secrets/locket"
+
+[volume]
+socket = "/run/docker/plugins/locket.sock"
+state-dir = "/var/lib/locket/state"
+runtime-dir = "/var/lib/locket/mounts"
+log-level = "info"

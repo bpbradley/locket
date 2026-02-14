@@ -49,6 +49,21 @@ pub enum LocketError {
 
     #[error(transparent)]
     Config(#[from] ConfigError),
+
+    #[error("validation error: {0}")]
+    Validation(String),
+}
+
+impl From<String> for LocketError {
+    fn from(s: String) -> Self {
+        LocketError::Validation(s)
+    }
+}
+
+impl From<&str> for LocketError {
+    fn from(s: &str) -> Self {
+        LocketError::Validation(s.to_string())
+    }
 }
 
 #[cfg(feature = "compose")]

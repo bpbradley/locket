@@ -38,6 +38,11 @@ async fn run() -> Result<(), LocketError> {
             cmd::exec(config).await
         }
         Command::Healthcheck(args) => cmd::healthcheck(args),
+        #[cfg(feature = "volume")]
+        Command::Volume(args) => {
+            let config = args.load()?;
+            cmd::volume(config).await
+        }
         #[cfg(feature = "compose")]
         Command::Compose(args) => cmd::compose(*args).await,
         #[cfg(feature = "compose")]

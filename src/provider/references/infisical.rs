@@ -9,7 +9,7 @@
 //! * The secret key is required and is encoded in the path component.
 //! * The environment slug, path, project ID, and secret type are optional query parameters, which override defaults.
 //!
-use super::SecretReference;
+use super::{Extract, ReferenceSyntax, SecretReference};
 use clap::ValueEnum;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
@@ -78,6 +78,34 @@ pub struct InfisicalReference {
     pub options: InfisicalOptions,
 }
 
+impl From<InfisicalReference> for SecretReference {
+    fn from(r: InfisicalReference) -> Self {
+        Self::Infisical(r)
+    }
+}
+
+impl ReferenceSyntax for InfisicalReference {
+    fn try_parse(raw: &str) -> Option<Self> {
+        Self::from_str(raw)
+            .inspect_err(|e| {
+                if !matches!(e, InfisicalParseError::InvalidScheme) {
+                    tracing::warn!("Invalid Infisical reference '{}': {}", raw, e);
+                }
+            })
+            .ok()
+    }
+}
+
+impl Extract for InfisicalReference {
+    fn extract(r: &SecretReference) -> Option<&Self> {
+        #[allow(unreachable_patterns)]
+        match r {
+            SecretReference::Infisical(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
 impl FromStr for InfisicalReference {
     type Err = InfisicalParseError;
 
@@ -143,19 +171,6 @@ pub struct InfisicalOptions {
 
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     pub secret_type: Option<InfisicalSecretType>,
-}
-
-impl<'a> TryFrom<&'a SecretReference> for &'a InfisicalReference {
-    type Error = ();
-
-    #[allow(irrefutable_let_patterns)]
-    fn try_from(value: &'a SecretReference) -> Result<Self, Self::Error> {
-        if let SecretReference::Infisical(inf) = value {
-            Ok(inf)
-        } else {
-            Err(())
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -11,10 +11,10 @@
 //! The provider uses the reqwest HTTP client
 //! and handles authentication via bearer tokens.
 
-use super::references::{OpReference, ReferenceParser, SecretReference};
+use super::references::{Extract, HasReference, OpReference, SecretReference};
 use crate::provider::ConcurrencyLimit;
 use crate::provider::config::connect::ConnectConfig;
-use crate::provider::{AuthToken, ProviderError, SecretsProvider};
+use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use reqwest::{Client, StatusCode};
@@ -31,14 +31,14 @@ use url::Url;
 pub struct OpConnectProvider {
     client: Client,
     host: Url,
-    token: AuthToken,
+    token: SecretString,
     cache: Arc<Mutex<ResolutionCache>>,
     max_concurrent: ConcurrencyLimit,
 }
 
 impl OpConnectProvider {
     pub async fn new(cfg: ConnectConfig) -> Result<Self, ProviderError> {
-        let token = cfg.connect_token;
+        let token = cfg.connect_token.resolve().await?;
 
         let host = cfg.connect_host;
 
@@ -277,12 +277,8 @@ impl OpConnectProvider {
     }
 }
 
-impl ReferenceParser for OpConnectProvider {
-    fn parse(&self, raw: &str) -> Option<SecretReference> {
-        OpReference::parse(raw)
-            .ok()
-            .map(SecretReference::OnePassword)
-    }
+impl HasReference for OpConnectProvider {
+    type Reference = OpReference;
 }
 
 #[async_trait]
@@ -291,10 +287,8 @@ impl SecretsProvider for OpConnectProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        let op_refs: Vec<&OpReference> = references
-            .iter()
-            .filter_map(|r| r.try_into().ok())
-            .collect();
+        let op_refs: Vec<&OpReference> =
+            references.iter().filter_map(OpReference::extract).collect();
 
         if op_refs.is_empty() {
             return Ok(HashMap::new());

@@ -5,9 +5,9 @@
 //! It uses the official Bitwarden SDK
 
 use super::ConcurrencyLimit;
-use super::references::{ReferenceParser, SecretReference};
+use super::references::SecretReference;
 use crate::provider::config::bws::BwsConfig;
-use crate::provider::references::BwsReference;
+use crate::provider::references::{BwsReference, Extract, HasReference};
 use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
 use bitwarden::{
@@ -21,7 +21,6 @@ use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::str::FromStr;
 use url::Url;
 use uuid::Uuid;
 
@@ -41,8 +40,10 @@ impl BwsProvider {
 
         let client = Client::new(Some(settings));
 
+        let token = cfg.bws_token.resolve().await?;
+
         let auth_req = AccessTokenLoginRequest {
-            access_token: cfg.bws_token.expose_secret().to_string(),
+            access_token: token.expose_secret().to_string(),
             state_file: None, // We are stateless; no cache file
         };
 
@@ -59,10 +60,8 @@ impl BwsProvider {
     }
 }
 
-impl ReferenceParser for BwsProvider {
-    fn parse(&self, raw: &str) -> Option<SecretReference> {
-        BwsReference::from_str(raw).ok().map(SecretReference::Bws)
-    }
+impl HasReference for BwsProvider {
+    type Reference = BwsReference;
 }
 
 #[async_trait]
@@ -71,13 +70,10 @@ impl SecretsProvider for BwsProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        let refs: Vec<(SecretReference, Uuid)> = references
+        let refs: Vec<BwsReference> = references
             .iter()
-            .filter_map(|r| {
-                r.try_into()
-                    .ok()
-                    .map(|bws_ref: &BwsReference| (r.clone(), Uuid::from(*bws_ref)))
-            })
+            .filter_map(BwsReference::extract)
+            .copied()
             .collect();
 
         if refs.is_empty() {
@@ -88,7 +84,8 @@ impl SecretsProvider for BwsProvider {
         let client = &self.client;
 
         let mut stream = stream::iter(refs)
-            .map(|(key, id)| async move {
+            .map(|reference| async move {
+                let id = Uuid::from(reference);
                 let req = SecretGetRequest { id };
 
                 let resp = client
@@ -97,7 +94,7 @@ impl SecretsProvider for BwsProvider {
                     .await
                     .map_err(|e| ProviderError::NotFound(format!("{} ({})", id, e)))?;
 
-                Ok((key, SecretString::new(resp.value.into())))
+                Ok((reference.into(), SecretString::new(resp.value.into())))
             })
             .buffer_unordered(self.max_concurrent.into_inner());
 
@@ -117,7 +114,7 @@ impl SecretsProvider for BwsProvider {
 /// BWS SDK URL wrapper
 /// Used to ensure proper URL formatting. BWS SDK accepts a raw string, and fails to parse URLs with trailing slashes
 /// This wrapper will ensure proper url encoding at config time, and remove the trailing slash if present when displaying.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub struct BwsUrl(Url);
 

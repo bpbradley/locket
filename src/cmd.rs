@@ -7,6 +7,7 @@
 //! * **Exec**: Process injection wrapper (`locket exec`).
 //! * **Healthcheck**: Health probe for sidecar
 //! * **Compose**: Docker Compose provider integration.
+//! * **Volume**: Docker Volume driver integration.
 
 use clap::{Parser, Subcommand};
 #[cfg(feature = "compose")]
@@ -16,6 +17,8 @@ mod config;
 mod exec;
 mod healthcheck;
 mod inject;
+#[cfg(feature = "volume")]
+mod volume;
 use crate::config::LayeredArgs;
 
 #[cfg(feature = "compose")]
@@ -24,6 +27,8 @@ pub use compose::compose;
 pub use config::compose::ComposeArgs;
 #[cfg(feature = "exec")]
 pub use config::exec::{ExecArgs, ExecConfig};
+#[cfg(feature = "volume")]
+pub use config::volume::{PluginArgs, PluginConfig};
 pub use config::{
     healthcheck::HealthArgs,
     inject::{InjectArgs, InjectConfig},
@@ -32,6 +37,8 @@ pub use config::{
 pub use exec::exec;
 pub use healthcheck::healthcheck;
 pub use inject::inject;
+#[cfg(feature = "volume")]
+pub use volume::volume;
 
 #[derive(Parser, Debug)]
 #[command(name = "locket")]
@@ -77,6 +84,11 @@ pub enum Command {
     /// Exits with code 0 if all known secrets are materialized, otherwise exits with non-zero exit code.
     #[clap(verbatim_doc_comment)]
     Healthcheck(HealthArgs),
+
+    /// Run as a Docker Volume Plugin
+    #[cfg(feature = "volume")]
+    Volume(LayeredArgs<PluginArgs>),
+
     /// Docker Compose provider API
     #[cfg(feature = "compose")]
     Compose(Box<ComposeArgs>),
