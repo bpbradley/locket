@@ -9,6 +9,9 @@ repository = "https://github.com/bpbradley/locket"
 homepage = "https://github.com/bpbradley/locket"
 publish = true
 
+[package.metadata.release]
+pre-release-hook = ["sh", "-c", "true"]
+
 [lib]
 proc-macro = true
 
