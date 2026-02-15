@@ -18,6 +18,13 @@ members = [".", "locket_derive", "xtask"]
 [workspace.metadata.release]
 shared-version = true
 tag-name = "v{{version}}"
+push = true
+publish = true
+consolidate-commits = true
+sign-commit = false
+sign-tag = false
+allow-branch = ["main"]
+pre-release-hook = ["sh", "-c", "cargo fmt -- --check && cargo xtask docs && cargo clippy -- -D warnings && cargo test --locked"]
 
 [features]
 # Base release features
