@@ -35,7 +35,7 @@ dev = ["locket-docs", "testing", "full"]
 default = ["full"]
 
 [dependencies]
-locket_derive = { path = "./locket_derive" }
+locket_derive = { path = "./locket_derive", version = "0.1.0" }
 clap = { version = "4", features = ["derive", "env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }

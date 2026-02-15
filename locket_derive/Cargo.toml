@@ -7,7 +7,7 @@ authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
 description = "proc macro to support layered conigurations in locket"
 repository = "https://github.com/bpbradley/locket"
 homepage = "https://github.com/bpbradley/locket"
-publish = false
+publish = true
 
 [lib]
 proc-macro = true
