@@ -15,6 +15,10 @@ categories = ["command-line-utilities", "config"]
 [workspace]
 members = [".", "locket_derive", "xtask"]
 
+[workspace.metadata.release]
+shared-version = true
+tag-name = "v{{version}}"
+
 [features]
 # Base release features
 op = ["tokio/process", "dep:percent-encoding"]
