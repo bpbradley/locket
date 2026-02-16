@@ -53,19 +53,19 @@ cmd = "cargo release rc --execute --no-publish"
 
 [release-promote]
 description = "Promote a release candidate to a full release and push"
-cmd = "cargo release release --execute"
+cmd = "cargo release release -p locket -p locket_derive --execute"
 
 [release-patch]
 description = "Bump patch version and execute release"
-cmd = "cargo release patch --execute"
+cmd = "cargo release patch -p locket -p locket_derive --execute"
 
 [release-minor]
 description = "Bump minor version and execute release"
-cmd = "cargo release minor --execute"
+cmd = "cargo release minor -p locket -p locket_derive --execute"
 
 [release-major]
 description = "Bump major version and execute release"
-cmd = "cargo release major --execute"
+cmd = "cargo release major -p locket -p locket_derive --execute"
 
 [docs]
 description = "Generate clap derived docs"
