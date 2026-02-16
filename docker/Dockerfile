@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # check=skip=SecretsUsedInArgOrEnv
 
-ARG RUST_TAG=1.92-alpine3.22
+ARG RUST_TAG=1.93-alpine3.22
 
 FROM rust:${RUST_TAG} AS chef
 USER root
