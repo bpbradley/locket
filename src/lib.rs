@@ -29,6 +29,7 @@ pub mod provider;
 pub mod secrets;
 pub mod template;
 #[cfg(feature = "volume")]
+#[cfg(target_os = "linux")]
 pub mod volume;
 pub mod watch;
 pub mod write;

@@ -39,6 +39,7 @@ async fn run() -> Result<(), LocketError> {
         }
         Command::Healthcheck(args) => cmd::healthcheck(args),
         #[cfg(feature = "volume")]
+        #[cfg(target_os = "linux")]
         Command::Volume(args) => {
             let config = args.load()?;
             cmd::volume(config).await
