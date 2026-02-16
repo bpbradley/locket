@@ -1,12 +1,12 @@
 [package]
 name = "locket"
-version = "0.17.2"
-edition = "2024"
-license = "AGPL-3.0-or-later"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
 description = "Helper tool for secret injection as a process dependency"
-repository = "https://github.com/bpbradley/locket"
-homepage = "https://github.com/bpbradley/locket"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/locket"
 readme = "README.md"
 keywords = ["secrets", "docker"]
@@ -14,6 +14,67 @@ categories = ["command-line-utilities", "config"]
 
 [workspace]
 members = [".", "locket_derive", "xtask"]
+
+[workspace.package]
+version = "0.17.2"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/bpbradley/locket"
+homepage = "https://github.com/bpbradley/locket"
+
+[workspace.dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1" }
+serde_json = "1"
+indexmap = "2"
+toml = "1"
+
+# locket_derive deps
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+
+# locket deps
+locket_derive = { path = "./locket_derive", version = "0.17.2" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+notify = "8"
+tempfile = "3"
+thiserror = "2"
+walkdir = "2"
+secrecy = { version = "0.10.3", features = ["serde"] }
+sysexits = "0.11"
+async-trait = "0.1"
+sanitize-filename = "0.6"
+humantime = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+url = { version = "2", features = ["serde"] }
+nix = { version = "0.31", features = ["user", "fs"] }
+percent-encoding = { version = "2.3" }
+bitwarden = { version = "2", features = ["secrets"] }
+uuid = { version = "1", features = ["serde"] }
+dotenvy = "0.15"
+serde_urlencoded = "0.7"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tower = "0.5"
+tower-service = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+
+# bitwarden dependencies are causing issues in reqwest >= 0.13.
+# I don't see an immediate fix for this, so for now will revert to 0.12.24+ and use rustls-tls-webpki-roots again.
+# The only other way to fix it that I could find was to install 0.13 reqwest with rustls-no-provider,
+# and then manually call `let _ = rustls::crypto::ring::default_provider().install_default();` to handle certs manually.
+# But bitwarden crate still requires reqwest < 0.13, so I might as well use the same version for the whole crate.
+reqwest = { version = ">=0.12.24, <0.13", features = ["json", "rustls-tls-webpki-roots"], default-features = false }
+regex = "1.7"
+anyhow = "1"
+
+# dev deps
+assert_fs = "1"
 
 [workspace.metadata.release]
 shared-version = true
@@ -30,7 +91,7 @@ pre-release-hook = ["sh", "-c", "cargo fmt -- --check && cargo xtask docs && car
 # Base release features
 op = ["tokio/process", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
-bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
+bws = ["dep:bitwarden", "dep:uuid"]
 compose = ["dep:dotenvy"]
 infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex", "dep:uuid"]
 exec = ["dep:dotenvy", "nix/signal", "nix/term", "tokio/process"]
@@ -46,53 +107,44 @@ dev = ["locket-docs", "testing", "full"]
 default = ["full"]
 
 [dependencies]
-locket_derive = { path = "./locket_derive", version = "0.17.2" }
-clap = { version = "4", features = ["derive", "env", "string"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-notify = "8"
-tempfile = "3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-walkdir = "2"
-secrecy = {version = "0.10.3", features = ["serde"]}
-sysexits = "0.10"
-indexmap = "2"
-async-trait = "0.1"
-sanitize-filename = "0.6"
-humantime = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal", "fs"] }
-tokio-util = { version = "0.7", features = ["rt"] }
-futures = { version = "0.3"}
-url = { version = "2", features = ["serde"]}
-toml = {version = "0.9"}
-nix = { version = "0.30", features = ["user", "fs"] }
-percent-encoding = { version = "2.3", optional = true }
-bitwarden = { version = "1", features=["secrets"], optional = true }
-uuid = { version = "1", features=["serde"], optional = true }
-dotenvy = {version = "0.15", optional = true}
-serde_urlencoded = { version = "0.7", optional = true }
-
-hyper = { version = "1", features = ["server", "http1"], optional = true }
-hyper-util = { version = "0.1", features = ["tokio"], optional = true }
-http-body-util = { version = "0.1", optional = true }
-tower = { version = "0.5", optional = true }
-tower-service = { version = "0.3", optional = true }
-chrono = { version = "0.4", default-features = false, features = ["serde", "clock"], optional = true }
-
-# bitwarden sdk needs to update their crate. Cannot build without this.
-# https://github.com/bitwarden/sdk-sm/issues/1244
-rustls-webpki = { version = "0.102", features = ["std"], optional = true }
-# bitwarden dependencies are further causing issues in reqwest >= 0.13.
-# I don't see an immediate fix for this, so for now will revert to 0.12.24+ and use rustls-tls-webpki-roots again.
-# The only other way to fix it that I could find was to install 0.13 reqwest with rustls-no-provider,
-# and then manually call `let _ = rustls::crypto::ring::default_provider().install_default();` to handle certs manually.
-reqwest = { version = ">=0.12.24, <0.13", features = ["json", "rustls-tls-webpki-roots"], default-features = false, optional = true }
-regex = { version = "1.7", optional = true }
+locket_derive.workspace = true
+clap = { workspace = true, features = ["env", "string"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+notify.workspace = true
+tempfile.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+secrecy.workspace = true
+sysexits.workspace = true
+indexmap.workspace = true
+async-trait.workspace = true
+sanitize-filename.workspace = true
+humantime.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+url.workspace = true
+toml.workspace = true
+nix.workspace = true
+percent-encoding = { workspace = true, optional = true }
+bitwarden = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+dotenvy = { workspace = true, optional = true }
+serde_urlencoded = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+tower-service = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
 
 [dev-dependencies]
-assert_fs = "1"
+assert_fs.workspace = true
 
 [lib]
 name = "locket"

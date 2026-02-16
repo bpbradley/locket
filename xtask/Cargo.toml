@@ -5,10 +5,10 @@ edition = "2024"
 publish = false
 
 [dependencies]
-anyhow = "1"
-clap = { version = "4", features = ["derive", "cargo"] }
-indexmap = "2"
-locket = { path = "..", features = ["dev"]}
-toml = "0.9"
-serde = "1"
-serde_json = { version = "1", features = ["preserve_order"] }
+anyhow.workspace = true
+clap = { workspace = true, features = ["cargo"] }
+indexmap.workspace = true
+locket = { path = "..", features = ["dev"] }
+toml.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
