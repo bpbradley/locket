@@ -13,7 +13,7 @@
         "--socket",
         "/run/docker/plugins/locket.sock",
         "--state-dir",
-        "/var/lib/locket/state",
+        "/etc/locket",
         "--runtime-dir",
         "/var/lib/locket/mounts",
         "--config",
@@ -32,28 +32,14 @@
     "propagatedMount": "/var/lib/locket/mounts",
     "mounts": [
         {
-            "name": "state",
-            "description": "Persistence for volume metadata",
-            "source": "/var/lib/locket/state",
-            "destination": "/var/lib/locket/state",
-            "type": "bind",
-            "options": [
-                "rbind",
-                "rw"
-            ],
-            "settable": [
-                "source"
-            ]
-        },
-        {
             "name": "config",
-            "description": "Config directory. Place locket.toml or token files here.",
+            "description": "locket data directory where configuration and state are stored",
             "source": "",
             "destination": "/etc/locket",
             "type": "bind",
             "options": [
-                "ro",
-                "rbind"
+                "rbind",
+                "rw"
             ],
             "settable": [
                 "source"
