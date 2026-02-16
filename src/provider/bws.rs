@@ -36,6 +36,9 @@ impl BwsProvider {
             api_url: cfg.bws_api_url.to_string(),
             user_agent: cfg.bws_user_agent,
             device_type: DeviceType::SDK,
+            device_identifier: None,
+            bitwarden_package_type: None,
+            bitwarden_client_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         };
 
         let client = Client::new(Some(settings));
