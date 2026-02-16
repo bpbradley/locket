@@ -5,4 +5,5 @@ pub mod exec;
 pub mod healthcheck;
 pub mod inject;
 #[cfg(feature = "volume")]
+#[cfg(target_os = "linux")]
 pub mod volume;

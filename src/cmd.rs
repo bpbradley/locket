@@ -18,6 +18,7 @@ mod exec;
 mod healthcheck;
 mod inject;
 #[cfg(feature = "volume")]
+#[cfg(target_os = "linux")]
 mod volume;
 use crate::config::LayeredArgs;
 
@@ -28,6 +29,7 @@ pub use config::compose::ComposeArgs;
 #[cfg(feature = "exec")]
 pub use config::exec::{ExecArgs, ExecConfig};
 #[cfg(feature = "volume")]
+#[cfg(target_os = "linux")]
 pub use config::volume::{PluginArgs, PluginConfig};
 pub use config::{
     healthcheck::HealthArgs,
@@ -38,6 +40,7 @@ pub use exec::exec;
 pub use healthcheck::healthcheck;
 pub use inject::inject;
 #[cfg(feature = "volume")]
+#[cfg(target_os = "linux")]
 pub use volume::volume;
 
 #[derive(Parser, Debug)]
@@ -87,6 +90,7 @@ pub enum Command {
 
     /// Run as a Docker Volume Plugin
     #[cfg(feature = "volume")]
+    #[cfg(target_os = "linux")]
     Volume(LayeredArgs<PluginArgs>),
 
     /// Docker Compose provider API
