@@ -247,25 +247,24 @@ locket can run as a managed Docker Engine Plugin. This allows you to offload the
 
 ## Installation
 
-You can configure the plugin using environment variables or, **recommended**, by mounting a configuration directory. The full configuration reference is available at [docs/volume.md](./docs/volume.md). Note that these configurations can be placed in the global plugin config, or they can be overridden on a per-volume basis using `driver_opts`.
-
-### File-Based Configuration
-
-This method is more secure as it prevents tokens from appearing in `docker plugin inspect`. It also
-allows you to much more easily rotate credentials without needing to restart the plugin, by simply updating the token file on the host.
-
 1.  **Prepare Host Directory**
-    Create a directory on your host (e.g., `/etc/locket`) to hold your configuration and secret tokens.
+    Create a directory on your host (e.g., `/etc/locket`) to hold configuration and persistent state. This directory will be mounted into the plugin container.
+
+    ```bash
+    sudo mkdir -p /etc/locket
+    ```
+
+2.  **Optional: Create a default configuration**
+    The plugin can be configured with defaults via config file loaded from `/etc/locket/locket.toml`. When configuring paths in this file, remember they are relative to the *plugin's* view of the mount, so place referenced files in `/etc/locket`.
 
     ```bash
     sudo mkdir -p /etc/locket/tokens
     echo "your-bws-token" | sudo tee /etc/locket/tokens/bws
     sudo chmod 600 /etc/locket/tokens/bws
     ```
-
-2.  **Create locket.toml**
-    Create `/etc/locket/locket.toml`. When configuring paths in this file, remember they are relative to the *plugin's* view of the mount, which is `/etc/locket`.
-
+    
+    `/etc/locket/locket.toml` sample. The full configuration reference is available at [docs/volume.md](./docs/volume.md). Note that these configurations can be placed here in the global plugin config, but they can be overridden on a per-volume basis using `driver_opts`. A configuration file is not strictly necessary at all if you prefer to configure everything via `driver_opts` when creating volumes, but it can be convenient to set global defaults for your providers here.
+    
     ```toml
     [volume]
     # Select the default provider. This can be overridden per volume using driver_opts.
@@ -279,7 +278,6 @@ allows you to much more easily rotate credentials without needing to restart the
 
     # Optional: Set global defaults for all volumes created. Can also be overridden per volume.
     user = "1000:1000"
-    log-level = "info"
     ```
 
 3.  **Install the Plugin**
@@ -290,21 +288,6 @@ allows you to much more easily rotate credentials without needing to restart the
       --alias locket \
       config.source=/etc/locket
     ```
-
-### Environment Variable Based Configuration
-
-Useful for quick testing or simple setups.
-
-```bash
-docker plugin install bpbradley/locket:plugin \
-  --alias locket \
-  SECRETS_PROVIDER=op-connect \
-  OP_CONNECT_HOST=https://connect.example.com \
-  OP_CONNECT_TOKEN="your-token"
-```
-
-> [!WARNING]
-> This method will expose your tokens in `docker plugin inspect`. Use file based configuration instead to avoid this.
 
 ### Example usage
 
