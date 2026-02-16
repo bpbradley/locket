@@ -66,7 +66,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 tokio-util = { version = "0.7", features = ["rt"] }
 futures = { version = "0.3"}
 url = { version = "2", features = ["serde"]}
-toml = {version = "0.9"}
+toml = {version = "1"}
 nix = { version = "0.30", features = ["user", "fs"] }
 percent-encoding = { version = "2.3", optional = true }
 bitwarden = { version = "2", features=["secrets"], optional = true }
@@ -81,10 +81,11 @@ tower = { version = "0.5", optional = true }
 tower-service = { version = "0.3", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"], optional = true }
 
-# bitwarden dependencies are further causing issues in reqwest >= 0.13.
+# bitwarden dependencies are causing issues in reqwest >= 0.13.
 # I don't see an immediate fix for this, so for now will revert to 0.12.24+ and use rustls-tls-webpki-roots again.
 # The only other way to fix it that I could find was to install 0.13 reqwest with rustls-no-provider,
 # and then manually call `let _ = rustls::crypto::ring::default_provider().install_default();` to handle certs manually.
+# But bitwarden crate still requires reqwest < 0.13, so I might as well use the same version for the whole crate.
 reqwest = { version = ">=0.12.24, <0.13", features = ["json", "rustls-tls-webpki-roots"], default-features = false, optional = true }
 regex = { version = "1.7", optional = true }
 
