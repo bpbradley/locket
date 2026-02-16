@@ -30,7 +30,7 @@ pre-release-hook = ["sh", "-c", "cargo fmt -- --check && cargo xtask docs && car
 # Base release features
 op = ["tokio/process", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
-bws = ["dep:bitwarden", "dep:uuid", "dep:rustls-webpki"]
+bws = ["dep:bitwarden", "dep:uuid"]
 compose = ["dep:dotenvy"]
 infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex", "dep:uuid"]
 exec = ["dep:dotenvy", "nix/signal", "nix/term", "tokio/process"]
@@ -81,9 +81,6 @@ tower = { version = "0.5", optional = true }
 tower-service = { version = "0.3", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"], optional = true }
 
-# bitwarden sdk needs to update their crate. Cannot build without this.
-# https://github.com/bitwarden/sdk-sm/issues/1244
-rustls-webpki = { version = "0.102", features = ["std"], optional = true }
 # bitwarden dependencies are further causing issues in reqwest >= 0.13.
 # I don't see an immediate fix for this, so for now will revert to 0.12.24+ and use rustls-tls-webpki-roots again.
 # The only other way to fix it that I could find was to install 0.13 reqwest with rustls-no-provider,
