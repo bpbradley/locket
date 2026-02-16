@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
 use xtask::docs::DocGenerator;
-use xtask::plugin::PluginConfigArgs;
 
 #[derive(Parser)]
 struct Xtask {
@@ -12,8 +11,9 @@ struct Xtask {
 enum Commands {
     /// Generate configuration tables in markdown format from clap definitions
     Docs(DocGenerator),
+    #[cfg(target_os = "linux")]
     /// Generate plugin configuration from for volume driver from clap definitions
-    Plugin(PluginConfigArgs),
+    Plugin(xtask::plugin::PluginConfigArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -21,6 +21,7 @@ fn main() -> anyhow::Result<()> {
 
     match args.cmd {
         Commands::Docs(docs) => docs.generate(),
+        #[cfg(target_os = "linux")]
         Commands::Plugin(config) => config.generate(),
     }
 }
