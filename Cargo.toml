@@ -66,7 +66,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 tokio-util = { version = "0.7", features = ["rt"] }
 futures = { version = "0.3"}
 url = { version = "2", features = ["serde"]}
-toml = {version = "0.9"}
+toml = {version = "1.0"}
 nix = { version = "0.30", features = ["user", "fs"] }
 percent-encoding = { version = "2.3", optional = true }
 bitwarden = { version = "1", features=["secrets"], optional = true }
