@@ -1,6 +1,6 @@
 [package]
 name = "locket"
-version = "0.17.0"
+version = "0.17.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Brian Bradley <brian.bradley.p@gmail.com>"]
@@ -46,7 +46,7 @@ dev = ["locket-docs", "testing", "full"]
 default = ["full"]
 
 [dependencies]
-locket_derive = { path = "./locket_derive", version = "0.17.0" }
+locket_derive = { path = "./locket_derive", version = "0.17.1" }
 clap = { version = "4", features = ["derive", "env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
