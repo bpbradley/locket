@@ -263,7 +263,10 @@ locket can run as a managed Docker Engine Plugin. This allows you to offload the
     sudo chmod 600 /etc/locket/tokens/bws
     ```
     
-    `/etc/locket/locket.toml` sample. The full configuration reference is available at [docs/volume.md](./docs/volume.md). Note that these configurations can be placed here in the global plugin config, but they can be overridden on a per-volume basis using `driver_opts`. A configuration file is not strictly necessary at all if you prefer to configure everything via `driver_opts` when creating volumes, but it can be convenient to set global defaults for your providers here.
+    Create default configuration at `/etc/locket/locket.toml`. The full reference is available at [docs/volume.md](./docs/volume.md)
+
+    > [!NOTE]
+    > Configurations can be overridden on a per-volume basis using `driver_opts`. A configuration file is not strictly necessary at all if you prefer to configure everything via `driver_opts`.
     
     ```toml
     [volume]
@@ -280,7 +283,7 @@ locket can run as a managed Docker Engine Plugin. This allows you to offload the
     user = "1000:1000"
     ```
 
-3.  **Install the Plugin**
+4.  **Install the Plugin**
     Install the plugin and map your host directory to the plugin's config source.
 
     ```bash
@@ -429,5 +432,6 @@ volumes:
 
 ## Roadmap
 
+1. **Init system**: `locket init` which could be used as a thin container init system, similar to tini or dumb-init, but with support for secret injection into child process groups. This would allow other developers to transparently wrap their applications with `locket init` in their Docker entrypoint, and gain secret injection capabilities in their applications natively.
 1. **Templating Engine**: Adding attributes to the secret reference which can transform secrets before injection. For example `{{ secret_reference | base64 }}` to encode the secret as base64, or `{{ secret_reference | totp }}` to interpret the secret as a totp code.
 1. **Swarm Operator**: Native integration for Docker Swarm secrets.
