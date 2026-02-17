@@ -245,52 +245,52 @@ Type "help", "copyright", "credits" or "license" for more information.
 
 locket can run as a managed Docker Engine Plugin. This allows you to offload the lifecycle of secret injection to the Docker Daemon. Volumes created with this driver are `tmpfs` (in-memory) filesystems, ensuring secrets are never written to disk. When a volume is unmounted and no references to it remain, the secrets are automatically removed from memory.
 
-## Installation
+### Setup
 
-1.  **Prepare Host Directory**
-    Create a directory on your host (e.g., `/etc/locket`) to hold configuration and persistent state. This directory will be mounted into the plugin container.
+Create a directory on your host (e.g., `/etc/locket`) to hold configuration and persistent state. This directory will be mounted into the plugin container.
 
-    ```bash
-    sudo mkdir -p /etc/locket
-    ```
+```bash
+sudo mkdir -p /etc/locket
+```
 
-2.  **Optional: Create a default configuration**
-    The plugin can be configured with defaults via config file loaded from `/etc/locket/locket.toml`. When configuring paths in this file, remember they are relative to the *plugin's* view of the mount, so place referenced files in `/etc/locket`.
+#### Optional: Create a Default Configuration
+The plugin can be configured with defaults via config file loaded from `/etc/locket/locket.toml`. When configuring paths in this file, remember they are relative to the *plugin's* view of the mount, so place referenced files in `/etc/locket`.
 
-    ```bash
-    sudo mkdir -p /etc/locket/tokens
-    echo "your-bws-token" | sudo tee /etc/locket/tokens/bws
-    sudo chmod 600 /etc/locket/tokens/bws
-    ```
-    
-    Create default configuration at `/etc/locket/locket.toml`. The full reference is available at [docs/volume.md](./docs/volume.md)
+```bash
+sudo mkdir -p /etc/locket/tokens
+echo "your-bws-token" | sudo tee /etc/locket/tokens/bws
+sudo chmod 600 /etc/locket/tokens/bws
+```
 
-    > [!NOTE]
-    > Configurations can be overridden on a per-volume basis using `driver_opts`. A configuration file is not strictly necessary at all if you prefer to configure everything via `driver_opts`.
-    
-    ```toml
-    [volume]
-    # Select the default provider. This can be overridden per volume using driver_opts.
-    provider = "bws"
+Create the default configuration at `/etc/locket/locket.toml`. The full reference is available at [docs/volume.md](./docs/volume.md)
 
-    # Default settings for providers
-    bws-token = "file:/etc/locket/tokens/bws"
-    # Configure defaults for other providers if needed.
-    connect-host = "https://connect.example.com"
-    connect-token = "file:/etc/locket/tokens/connect"
 
-    # Optional: Set global defaults for all volumes created. Can also be overridden per volume.
-    user = "1000:1000"
-    ```
+```toml
+[volume]
+# Select the default provider. This can be overridden per volume using driver_opts.
+provider = "bws"
 
-4.  **Install the Plugin**
-    Install the plugin and map your host directory to the plugin's config source.
+# Default settings for providers
+bws-token = "file:/etc/locket/tokens/bws"
+# Configure defaults for other providers if needed.
+connect-host = "https://connect.example.com"
+connect-token = "file:/etc/locket/tokens/connect"
 
-    ```bash
-    docker plugin install bpbradley/locket:plugin \
-      --alias locket \
-      config.source=/etc/locket
-    ```
+# Optional: Set global defaults for all volumes created. Can also be overridden per volume.
+user = "1000:1000"
+```
+
+> [!NOTE]
+> Configurations can be overridden on a per-volume basis using `driver_opts`. A configuration file is not strictly necessary at all if you prefer to configure everything via `driver_opts`.
+
+#### Install the Plugin
+Install the plugin and map your host directory to the plugin's config source.
+
+```bash
+docker plugin install bpbradley/locket:plugin \
+ --alias locket \
+ config.source=/etc/locket
+```
 
 ### Example usage
 
