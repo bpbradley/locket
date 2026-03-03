@@ -43,7 +43,7 @@ tempfile = "3"
 thiserror = "2"
 walkdir = "2"
 secrecy = { version = "0.10.3", features = ["serde"] }
-sysexits = "0.11"
+sysexits = "0.13"
 async-trait = "0.1"
 sanitize-filename = "0.6"
 humantime = "2"
