@@ -74,7 +74,7 @@ jobs:
                   driver: docker-container
 
             - name: Setup GitHub Runtime
-              uses: crazy-max/ghaction-github-runtime@v3
+              uses: crazy-max/ghaction-github-runtime@v4
 
             - name: Build images
               working-directory: docker
