@@ -6,7 +6,6 @@ ARG RUST_TAG=1.95-alpine3.22
 FROM rust:${RUST_TAG} AS chef
 USER root
 RUN apk add --no-cache musl-dev build-base pkgconfig \
-    && rustup target add x86_64-unknown-linux-musl \
     && cargo install cargo-chef
 WORKDIR /src
 
@@ -29,16 +28,17 @@ COPY --from=planner /src/recipe.json recipe.json
 
 ARG CACHE_FEATURES="full"
 
-RUN cargo chef cook --release --target x86_64-unknown-linux-musl \
-    --recipe-path recipe.json \
-    --no-default-features --features "${CACHE_FEATURES}"
+RUN cargo chef cook --release \
+       --recipe-path recipe.json \
+       --no-default-features --features "${CACHE_FEATURES}"
 
 ARG FEATURES="full"
 
 COPY . .
-RUN cargo build --release --locked --target x86_64-unknown-linux-musl \
-    --no-default-features --features "${FEATURES}" \
-    && strip target/x86_64-unknown-linux-musl/release/locket
+RUN cargo build --release --locked \
+       --no-default-features --features "${FEATURES}" \
+    && strip target/release/locket \
+    && cp target/release/locket /locket
 
 FROM alpine:3.23 AS rootfs
 RUN addgroup -g 65532 nonroot \
@@ -89,7 +89,7 @@ COPY --from=rootfs --chown=nonroot:nonroot /run/secrets /run/secrets
 COPY --from=rootfs --chmod=644 /etc/passwd.min /etc/passwd
 COPY --from=rootfs --chmod=644 /etc/group.min /etc/group
 COPY --from=rootfs --chown=nonroot:nonroot /etc/locket /etc/locket
-COPY --from=builder /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
+COPY --from=builder /locket /usr/local/bin/locket
 
 WORKDIR /
 USER nonroot:nonroot
@@ -100,13 +100,14 @@ ENTRYPOINT ["locket","inject", "--config", "/etc/locket/locket.toml"]
 
 FROM alpine:3.23 AS opstage
 ARG OP_VERSION=2.32.0
+ARG TARGETARCH
 RUN set -eux; \
-    apk add --no-cache ca-certificates wget; \
-    echo "https://downloads.1password.com/linux/alpinelinux/stable/" >> /etc/apk/repositories; \
-    wget -O /etc/apk/keys/support@1password.com-61ddfc31.rsa.pub \
-    https://downloads.1password.com/linux/keys/alpinelinux/support@1password.com-61ddfc31.rsa.pub; \
-    apk update; \
-    apk add --no-cache 1password-cli=${OP_VERSION}-r0 || apk add --no-cache 1password-cli
+    apk add --no-cache ca-certificates unzip; \
+    wget -O /tmp/op.zip \
+      "https://cache.agilebits.com/dist/1P/op2/pkg/v${OP_VERSION}/op_linux_${TARGETARCH}_v${OP_VERSION}.zip"; \
+    unzip /tmp/op.zip -d /tmp/op; \
+    install -m 755 /tmp/op/op /usr/bin/op; \
+    rm -rf /tmp/op /tmp/op.zip
 
 FROM runtime AS base
 ARG DEFAULT_PROVIDER
@@ -145,6 +146,6 @@ RUN addgroup -g 65532 nonroot \
 
 COPY --from=opstage /usr/bin/op /usr/local/bin/op
 COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
-COPY --from=builder /src/target/x86_64-unknown-linux-musl/release/locket /usr/local/bin/locket
+COPY --from=builder /locket /usr/local/bin/locket
 VOLUME ["/run/secrets/locket", "/templates"]
 ENTRYPOINT ["/bin/bash"]

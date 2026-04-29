@@ -4,6 +4,7 @@ variable "REGISTRIES"    { default = "bpbradley" }
 variable "IMAGE"         { default = "locket" }
 variable "PLATFORMS"     { default = "linux/amd64" }
 variable "CI"            { default = false }
+variable "CACHE_REPO"    { default = "ghcr.io/bpbradley/locket" }
 
 group "release" {
   targets = ["connect", "op", "bws", "infisical", "aio", "plugin"]
@@ -20,9 +21,9 @@ group "plugin-build" {
 target "_common" {
   context   = ".."
   dockerfile = "docker/Dockerfile"
-  platforms = [PLATFORMS]
-  cache-to   = CI ? ["type=gha,mode=max,scope=locket-main"] : []
-  cache-from = CI ? ["type=gha,scope=locket-main"] : []
+  platforms = split(",", PLATFORMS)
+  cache-to   = CI ? ["type=registry,ref=${CACHE_REPO}:cache,mode=max"] : []
+  cache-from = CI ? ["type=registry,ref=${CACHE_REPO}:cache"] : []
 }
 
 function "get_registries" {
