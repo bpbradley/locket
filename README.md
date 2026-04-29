@@ -78,7 +78,7 @@ services:
     image: my-app:latest
     depends_on:
         locket:
-            condition: healthy # locket is healthy once all secrets are injected
+            condition: service_healthy # locket is healthy once all secrets are injected
     volumes:
       # Mount the shared volume wherever you want the secrets in the container
       - secrets-store:/run/secrets/locket:ro
