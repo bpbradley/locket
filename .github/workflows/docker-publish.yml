@@ -17,7 +17,7 @@ jobs:
         env:
             BUILDX_BAKE_ENTITLEMENTS_FS: 0
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Calculate Version and Pre-release State
               id: meta
