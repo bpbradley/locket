@@ -19,12 +19,15 @@ use std::sync::Arc;
     feature = "op",
     feature = "connect",
     feature = "bws",
-    feature = "infisical"
+    feature = "infisical",
+    feature = "bao"
 )))]
 compile_error!(
-    "At least one provider feature must be enabled (e.g. --features op,connect,bws,infisical)"
+    "At least one provider feature must be enabled (e.g. --features op,connect,bws,infisical,bao)"
 );
 
+#[cfg(feature = "bao")]
+mod bao;
 #[cfg(feature = "bws")]
 mod bws;
 pub mod config;
@@ -126,6 +129,9 @@ pub enum Provider {
     Bws(config::bws::BwsConfig),
     #[cfg(feature = "infisical")]
     Infisical(config::infisical::InfisicalConfig),
+
+    #[cfg(feature = "bao")]
+    Bao(config::bao::BaoConfig),
 }
 
 impl Provider {
@@ -147,6 +153,8 @@ impl Signature for Provider {
             Self::Bws(c) => c.signature().await,
             #[cfg(feature = "infisical")]
             Self::Infisical(c) => c.signature().await,
+            #[cfg(feature = "bao")]
+            Self::Bao(c) => c.signature().await,
         }
     }
 }
@@ -162,6 +170,8 @@ impl ReferenceParser for Provider {
             Self::Bws(cfg) => cfg.parse(raw),
             #[cfg(feature = "infisical")]
             Self::Infisical(cfg) => cfg.parse(raw),
+            #[cfg(feature = "bao")]
+            Self::Bao(cfg) => cfg.parse(raw),
         }
     }
 }
@@ -178,6 +188,8 @@ impl ProviderFactory for Provider {
             Self::Bws(c) => Arc::new(bws::BwsProvider::new(c.clone()).await?),
             #[cfg(feature = "infisical")]
             Self::Infisical(c) => Arc::new(infisical::InfisicalProvider::new(c.clone()).await?),
+            #[cfg(feature = "bao")]
+            Self::Bao(c) => Arc::new(bao::BaoProvider::new(c.clone()).await?),
         };
         Ok(provider)
     }
@@ -220,6 +232,8 @@ impl TryFrom<ProviderArgs> for Provider {
             ProviderKind::OpConnect => Ok(Provider::Connect(args.config.connect.try_into()?)),
             #[cfg(feature = "infisical")]
             ProviderKind::Infisical => Ok(Provider::Infisical(args.config.infisical.try_into()?)),
+            #[cfg(feature = "bao")]
+            ProviderKind::Bao => Ok(Provider::Bao(args.config.bao.try_into()?)),
         }
     }
 }
@@ -239,6 +253,9 @@ pub enum ProviderKind {
     /// Infisical Secrets Provider
     #[cfg(feature = "infisical")]
     Infisical,
+    /// OpenBao / HashiCorp Vault Provider
+    #[cfg(feature = "bao")]
+    Bao,
 }
 
 #[derive(
@@ -265,4 +282,9 @@ pub struct ProviderConfigs {
     #[command(flatten, next_help_heading = "Infisical Secrets Provider")]
     #[serde(flatten)]
     pub infisical: config::infisical::InfisicalArgs,
+
+    #[cfg(feature = "bao")]
+    #[command(flatten, next_help_heading = "OpenBao / Vault Provider")]
+    #[serde(flatten)]
+    pub bao: config::bao::BaoArgs,
 }
