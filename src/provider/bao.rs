@@ -15,8 +15,10 @@ use async_trait::async_trait;
 use futures::{StreamExt, stream};
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
+use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -60,7 +62,7 @@ impl BaoProvider {
         &self,
         location: &BaoSecretLocation,
         token: &SecretString,
-    ) -> Result<HashMap<String, serde_json::Value>, ProviderError> {
+    ) -> Result<HashMap<String, KvV2Value>, ProviderError> {
         let mut url = self.config.url.clone();
         {
             let mut segments = url
@@ -115,7 +117,7 @@ impl BaoProvider {
     async fn fetch_group_with_retry(
         &self,
         location: &BaoSecretLocation,
-    ) -> Result<HashMap<String, serde_json::Value>, ProviderError> {
+    ) -> Result<HashMap<String, KvV2Value>, ProviderError> {
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -179,13 +181,12 @@ impl SecretsProvider for BaoProvider {
                 Ok(fields) => {
                     for r in group_refs {
                         match fields.get(r.field.as_str()) {
-                            Some(serde_json::Value::String(s)) => {
-                                let secret = SecretString::new(s.clone().into());
-                                map.insert(SecretReference::Bao(r.clone()), secret);
+                            Some(KvV2Value::Scalar(secret)) => {
+                                map.insert(SecretReference::Bao(r.clone()), secret.clone());
                             }
-                            Some(_) => {
+                            Some(KvV2Value::Unsupported) => {
                                 warn!(
-                                    "Field '{}' in {} is not a string; skipping",
+                                    "Field '{}' in {} is not a scalar value; skipping",
                                     r.field, r.location
                                 );
                             }
@@ -394,7 +395,74 @@ struct KvV2Response {
 
 #[derive(Deserialize)]
 struct KvV2Data {
-    data: Option<HashMap<String, serde_json::Value>>,
+    data: Option<HashMap<String, KvV2Value>>,
+}
+
+/// A single field value in a KV v2 secret's data map.
+///
+/// Scalars are captured as secrets at deserialization time so plaintext
+/// never sits in a non-zeroizing type. Numbers and bools resolve to their
+/// string form. Nulls, arrays, and objects cannot be injected as a value.
+enum KvV2Value {
+    Scalar(SecretString),
+    Unsupported,
+}
+
+impl<'de> Deserialize<'de> for KvV2Value {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct KvV2ValueVisitor;
+
+        impl<'de> Visitor<'de> for KvV2ValueVisitor {
+            type Value = KvV2Value;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a KV v2 field value")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(KvV2Value::Scalar(SecretString::new(v.into())))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(KvV2Value::Scalar(SecretString::new(v.into())))
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(KvV2Value::Scalar(SecretString::new(v.to_string().into())))
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(KvV2Value::Scalar(SecretString::new(v.to_string().into())))
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(KvV2Value::Scalar(SecretString::new(v.to_string().into())))
+            }
+
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(KvV2Value::Scalar(SecretString::new(v.to_string().into())))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(KvV2Value::Unsupported)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(KvV2Value::Unsupported)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(KvV2Value::Unsupported)
+            }
+        }
+
+        deserializer.deserialize_any(KvV2ValueVisitor)
+    }
 }
 
 #[cfg(test)]
@@ -434,5 +502,31 @@ mod tests {
         assert!(!token.is_expired());
         token.poison();
         assert!(token.is_expired());
+    }
+
+    #[test]
+    fn test_kv_scalars_deserialize_as_secrets() {
+        let json = r#"{"password": "hunter2", "port": 5432, "enabled": true, "ratio": 1.5}"#;
+        let fields: HashMap<String, KvV2Value> = serde_json::from_str(json).unwrap();
+
+        let expect_secret = |key: &str| match &fields[key] {
+            KvV2Value::Scalar(s) => s.expose_secret().to_string(),
+            KvV2Value::Unsupported => panic!("field '{key}' should be a scalar"),
+        };
+
+        assert_eq!(expect_secret("password"), "hunter2");
+        assert_eq!(expect_secret("port"), "5432");
+        assert_eq!(expect_secret("enabled"), "true");
+        assert_eq!(expect_secret("ratio"), "1.5");
+    }
+
+    #[test]
+    fn test_kv_structured_values_unsupported() {
+        let json = r#"{"nothing": null, "list": [1, 2], "nested": {"a": 1}}"#;
+        let fields: HashMap<String, KvV2Value> = serde_json::from_str(json).unwrap();
+
+        for key in ["nothing", "list", "nested"] {
+            assert!(matches!(fields[key], KvV2Value::Unsupported));
+        }
     }
 }
