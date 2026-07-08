@@ -115,6 +115,30 @@ services:
             - "--secret=my_secret=3832b656-a93b-45ad-bdfa-b267016802c3"
             - "--secret=my_other_secret={{ 3832b656-a93b-45ad-bdfa-b267016802c3 }}"
             - "--inject-failure-policy=error"
+    locket-bao:
+        image: ghcr.io/bpbradley/locket:bao
+        user: "1000:1000"
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
+        container_name: locket-bao
+        secrets:
+            - bao_secret_id
+        volumes:
+            - ./secrets/bao:/templates:ro
+            - out-bao:/run/secrets/locket
+        environment:
+            BAO_URL: $BAO_URL
+        command:
+            - "--log-level=debug"
+            - "--bao-role-id=locket"
+            - "--bao-secret-id=file:/run/secrets/bao_secret_id"
+            - "--map=/templates/config:/run/secrets/locket/config"
+            - "--map=/templates/secret.txt:/run/secrets/locket/secret.txt"
+            - "--secret=my_secret=bao://secret/app/config/password"
+            - "--secret=my_other_secret={{ bao://secret/app/config/password }}"
+            - "--inject-failure-policy=error"
     observer:
         image: alpine:latest
         container_name: observer
@@ -129,6 +153,8 @@ services:
                 condition: service_healthy
             locket-infisical:
                 condition: service_healthy
+            locket-bao:
+                condition: service_healthy
         volumes:
             - ./verify.sh:/verify.sh:ro
             - out-connect:/out/1password-connect:ro
@@ -136,6 +162,7 @@ services:
             - out-bws:/out/bitwarden:ro
             - out-aio:/out/aio:ro
             - out-infisical:/out/infisical:ro
+            - out-bao:/out/openbao:ro
         command: ["/bin/sh", "/verify.sh"]
 
 secrets:
@@ -147,6 +174,8 @@ secrets:
         file: /etc/tokens/bws
     infisical_token:
         file: /etc/tokens/infisical
+    bao_secret_id:
+        file: /etc/tokens/bao
 
 volumes:
     op-cfg:
@@ -200,6 +229,16 @@ volumes:
                 },
         }
     out-infisical:
+        {
+            driver: local,
+            driver_opts:
+                {
+                    type: tmpfs,
+                    device: tmpfs,
+                    o: "uid=1000,gid=1000,mode=0700",
+                },
+        }
+    out-bao:
         {
             driver: local,
             driver_opts:
