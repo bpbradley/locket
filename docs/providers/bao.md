@@ -5,11 +5,7 @@ This provider is based on [OpenBao](https://openbao.org/) (a Linux Foundation fo
 It uses the KV v2 Secrets Engine to fetch secrets, and the AppRole auth method to authenticate.
 
 > [!NOTE]
-> This provider expects a running and unsealed OpenBao (or Vault) instance. See the [OpenBao installation docs](https://openbao.org/docs/platform/docker/) for deployment options. For a quick disposable test instance (in-memory, auto-unsealed, not for production):
->
-> ```sh
-> docker run --rm -p 8200:8200 -e BAO_DEV_ROOT_TOKEN_ID=root openbao/openbao
-> ```
+> This provider expects a running and unsealed OpenBao (or Vault) instance, which locket does not manage. See the [OpenBao documentation](https://openbao.org/docs/) for deployment and hardening guidance, and [Installing OpenBao](https://openbao.org/docs/install/) for installation options including container images.
 
 ## Reference syntax
 
@@ -23,6 +19,7 @@ Example: `bao://secret/app/prod/db-password` refers to the `db-password` field o
 
 > [!TIP]
 > If multiple secret references point to the same `mount`/`path` (just different `field`s), locket will only fetch that secret once per resolution pass instead of once per field.
+
 
 ## Setup
 
@@ -38,7 +35,7 @@ Example: `bao://secret/app/prod/db-password` refers to the `db-password` field o
    bao auth enable approle
    ```
 
-3. Create a policy granting read access to the secrets locket needs:
+3. Create a policy granting read access to the secrets locket needs. Note the `data/` segment between the mount and the secret path: that is how the KV v2 API addresses secret contents, so a policy written without it will not match.
 
    ```sh
    bao policy write locket - <<'EOF'
@@ -59,18 +56,21 @@ Example: `bao://secret/app/prod/db-password` refers to the `db-password` field o
      token_num_uses=0
    ```
 
+   locket renews its token automatically when it expires, so short TTLs are fine. A role with `token_ttl=0` (non-expiring tokens) is also supported: locket logs in once and reuses the token.
+
 5. Read the Role ID (not sensitive, safe to store alongside config):
 
    ```sh
    bao read auth/approle/role/locket/role-id
    ```
 
-6. Generate a Secret ID (sensitive — shown only once, store it like any other secret):
+6. Generate a Secret ID and keep in a safe location
 
    ```sh
    bao write -f auth/approle/role/locket/secret-id
    ```
 
+7. Provide the Secret ID to locket via `--bao-secret-id`. Prefer the `file:` form (e.g. a docker secret, as in the sidecar example below) over passing the value directly, so it stays out of process arguments and container environment.
 [Here](../inject.md#openbao--vault-provider) is the reference configuration for locket using OpenBao/Vault
 
 ```sh
@@ -79,10 +79,10 @@ locket inject --provider bao \
   --bao-role-id 00000000-0000-0000-0000-000000000000 \
   --bao-secret-id file:/path/to/secret-id \
   --out /run/secrets/locket \
-  --secret name={{bao://secret/app/prod/db-password}}
+  --secret "name={{bao://secret/app/prod/db-password}}" \
   --secret /path/to/secrets.yaml \
   --secret auth_key=@key.pem \
-  --map ./tpl:/run/secrets/locket/mapped 
+  --map ./tpl:/run/secrets/locket/mapped
 ```
 
 ## Example Sidecar Configuration
@@ -124,6 +124,7 @@ services:
       type: locket
       options:
         provider: bao
+        raw: true
         bao-url: "https://openbao.example.com"
         bao-role-id: "00000000-0000-0000-0000-000000000000"
         bao-secret-id: file:/etc/tokens/bao-secret-id
@@ -135,7 +136,7 @@ services:
     command:
       - sh
       - -c
-      - "env | grep LOCKET"
+      - "env | grep DB_PASSWORD"
     depends_on:
       - locket
 ```
