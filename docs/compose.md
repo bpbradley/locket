@@ -26,6 +26,7 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
 | `--env-file` | `LOCKET_ENV_FILE` |  | Files containing environment variables which may contain secret references |
 | `--env` | `LOCKET_ENV` |  | Environment variable overrides which may contain secret references |
+| `--raw` | `LOCKET_RAW` | `false` | Inject variables with their exact names, without the provider service name prefix<br><br>By default Docker Compose prefixes injected variables with the provider service name, e.g. `SECRET` becomes `LOCKET_SECRET` for a service named `locket`. Enable this to inject variables as-is. Requires Docker Compose v5.2.0 or later, and avoiding name collisions between provider services becomes your responsibility <br><br> **Choices:**<br>- `true`<br>- `false` |
 | `<service>` |  |  | Service name from Docker Compose |
 ### 1Password (op)
 
