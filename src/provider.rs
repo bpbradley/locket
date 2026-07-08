@@ -26,6 +26,8 @@ compile_error!(
     "At least one provider feature must be enabled (e.g. --features op,connect,bws,infisical,bao)"
 );
 
+#[cfg(any(feature = "bao", feature = "infisical"))]
+mod auth;
 #[cfg(feature = "bao")]
 mod bao;
 #[cfg(feature = "bws")]
