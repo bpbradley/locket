@@ -14,7 +14,7 @@ Run as a Docker Volume Plugin
 | `--config` | `LOCKET_CONFIG` |  | Path to configuration files<br><br>Can be specified multiple times to layer multiple files. Each file is loaded in the order specified, with later files overriding earlier ones. |
 | `--secrets` | `LOCKET_VOLUME_DEFAULT_SECRETS` |  | Default secrets to mount into the volume<br><br>These will typically be specified in driver_opts for volume. However, default secrets can be provided via CLI/ENV which would be available to all volumes by default. |
 | `--user` | `LOCKET_FILE_OWNER` |  | Owner of the file/dir<br><br>Defaults to the running user/group. The running user must have write permissions on the directory to change the owner. |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider<br>- `bao`: OpenBao / HashiCorp Vault Provider |
 | `--socket` | `LOCKET_PLUGIN_SOCKET` | `/run/docker/plugins/locket.sock` | Path to the listening socket |
 | `--state-dir` | `LOCKET_PLUGIN_STATE_DIR` | `/var/lib/locket` | Path to directory where state configuration is stored.<br><br>This is where the plugin will store necessary data to reload configured volumes from cold start |
 | `--runtime-dir` | `LOCKET_PLUGIN_RUNTIME_DIR` | `/var/lib/locket` | Path to directory where runtime data is stored.<br><br>This is where volumes are physically mounted on the host filesystem. |
@@ -62,6 +62,16 @@ Run as a Docker Volume Plugin
 | `--infisical-default-path` | `INFISICAL_DEFAULT_PATH` | `/` | The default path to use when one is not specified |
 | `--infisical-default-secret-type` | `INFISICAL_DEFAULT_SECRET_TYPE` | `shared` | The default secret type to use when one is not specified <br><br> **Choices:**<br>- `shared`<br>- `personal` |
 | `--infisical-max-concurrent` | `INFISICAL_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Infisical API |
+### OpenBao / Vault Provider
+
+| Command | Env | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--bao-url` | `BAO_URL` |  | OpenBao / Vault server URL |
+| `--bao-namespace` | `BAO_NAMESPACE` |  | OpenBao / Vault namespace (Enterprise/OpenBao Namespaces feature) |
+| `--bao-role-id` | `BAO_ROLE_ID` |  | AppRole Role ID |
+| `--bao-secret-id` | `BAO_SECRET_ID` |  | AppRole Secret ID<br><br>Either provide the value directly or via a file with `file:` prefix |
+| `--bao-auth-mount` | `BAO_AUTH_MOUNT` | `approle` | Auth mount path where the AppRole auth method is enabled |
+| `--bao-max-concurrent` | `BAO_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to the OpenBao/Vault API |
 
 ## TOML Reference
 
@@ -171,5 +181,23 @@ infisical-default-secret-type = "shared"
 
 # Maximum allowed concurrent requests to Infisical API
 infisical-max-concurrent = 20
+
+# OpenBao / Vault server URL
+# bao-url = ...
+
+# OpenBao / Vault namespace (Enterprise/OpenBao Namespaces feature)
+# bao-namespace = ...
+
+# Auth mount path where the AppRole auth method is enabled
+bao-auth-mount = "approle"
+
+# AppRole Role ID
+# bao-role-id = ...
+
+# AppRole Secret ID
+# bao-secret-id = ...
+
+# Maximum allowed concurrent requests to the OpenBao/Vault API
+bao-max-concurrent = 20
 
 ```

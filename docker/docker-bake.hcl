@@ -7,11 +7,11 @@ variable "CI"            { default = false }
 variable "CACHE_REPO"    { default = "ghcr.io/bpbradley/locket" }
 
 group "release" {
-  targets = ["connect", "op", "bws", "infisical", "aio", "plugin"]
+  targets = ["connect", "op", "bws", "infisical", "bao", "aio", "plugin"]
 }
 
 group "all" {
-  targets = ["connect", "op", "bws", "infisical", "aio", "debug", "plugin"]
+  targets = ["connect", "op", "bws", "infisical", "bao", "aio", "debug", "plugin"]
 }
 
 group "plugin-build" {
@@ -105,11 +105,22 @@ target "infisical" {
   labels = { "org.opencontainers.image.version" = VERSION }
 }
 
+target "bao" {
+  inherits = ["_common"]
+  target = "base"
+  args = {
+    FEATURES = "bao,exec"
+    DEFAULT_PROVIDER = "bao"
+  }
+  tags = tags_for("bao")
+  labels = { "org.opencontainers.image.version" = VERSION }
+}
+
 target "aio" {
   inherits = ["_common"]
   target = "aio"
   args = {
-    FEATURES = "op,connect,bws,infisical,exec"
+    FEATURES = "op,connect,bws,infisical,bao,exec"
   }
   tags = tags_main()
   labels = { "org.opencontainers.image.version" = VERSION }
@@ -119,7 +130,7 @@ target "plugin" {
   inherits = ["_common"]
   target = "plugin"
   args = {
-    FEATURES = "op,connect,bws,infisical,volume"
+    FEATURES = "op,connect,bws,infisical,bao,volume"
   }
   tags = tags_for("volume")
   labels = { "org.opencontainers.image.version" = VERSION }
@@ -129,7 +140,7 @@ target "debug" {
   inherits = ["_common"]
   target = "debug"
   args = {
-    FEATURES = "op,connect,bws,infisical,exec"
+    FEATURES = "op,connect,bws,infisical,bao,exec"
   }
   tags = tags_for("debug")
   labels = { "org.opencontainers.image.version" = VERSION }

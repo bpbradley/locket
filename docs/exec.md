@@ -43,7 +43,7 @@ locket exec --provider bws --bws-token=file:/path/to/token \
 
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider |
+| `--provider` | `SECRETS_PROVIDER` |  | Secrets provider backend to use <br><br> **Choices:**<br>- `op`: 1Password Service Account<br>- `op-connect`: 1Password Connect Provider<br>- `bws`: Bitwarden Secrets Provider<br>- `infisical`: Infisical Secrets Provider<br>- `bao`: OpenBao / HashiCorp Vault Provider |
 ### 1Password (op)
 
 | Command | Env | Default | Description |
@@ -78,6 +78,16 @@ locket exec --provider bws --bws-token=file:/path/to/token \
 | `--infisical-default-path` | `INFISICAL_DEFAULT_PATH` | `/` | The default path to use when one is not specified |
 | `--infisical-default-secret-type` | `INFISICAL_DEFAULT_SECRET_TYPE` | `shared` | The default secret type to use when one is not specified <br><br> **Choices:**<br>- `shared`<br>- `personal` |
 | `--infisical-max-concurrent` | `INFISICAL_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to Infisical API |
+### OpenBao / Vault Provider
+
+| Command | Env | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--bao-url` | `BAO_URL` |  | OpenBao / Vault server URL |
+| `--bao-namespace` | `BAO_NAMESPACE` |  | OpenBao / Vault namespace (Enterprise/OpenBao Namespaces feature) |
+| `--bao-role-id` | `BAO_ROLE_ID` |  | AppRole Role ID |
+| `--bao-secret-id` | `BAO_SECRET_ID` |  | AppRole Secret ID<br><br>Either provide the value directly or via a file with `file:` prefix |
+| `--bao-auth-mount` | `BAO_AUTH_MOUNT` | `approle` | Auth mount path where the AppRole auth method is enabled |
+| `--bao-max-concurrent` | `BAO_MAX_CONCURRENT` | `20` | Maximum allowed concurrent requests to the OpenBao/Vault API |
 
 ## TOML Reference
 
@@ -223,6 +233,24 @@ infisical-default-secret-type = "shared"
 
 # Maximum allowed concurrent requests to Infisical API
 infisical-max-concurrent = 20
+
+# OpenBao / Vault server URL
+# bao-url = ...
+
+# OpenBao / Vault namespace (Enterprise/OpenBao Namespaces feature)
+# bao-namespace = ...
+
+# Auth mount path where the AppRole auth method is enabled
+bao-auth-mount = "approle"
+
+# AppRole Role ID
+# bao-role-id = ...
+
+# AppRole Secret ID
+# bao-secret-id = ...
+
+# Maximum allowed concurrent requests to the OpenBao/Vault API
+bao-max-concurrent = 20
 
 cmd = []
 

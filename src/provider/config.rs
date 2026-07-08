@@ -1,3 +1,5 @@
+#[cfg(feature = "bao")]
+pub mod bao;
 #[cfg(feature = "bws")]
 pub mod bws;
 #[cfg(feature = "connect")]
