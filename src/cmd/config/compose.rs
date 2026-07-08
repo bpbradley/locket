@@ -46,6 +46,24 @@ pub struct UpArgs {
     )]
     pub env: Vec<Secret>,
 
+    /// Inject variables with their exact names, without the provider service name prefix
+    ///
+    /// By default Docker Compose prefixes injected variables with the provider service name,
+    /// e.g. `SECRET` becomes `LOCKET_SECRET` for a service named `locket`. 
+    /// Enable this to inject variables as-is. 
+    /// Requires Docker Compose v5.2.0 or later, and avoiding name collisions between provider services becomes your responsibility
+    #[arg(
+        long,
+        env = "LOCKET_RAW",
+        value_name = "true|false",
+        default_value_t = false,
+        action = clap::ArgAction::Set,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        help_heading = None,
+    )]
+    pub raw: bool,
+
     /// Log level
     #[arg(long, env = "LOCKET_LOG_LEVEL", value_enum, default_value_t = LogLevel::Debug)]
     pub log_level: LogLevel,

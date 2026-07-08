@@ -55,6 +55,7 @@ pub enum MessageType {
     Error,
     Debug,
     SetEnv,
+    RawSetEnv,
 }
 
 #[derive(Serialize)]
@@ -82,8 +83,13 @@ impl ComposeMsg {
         }
     }
 
-    pub fn set_env(key: &str, value: &str) {
-        Self::emit(MessageType::SetEnv, format!("{}={}", key, value));
+    pub fn set_env(key: &str, value: &str, raw: bool) {
+        let msg_type = if raw {
+            MessageType::RawSetEnv
+        } else {
+            MessageType::SetEnv
+        };
+        Self::emit(msg_type, format!("{}={}", key, value));
     }
 }
 
@@ -134,5 +140,16 @@ impl<'a> Visit for MessageVisitor<'a> {
         if field.name() == "message" {
             self.0.push_str(value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_type_wire_names() {
+        assert_eq!(serde_json::to_string(&MessageType::SetEnv).unwrap(), "\"setenv\"");
+        assert_eq!(serde_json::to_string(&MessageType::RawSetEnv).unwrap(), "\"rawsetenv\"");
     }
 }

@@ -6,6 +6,7 @@ services:
             type: locket
             options:
                 provider: op-connect
+                raw: false # these will be prefixed with `LOCKET-OP`
                 connect-token: file:/etc/tokens/connect
                 connect-host: $OP_CONNECT_HOST
                 env_file: locket.env
@@ -17,6 +18,7 @@ services:
             type: locket
             options:
                 provider: bws
+                raw: true
                 bws-token: file:/etc/tokens/bws
                 env:
                     - TEXT={{814d7d9a-54a5-47a0-afc0-b3a7015213c4}}
@@ -25,6 +27,7 @@ services:
             type: locket
             options:
                 provider: infisical
+                raw: true
                 infisical-client-secret: file:/etc/tokens/infisical
                 infisical-client-id: "db63bd8b-4972-4c1e-b047-8ef3482b5666"
                 infisical-default-project-id: "0667e4a5-2168-4a63-8800-31475718ae85"

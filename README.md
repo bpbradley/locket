@@ -161,9 +161,10 @@ services:
 
 ```
 
-> [!NOTE]
-> The environment variables are injected with the providers service name prefixed.
-> This is behavior managed by Docker directly, and cannot be changed. So in some cases it may be necessary to get creative with the service names to ensure the secrets are namespaced as desired.
+> [!TIP]
+> By default, the enviornment variables are injected with the providers name prefixed.
+> This behavior is managed by docker directly. As of Docker Compose version 5.2.0, support for `raw` mode was added, and so you can opt into this with `raw: true` in options. This will remove the automatic prefixing behavior.
+
 
 In order to use the Provider mode, `locket` must be installed on the host system directly as a Docker CLI plugin. The simplest way to do this is to install the binary directly from GitHub, and symlink it to the appropriate directory for docker to access it as a cli-plugin.
 
