@@ -286,14 +286,14 @@ impl BaoAuthenticator {
             .await
             .map_err(|e| ProviderError::Network(Box::new(e)))?;
 
-        debug!(
-            "Login successful. Expires in {} seconds",
-            login_resp.auth.lease_duration
-        );
+        match login_resp.auth.lease_duration {
+            0 => debug!("Login successful. Token does not expire"),
+            s => debug!("Login successful. Expires in {} seconds", s),
+        }
 
         Ok(BaoToken {
             client_token: login_resp.auth.client_token,
-            expiry: Instant::now() + Duration::from_secs(login_resp.auth.lease_duration),
+            expiry: TokenExpiry::from_lease_duration(login_resp.auth.lease_duration),
         })
     }
 
@@ -334,16 +334,48 @@ impl From<BaoConfig> for ProviderConfig {
 #[derive(Debug, Clone)]
 struct BaoToken {
     client_token: SecretString,
-    expiry: Instant,
+    expiry: TokenExpiry,
 }
 
 impl BaoToken {
     fn is_expired(&self) -> bool {
-        self.expiry <= Instant::now() + Duration::from_secs(60)
+        self.expiry.is_expired()
     }
     fn poison(&mut self) {
-        // Set to a point in the past so that it will be considered expired
-        self.expiry = Instant::now() - Duration::from_secs(1);
+        // Set to a point in the past so that it will be considered expired.
+        // Applies to non-expiring tokens too: they can still be revoked
+        // server side, and poisoning must force a fresh login.
+        self.expiry = TokenExpiry::At(Instant::now() - Duration::from_secs(1));
+    }
+}
+
+/// Tokens are renewed this long before they actually expire, so a token
+/// is never used within moments of its deadline.
+const EXPIRY_LEEWAY: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone)]
+enum TokenExpiry {
+    Never,
+    At(Instant),
+}
+
+impl TokenExpiry {
+    /// Vault and OpenBao report `lease_duration: 0` for tokens that never
+    /// expire, e.g. AppRole roles configured with `token_ttl=0`.
+    fn from_lease_duration(seconds: u64) -> Self {
+        match seconds {
+            0 => Self::Never,
+            s => Instant::now()
+                .checked_add(Duration::from_secs(s))
+                .map_or(Self::Never, Self::At),
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        match self {
+            Self::Never => false,
+            Self::At(deadline) => *deadline <= Instant::now() + EXPIRY_LEEWAY,
+        }
     }
 }
 
@@ -456,7 +488,7 @@ impl<'de> Deserialize<'de> for KvV2Value {
 mod tests {
     use super::*;
 
-    fn token_with_expiry(expiry: Instant) -> BaoToken {
+    fn token_with_expiry(expiry: TokenExpiry) -> BaoToken {
         BaoToken {
             client_token: SecretString::new("test-token".into()),
             expiry,
@@ -465,30 +497,61 @@ mod tests {
 
     #[test]
     fn test_token_not_expired_well_before_leeway() {
-        let token = token_with_expiry(Instant::now() + Duration::from_secs(120));
+        let token = token_with_expiry(TokenExpiry::At(Instant::now() + Duration::from_secs(120)));
         assert!(!token.is_expired());
     }
 
     #[test]
     fn test_token_expired_within_leeway() {
-        // is_expired() treats tokens expiring within the next 60s as expired already,
-        // so renewal happens before the token actually stops working.
-        let token = token_with_expiry(Instant::now() + Duration::from_secs(30));
+        // is_expired() treats tokens expiring within EXPIRY_LEEWAY as expired
+        // already, so renewal happens before the token actually stops working.
+        let token = token_with_expiry(TokenExpiry::At(Instant::now() + EXPIRY_LEEWAY / 2));
         assert!(token.is_expired());
     }
 
     #[test]
     fn test_token_expired_in_the_past() {
-        let token = token_with_expiry(Instant::now() - Duration::from_secs(1));
+        let token = token_with_expiry(TokenExpiry::At(Instant::now() - Duration::from_secs(1)));
         assert!(token.is_expired());
     }
 
     #[test]
     fn test_token_poison_marks_expired() {
-        let mut token = token_with_expiry(Instant::now() + Duration::from_secs(120));
+        let mut token =
+            token_with_expiry(TokenExpiry::At(Instant::now() + Duration::from_secs(120)));
         assert!(!token.is_expired());
         token.poison();
         assert!(token.is_expired());
+    }
+
+    #[test]
+    fn test_zero_lease_duration_never_expires() {
+        let token = token_with_expiry(TokenExpiry::from_lease_duration(0));
+        assert!(!token.is_expired());
+    }
+
+    #[test]
+    fn test_nonzero_lease_duration_expires() {
+        assert!(matches!(
+            TokenExpiry::from_lease_duration(900),
+            TokenExpiry::At(_)
+        ));
+    }
+
+    #[test]
+    fn test_poison_forces_expiry_of_non_expiring_token() {
+        let mut token = token_with_expiry(TokenExpiry::Never);
+        assert!(!token.is_expired());
+        token.poison();
+        assert!(token.is_expired());
+    }
+
+    #[test]
+    fn test_absurd_lease_duration_does_not_panic() {
+        // A hostile or broken server could report a lease that overflows
+        // Instant arithmetic. Saturate to Never instead of panicking.
+        let token = token_with_expiry(TokenExpiry::from_lease_duration(u64::MAX));
+        assert!(!token.is_expired());
     }
 
     #[test]
