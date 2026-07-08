@@ -49,8 +49,8 @@ pub struct UpArgs {
     /// Inject variables with their exact names, without the provider service name prefix
     ///
     /// By default Docker Compose prefixes injected variables with the provider service name,
-    /// e.g. `SECRET` becomes `LOCKET_SECRET` for a service named `locket`. 
-    /// Enable this to inject variables as-is. 
+    /// e.g. `SECRET` becomes `LOCKET_SECRET` for a service named `locket`.
+    /// Enable this to inject variables as-is.
     /// Requires Docker Compose v5.2.0 or later, and avoiding name collisions between provider services becomes your responsibility
     #[arg(
         long,

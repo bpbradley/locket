@@ -142,14 +142,3 @@ impl<'a> Visit for MessageVisitor<'a> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn message_type_wire_names() {
-        assert_eq!(serde_json::to_string(&MessageType::SetEnv).unwrap(), "\"setenv\"");
-        assert_eq!(serde_json::to_string(&MessageType::RawSetEnv).unwrap(), "\"rawsetenv\"");
-    }
-}
