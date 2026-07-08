@@ -9,7 +9,7 @@
 use super::{
     ConcurrencyLimit, ProviderError, SecretsProvider,
     config::bao::BaoConfig,
-    references::{BaoReference, Extract, HasReference, SecretReference},
+    references::{BaoReference, BaoSecretLocation, Extract, HasReference, SecretReference},
 };
 use async_trait::async_trait;
 use futures::{StreamExt, stream};
@@ -55,11 +55,10 @@ impl BaoProvider {
         })
     }
 
-    /// Reads a KV v2 secret's full data map for a given mount/path.
+    /// Reads a KV v2 secret's full data map for a given location.
     async fn fetch_group(
         &self,
-        mount: &str,
-        path: &str,
+        location: &BaoSecretLocation,
         token: &SecretString,
     ) -> Result<HashMap<String, serde_json::Value>, ProviderError> {
         let mut url = self.config.url.clone();
@@ -69,11 +68,9 @@ impl BaoProvider {
                 .map_err(|_| ProviderError::InvalidConfig("bao-url cannot be a base".into()))?;
             segments.clear();
             segments.push("v1");
-            segments.push(mount);
+            segments.push(location.mount.as_str());
             segments.push("data");
-            for seg in path.split('/') {
-                segments.push(seg);
-            }
+            segments.extend(location.path.segments());
         }
 
         let mut req = self
@@ -98,11 +95,11 @@ impl BaoProvider {
                 wrapper
                     .data
                     .data
-                    .ok_or_else(|| ProviderError::NotFound(format!("{}/{}", mount, path)))
+                    .ok_or_else(|| ProviderError::NotFound(location.to_string()))
             }
-            StatusCode::NOT_FOUND => Err(ProviderError::NotFound(format!("{}/{}", mount, path))),
+            StatusCode::NOT_FOUND => Err(ProviderError::NotFound(location.to_string())),
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(ProviderError::Unauthorized(
-                format!("Access denied for {}/{}", mount, path),
+                format!("Access denied for {}", location),
             )),
             status => {
                 let txt = resp.text().await.unwrap_or_default();
@@ -117,22 +114,21 @@ impl BaoProvider {
     /// Fetches a secret's data map, retrying once with a fresh token if access was denied.
     async fn fetch_group_with_retry(
         &self,
-        mount: &str,
-        path: &str,
+        location: &BaoSecretLocation,
     ) -> Result<HashMap<String, serde_json::Value>, ProviderError> {
         let mut attempt = 0;
         loop {
             attempt += 1;
             let token = self.auth.get_token().await?;
 
-            match self.fetch_group(mount, path, &token).await {
+            match self.fetch_group(location, &token).await {
                 Ok(data) => return Ok(data),
                 // Token may need to be refreshed. Try invalidating the token
                 // to trigger a rotation and try again
                 Err(ProviderError::Unauthorized(_)) if attempt < 2 => {
                     warn!(
-                        "Got Unauthorized for {}/{}. Invalidating token and retrying...",
-                        mount, path
+                        "Got Unauthorized for {}. Invalidating token and retrying...",
+                        location
                     );
                     self.auth.invalidate(&token).await;
                     continue;
@@ -153,31 +149,26 @@ impl SecretsProvider for BaoProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        let refs: Vec<BaoReference> = references
-            .iter()
-            .filter_map(BaoReference::extract)
-            .cloned()
-            .collect();
+        // Group references by location so a secret with multiple referenced
+        // fields is only fetched once, instead of once per field.
+        let mut groups: HashMap<&BaoSecretLocation, Vec<&BaoReference>> = HashMap::new();
+        for r in references.iter().filter_map(BaoReference::extract) {
+            groups.entry(&r.location).or_default().push(r);
+        }
 
-        if refs.is_empty() {
+        if groups.is_empty() {
             return Ok(HashMap::new());
         }
 
-        // Group references by (mount, path) so a secret with multiple referenced
-        // fields is only fetched once, instead of once per field.
-        let mut groups: HashMap<(String, String), Vec<BaoReference>> = HashMap::new();
-        for r in refs {
-            groups
-                .entry((r.mount.clone(), r.path.clone()))
-                .or_default()
-                .push(r);
-        }
-
-        let results = stream::iter(groups.into_iter())
-            .map(|((mount, path), group_refs)| async move {
-                let data = self.fetch_group_with_retry(&mount, &path).await;
+        let fetches: Vec<_> = groups
+            .into_iter()
+            .map(|(location, group_refs)| async move {
+                let data = self.fetch_group_with_retry(location).await;
                 (group_refs, data)
             })
+            .collect();
+
+        let results = stream::iter(fetches)
             .buffer_unordered(self.config.max_concurrent.into_inner())
             .collect::<Vec<_>>()
             .await;
@@ -187,15 +178,15 @@ impl SecretsProvider for BaoProvider {
             match data {
                 Ok(fields) => {
                     for r in group_refs {
-                        match fields.get(&r.field) {
+                        match fields.get(r.field.as_str()) {
                             Some(serde_json::Value::String(s)) => {
                                 let secret = SecretString::new(s.clone().into());
-                                map.insert(SecretReference::Bao(r), secret);
+                                map.insert(SecretReference::Bao(r.clone()), secret);
                             }
                             Some(_) => {
                                 warn!(
-                                    "Field '{}' in {}/{} is not a string; skipping",
-                                    r.field, r.mount, r.path
+                                    "Field '{}' in {} is not a string; skipping",
+                                    r.field, r.location
                                 );
                             }
                             None => {

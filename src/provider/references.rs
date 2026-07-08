@@ -11,7 +11,7 @@ mod infisical;
 #[cfg(any(feature = "op", feature = "connect"))]
 mod op;
 #[cfg(feature = "bao")]
-pub use bao::{BaoParseError, BaoReference};
+pub use bao::{BaoParseError, BaoReference, BaoSecretLocation};
 #[cfg(feature = "bws")]
 pub use bws::BwsReference;
 #[cfg(feature = "infisical")]
