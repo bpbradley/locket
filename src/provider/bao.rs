@@ -8,8 +8,10 @@
 
 use super::{
     ConcurrencyLimit, ProviderError, SecretsProvider,
-    config::bao::BaoConfig,
-    references::{BaoReference, BaoSecretLocation, Extract, HasReference, SecretReference},
+    config::bao::{BaoConfig, BaoNamespace, BaoServerUrl},
+    references::{
+        BaoMount, BaoReference, BaoSecretLocation, Extract, HasReference, SecretReference,
+    },
 };
 use async_trait::async_trait;
 use futures::{StreamExt, stream};
@@ -22,7 +24,6 @@ use std::fmt;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
-use url::Url;
 
 pub struct BaoProvider {
     client: Client,
@@ -63,24 +64,18 @@ impl BaoProvider {
         location: &BaoSecretLocation,
         token: &SecretString,
     ) -> Result<HashMap<String, KvV2Value>, ProviderError> {
-        let mut url = self.config.url.clone();
-        {
-            let mut segments = url
-                .path_segments_mut()
-                .map_err(|_| ProviderError::InvalidConfig("bao-url cannot be a base".into()))?;
-            segments.clear();
-            segments.push("v1");
-            segments.push(location.mount.as_str());
-            segments.push("data");
-            segments.extend(location.path.segments());
-        }
+        let url = self.config.url.endpoint(
+            ["v1", location.mount.as_str(), "data"]
+                .into_iter()
+                .chain(location.path.segments()),
+        );
 
         let mut req = self
             .client
             .get(url)
             .header("X-Vault-Token", token.expose_secret());
         if let Some(ns) = &self.config.namespace {
-            req = req.header("X-Vault-Namespace", ns);
+            req = req.header("X-Vault-Namespace", ns.as_str());
         }
 
         let resp = req
@@ -258,17 +253,9 @@ impl BaoAuthenticator {
     }
 
     async fn login(client: &Client, config: &AuthConfig) -> Result<BaoToken, ProviderError> {
-        let mut url = config.url.clone();
-        {
-            let mut segments = url
-                .path_segments_mut()
-                .map_err(|_| ProviderError::InvalidConfig("bao-url cannot be a base".into()))?;
-            segments.clear();
-            segments.push("v1");
-            segments.push("auth");
-            segments.push(&config.auth_mount);
-            segments.push("login");
-        }
+        let url = config
+            .url
+            .endpoint(["v1", "auth", config.auth_mount.as_str(), "login"]);
 
         let payload = LoginParams {
             role_id: &config.role_id,
@@ -277,7 +264,7 @@ impl BaoAuthenticator {
 
         let mut req = client.post(url).json(&payload);
         if let Some(ns) = &config.namespace {
-            req = req.header("X-Vault-Namespace", ns);
+            req = req.header("X-Vault-Namespace", ns.as_str());
         }
 
         let resp = req
@@ -320,17 +307,17 @@ impl BaoAuthenticator {
 
 #[derive(Debug, Clone)]
 struct AuthConfig {
-    url: Url,
-    namespace: Option<String>,
-    auth_mount: String,
+    url: BaoServerUrl,
+    namespace: Option<BaoNamespace>,
+    auth_mount: BaoMount,
     role_id: String,
     secret_id: SecretString,
 }
 
 #[derive(Debug, Clone)]
 struct ProviderConfig {
-    url: Url,
-    namespace: Option<String>,
+    url: BaoServerUrl,
+    namespace: Option<BaoNamespace>,
     max_concurrent: ConcurrencyLimit,
 }
 
