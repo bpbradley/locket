@@ -69,8 +69,12 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 
 Handler for Docker Compose `down`, but no-op because secrets are not persisted
 
-_No options._
+### Options
 
+| Command | Env | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--log-level` | `LOCKET_LOG_LEVEL` | `debug` | Log level <br><br> **Choices:**<br>- `trace`<br>- `debug`<br>- `info`<br>- `warn`<br>- `error` |
+| `<service>` |  |  | Service name from Docker Compose |
 
 ---
 

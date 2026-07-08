@@ -15,7 +15,7 @@ pub async fn compose(args: ComposeArgs) -> Result<(), crate::error::LocketError>
     let project = args.project_name;
     match args.cmd {
         ComposeCommand::Up(args) => up::up(project, *args).await,
-        ComposeCommand::Down => down::down(project).await,
+        ComposeCommand::Down(args) => down::down(project, *args).await,
         ComposeCommand::Metadata => meta::metadata(project).await,
     }
 }

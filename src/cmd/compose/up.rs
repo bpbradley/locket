@@ -5,12 +5,11 @@ use crate::logging::{LogFormat, Logger};
 use crate::provider::Provider;
 
 use secrecy::ExposeSecret;
-use tracing::{debug, info};
+use tracing::debug;
 
 pub async fn up(project: String, args: UpArgs) -> Result<(), crate::error::LocketError> {
     Logger::new(LogFormat::Compose, args.log_level).init()?;
-    info!("Starting project: {}", project);
-
+    debug!("Starting project {} with: {:#?}", project, args);
     let provider = Provider::try_from(args.provider)?.build().await?;
 
     let mut secrets = Vec::with_capacity(args.env_file.len() + args.env.len());

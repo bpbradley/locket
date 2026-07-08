@@ -60,7 +60,17 @@ pub enum ComposeCommand {
     /// Injects secrets into a Docker Compose service environment with `docker compose up`
     Up(Box<UpArgs>),
     /// Handler for Docker Compose `down`, but no-op because secrets are not persisted
-    Down,
+    Down(Box<DownArgs>),
     /// Handler for Docker Compose `metadata` command so that docker can query plugin capabilities
     Metadata,
+}
+
+#[derive(Args, Debug)]
+pub struct DownArgs {
+    /// Log level
+    #[arg(long, env = "LOCKET_LOG_LEVEL", value_enum, default_value_t = LogLevel::Debug)]
+    pub log_level: LogLevel,
+    /// Service name from Docker Compose
+    #[arg(help_heading = None)]
+    pub service: String,
 }
