@@ -85,5 +85,8 @@ jobs:
               working-directory: docker
               env:
                   CI: true
+                  # Match the release workflow's amd64 cache refs so PR and
+                  # release builds share a warm cache.
+                  CACHE_SUFFIX: amd64
               run: |
                   docker buildx bake --allow=fs.read=.. -f docker-bake.hcl --set "*.output=type=cacheonly" release

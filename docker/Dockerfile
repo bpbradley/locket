@@ -2,11 +2,17 @@
 # check=skip=SecretsUsedInArgOrEnv
 
 ARG RUST_TAG=1.95-alpine3.22
+ARG XX_TAG=1.7.0
 
-FROM rust:${RUST_TAG} AS chef
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_TAG} AS xx
+
+# Compilation stages are pinned to the build platform and cross-compile to
+# the target platform via xx, so rustc never runs under emulation.
+FROM --platform=$BUILDPLATFORM rust:${RUST_TAG} AS chef
+COPY --from=xx / /
 USER root
-RUN apk add --no-cache musl-dev build-base pkgconfig \
-    && cargo install cargo-chef
+RUN apk add --no-cache musl-dev build-base pkgconfig clang lld file \
+    && cargo install cargo-chef --locked
 WORKDIR /src
 
 FROM chef AS planner
@@ -26,21 +32,29 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 COPY --from=planner /src/recipe.json recipe.json
 
+ARG TARGETPLATFORM
+RUN xx-apk add --no-cache musl-dev gcc \
+    && xx-cargo --setup-target-triple
+
+ENV CARGO_PROFILE_RELEASE_STRIP=symbols
+
 ARG CACHE_FEATURES="full"
 
-RUN cargo chef cook --release \
+RUN xx-cargo chef cook --release \
        --recipe-path recipe.json \
        --no-default-features --features "${CACHE_FEATURES}"
 
 ARG FEATURES="full"
 
 COPY . .
-RUN cargo build --release --locked \
+RUN xx-cargo build --release --locked \
        --no-default-features --features "${FEATURES}" \
-    && strip target/release/locket \
-    && cp target/release/locket /locket
+    && locket_bin="target/$(xx-cargo --print-target-triple)/release/locket" \
+    && xx-verify --static "${locket_bin}" \
+    && cp "${locket_bin}" /locket
 
-FROM alpine:3.23 AS rootfs
+
+FROM --platform=$BUILDPLATFORM alpine:3.23 AS rootfs
 RUN addgroup -g 65532 nonroot \
     && adduser -D -H -u 65532 -G nonroot nonroot
 
@@ -98,7 +112,7 @@ HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
     CMD ["locket","healthcheck"]
 ENTRYPOINT ["locket","inject", "--config", "/etc/locket/locket.toml"]
 
-FROM alpine:3.23 AS opstage
+FROM --platform=$BUILDPLATFORM alpine:3.23 AS opstage
 ARG OP_VERSION=2.32.0
 ARG TARGETARCH
 RUN set -eux; \
