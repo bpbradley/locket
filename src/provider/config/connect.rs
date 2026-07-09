@@ -1,16 +1,15 @@
 use crate::provider::{
-    AuthToken, ConcurrencyLimit, ProviderError, Signature,
+    AuthToken, ConcurrencyLimit, ProviderError, ServerUrl, Signature,
     references::{HasReference, OpReference},
 };
 use async_trait::async_trait;
 use clap::Args;
 use locket_derive::LayeredConfig;
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectConfig {
-    pub connect_host: Url,
+    pub connect_host: ServerUrl,
     pub connect_token: AuthToken,
     pub connect_max_concurrent: ConcurrencyLimit,
 }
@@ -34,7 +33,7 @@ impl Signature for ConnectConfig {
 pub struct ConnectArgs {
     /// 1Password Connect Host HTTP(S) URL
     #[arg(long, env = "OP_CONNECT_HOST")]
-    pub connect_host: Option<Url>,
+    pub connect_host: Option<ServerUrl>,
 
     /// 1Password Connect Token
     ///

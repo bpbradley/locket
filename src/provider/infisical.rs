@@ -7,12 +7,12 @@
 //! and it will gracefully handle rotating authentication when request limit is reached
 
 use super::{
-    ConcurrencyLimit, ProviderError, SecretsProvider,
+    ConcurrencyLimit, ProviderError, SecretsProvider, ServerUrl,
     auth::{ExpiringToken, SecretView, TokenAuthenticator, TokenExchange},
     config::infisical::InfisicalConfig,
     references::{
-        Extract, InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference,
-        InfisicalSecretType, InfisicalSlug, ReferenceParser, SecretReference,
+        Extract, HasReference, InfisicalPath, InfisicalProjectId, InfisicalReference,
+        InfisicalSecretType, InfisicalSlug, SecretReference,
     },
 };
 use async_trait::async_trait;
@@ -21,10 +21,8 @@ use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 use tracing::warn;
-use url::Url;
 use uuid::Uuid;
 
 pub struct InfisicalProvider {
@@ -103,8 +101,7 @@ impl InfisicalProvider {
         let url = self
             .config
             .url
-            .join(&format!("/api/v4/secrets/{}", secret_name))
-            .map_err(ProviderError::Url)?;
+            .endpoint(["api", "v4", "secrets", secret_name]);
 
         let query_params = SecretQueryParams {
             project_id,
@@ -168,17 +165,8 @@ impl InfisicalProvider {
     }
 }
 
-impl ReferenceParser for InfisicalProvider {
-    fn parse(&self, raw: &str) -> Option<SecretReference> {
-        match InfisicalReference::from_str(raw) {
-            Ok(reference) => Some(SecretReference::Infisical(reference)),
-            Err(InfisicalParseError::InvalidScheme) => None,
-            Err(e) => {
-                warn!("Invalid reference '{}': {}", raw, e);
-                None
-            }
-        }
-    }
+impl HasReference for InfisicalProvider {
+    type Reference = InfisicalReference;
 }
 
 #[async_trait]
@@ -235,8 +223,7 @@ impl TokenExchange for UniversalAuthLogin {
         let url = self
             .config
             .url
-            .join("/api/v1/auth/universal-auth/login")
-            .map_err(ProviderError::Url)?;
+            .endpoint(["api", "v1", "auth", "universal-auth", "login"]);
 
         let payload = LoginParams {
             client_id: &self.config.client_id,
@@ -274,14 +261,14 @@ impl TokenExchange for UniversalAuthLogin {
 
 #[derive(Debug, Clone)]
 struct AuthConfig {
-    url: Url,
+    url: ServerUrl,
     client_id: Uuid,
     client_secret: SecretString,
 }
 
 #[derive(Debug, Clone)]
 struct ProviderConfig {
-    url: Url,
+    url: ServerUrl,
     default_path: InfisicalPath,
     default_secret_type: InfisicalSecretType,
     default_env: Option<InfisicalSlug>,

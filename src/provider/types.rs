@@ -4,8 +4,85 @@ use super::ProviderError;
 use crate::path::CanonicalPath;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize, Serializer};
+use std::fmt;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
+use thiserror::Error;
+use url::Url;
+
+#[derive(Debug, Error)]
+pub enum ServerUrlError {
+    #[error("invalid url: {0}")]
+    Parse(#[from] url::ParseError),
+
+    #[error("invalid server url '{0}': scheme must be http or https")]
+    Scheme(Url),
+
+    #[error("invalid server url '{0}': query and fragment are not allowed")]
+    Components(Url),
+}
+
+/// A provider API base URL: `http(s)://host[:port][/path-prefix]`.
+///
+/// The optional path prefix supports servers behind path-routing reverse
+/// proxies.
+///
+/// Guaranteed hierarchical with no query or fragment, so endpoint URLs can
+/// always be built from it. A trailing slash is normalized away at
+/// construction so equal configurations compare and hash equal.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "Url", into = "Url")]
+pub struct ServerUrl(Url);
+
+impl ServerUrl {
+    /// Builds an endpoint URL by appending path segments to the base URL,
+    /// percent-encoding each segment as needed.
+    pub fn endpoint<'a>(&self, segments: impl IntoIterator<Item = &'a str>) -> Url {
+        let mut url = self.0.clone();
+        url.path_segments_mut()
+            .expect("http(s) urls are hierarchical")
+            .pop_if_empty()
+            .extend(segments);
+        url
+    }
+}
+
+impl TryFrom<Url> for ServerUrl {
+    type Error = ServerUrlError;
+
+    fn try_from(mut url: Url) -> Result<Self, Self::Error> {
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(ServerUrlError::Scheme(url));
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(ServerUrlError::Components(url));
+        }
+        url.path_segments_mut()
+            .expect("http(s) urls are hierarchical")
+            .pop_if_empty();
+        Ok(Self(url))
+    }
+}
+
+impl FromStr for ServerUrl {
+    type Err = ServerUrlError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Url::parse(s)?.try_into()
+    }
+}
+
+impl From<ServerUrl> for Url {
+    fn from(url: ServerUrl) -> Self {
+        url.0
+    }
+}
+
+impl fmt::Display for ServerUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// A source for an authentication token.
 #[derive(Debug, Clone)]
@@ -188,5 +265,87 @@ impl std::str::FromStr for ConcurrencyLimit {
 impl std::fmt::Display for ConcurrencyLimit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_server_url_accepts_bare_host() {
+        assert!(ServerUrl::from_str("https://bao.example.com:8200").is_ok());
+        assert!(ServerUrl::from_str("http://127.0.0.1:8200/").is_ok());
+    }
+
+    #[test]
+    fn test_server_url_rejects_non_http_schemes() {
+        assert!(matches!(
+            ServerUrl::from_str("data:text/plain,hello"),
+            Err(ServerUrlError::Scheme(_))
+        ));
+        assert!(matches!(
+            ServerUrl::from_str("unix:/var/run/bao.sock"),
+            Err(ServerUrlError::Scheme(_))
+        ));
+        assert!(matches!(
+            ServerUrl::from_str("not a url"),
+            Err(ServerUrlError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn test_server_url_rejects_query_and_fragment() {
+        for bad in [
+            "https://example.com?query=1",
+            "https://example.com/#fragment",
+            "https://example.com/vault?query=1",
+        ] {
+            assert!(
+                matches!(ServerUrl::from_str(bad), Err(ServerUrlError::Components(_))),
+                "'{bad}' should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_server_url_endpoint_from_bare_host() {
+        let url = ServerUrl::from_str("https://bao.example.com:8200").unwrap();
+        let endpoint = url.endpoint(["v1", "secret", "data", "app"]);
+        assert_eq!(
+            endpoint.as_str(),
+            "https://bao.example.com:8200/v1/secret/data/app"
+        );
+    }
+
+    #[test]
+    fn test_server_url_endpoint_appends_to_path_prefix() {
+        let url = ServerUrl::from_str("https://example.com/vault").unwrap();
+        let endpoint = url.endpoint(["v1", "secret", "data", "app"]);
+        assert_eq!(
+            endpoint.as_str(),
+            "https://example.com/vault/v1/secret/data/app"
+        );
+    }
+
+    #[test]
+    fn test_server_url_normalizes_trailing_slash() {
+        let with = ServerUrl::from_str("https://example.com/vault/").unwrap();
+        let without = ServerUrl::from_str("https://example.com/vault").unwrap();
+        assert_eq!(with, without);
+        assert_eq!(
+            with.endpoint(["v1"]).as_str(),
+            without.endpoint(["v1"]).as_str()
+        );
+    }
+
+    #[test]
+    fn test_server_url_endpoint_encodes_segments() {
+        let url = ServerUrl::from_str("https://example.com").unwrap();
+        let endpoint = url.endpoint(["v1", "auth", "app role", "login"]);
+        assert_eq!(
+            endpoint.as_str(),
+            "https://example.com/v1/auth/app%20role/login"
+        );
     }
 }

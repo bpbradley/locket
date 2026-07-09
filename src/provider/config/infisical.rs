@@ -1,5 +1,5 @@
 use crate::provider::{
-    AuthToken, ConcurrencyLimit, ProviderError, Signature,
+    AuthToken, ConcurrencyLimit, ProviderError, ServerUrl, Signature,
     references::{
         HasReference, InfisicalPath, InfisicalProjectId, InfisicalReference, InfisicalSecretType,
         InfisicalSlug,
@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InfisicalConfig {
-    pub infisical_url: url::Url,
+    pub infisical_url: ServerUrl,
     pub infisical_client_secret: AuthToken,
     pub infisical_client_id: Uuid,
     pub infisical_default_path: InfisicalPath,
@@ -43,7 +43,7 @@ pub struct InfisicalArgs {
     /// The URL of the Infisical instance to connect to.
     #[arg(long, env = "INFISICAL_URL")]
     #[locket(default = "https://us.infisical.com")]
-    pub infisical_url: Option<url::Url>,
+    pub infisical_url: Option<ServerUrl>,
 
     /// The client secret for Universal Auth to authenticate with Infisical.
     ///
