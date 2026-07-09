@@ -45,7 +45,7 @@ mod types;
 
 use managed::{ManagedProvider, ProviderFactory};
 pub use references::{ReferenceParseError, ReferenceParser, SecretReference};
-pub use types::{AuthToken, ConcurrencyLimit, TokenSource};
+pub use types::{AuthToken, ConcurrencyLimit, ServerUrl, ServerUrlError, TokenSource};
 
 /// Trait for configuration structs that can produce a "signature" representing their content's freshness.
 #[async_trait]
@@ -98,10 +98,6 @@ pub enum ProviderError {
         status: Option<i32>,
         stderr: String,
     },
-
-    /// URL parse error
-    #[error("url error: {0}")]
-    Url(#[from] url::ParseError),
 }
 
 /// Abstraction for a backend service that resolves secret references.

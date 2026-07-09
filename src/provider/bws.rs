@@ -134,7 +134,9 @@ impl std::str::FromStr for BwsUrl {
     type Err = ProviderError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(BwsUrl(Url::parse(s)?))
+        let url = Url::parse(s)
+            .map_err(|e| ProviderError::InvalidConfig(format!("invalid url '{}': {}", s, e)))?;
+        Ok(BwsUrl(url))
     }
 }
 

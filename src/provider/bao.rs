@@ -7,9 +7,9 @@
 //! and it will gracefully handle rotating authentication when access is denied.
 
 use super::{
-    ConcurrencyLimit, ProviderError, SecretsProvider,
+    ConcurrencyLimit, ProviderError, SecretsProvider, ServerUrl,
     auth::{ExpiringToken, SecretView, TokenAuthenticator, TokenExchange},
-    config::bao::{BaoConfig, BaoNamespace, BaoServerUrl},
+    config::bao::{BaoConfig, BaoNamespace},
     references::{
         BaoMount, BaoReference, BaoSecretLocation, Extract, HasReference, SecretReference,
     },
@@ -258,7 +258,7 @@ impl TokenExchange for AppRoleLogin {
 
 #[derive(Debug, Clone)]
 struct AuthConfig {
-    url: BaoServerUrl,
+    url: ServerUrl,
     namespace: Option<BaoNamespace>,
     auth_mount: BaoMount,
     role_id: String,
@@ -267,7 +267,7 @@ struct AuthConfig {
 
 #[derive(Debug, Clone)]
 struct ProviderConfig {
-    url: BaoServerUrl,
+    url: ServerUrl,
     namespace: Option<BaoNamespace>,
     max_concurrent: ConcurrencyLimit,
 }

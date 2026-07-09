@@ -14,7 +14,7 @@
 use super::references::{Extract, HasReference, OpReference, SecretReference};
 use crate::provider::ConcurrencyLimit;
 use crate::provider::config::connect::ConnectConfig;
-use crate::provider::{ProviderError, SecretsProvider};
+use crate::provider::{ProviderError, SecretsProvider, ServerUrl};
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use reqwest::{Client, StatusCode};
@@ -26,11 +26,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use url::Url;
 
 pub struct OpConnectProvider {
     client: Client,
-    host: Url,
+    host: ServerUrl,
     token: SecretString,
     cache: Arc<Mutex<ResolutionCache>>,
     max_concurrent: ConcurrencyLimit,
@@ -47,9 +46,7 @@ impl OpConnectProvider {
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
 
-        let check_url = host
-            .join("/v1/vaults")
-            .map_err(|e| ProviderError::Other(e.to_string()))?;
+        let check_url = host.endpoint(["v1", "vaults"]);
 
         let resp = client
             .get(check_url)
@@ -138,10 +135,7 @@ impl OpConnectProvider {
             }
         }
 
-        let url = self
-            .host
-            .join("/v1/vaults")
-            .map_err(|e| ProviderError::Other(e.to_string()))?;
+        let url = self.host.endpoint(["v1", "vaults"]);
 
         let filter = format!("name eq \"{}\"", name_or_id);
 
@@ -195,11 +189,9 @@ impl OpConnectProvider {
             }
         }
 
-        let path = format!("/v1/vaults/{}/items", vault_uuid);
         let url = self
             .host
-            .join(&path)
-            .map_err(|e| ProviderError::Other(e.to_string()))?;
+            .endpoint(["v1", "vaults", vault_uuid.as_ref(), "items"]);
 
         let filter = format!("title eq \"{}\"", item_name_or_id);
 
@@ -233,8 +225,9 @@ impl OpConnectProvider {
         let vault_id = self.resolve_vault_id(&op_ref.vault).await?;
         let item_id = self.resolve_item_id(&vault_id, &op_ref.item).await?;
 
-        let mut api_url = self.host.clone();
-        api_url.set_path(&format!("/v1/vaults/{}/items/{}", vault_id, item_id));
+        let api_url =
+            self.host
+                .endpoint(["v1", "vaults", vault_id.as_ref(), "items", item_id.as_ref()]);
 
         let resp = self
             .client

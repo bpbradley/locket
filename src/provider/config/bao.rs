@@ -1,5 +1,5 @@
 use crate::provider::{
-    AuthToken, ConcurrencyLimit, ProviderError, Signature,
+    AuthToken, ConcurrencyLimit, ProviderError, ServerUrl, Signature,
     references::{BaoMount, BaoReference, HasReference},
 };
 use async_trait::async_trait;
@@ -9,78 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use thiserror::Error;
-use url::Url;
 
 #[derive(Debug, Error)]
 pub enum BaoConfigError {
-    #[error("invalid url: {0}")]
-    Url(#[from] url::ParseError),
-
-    #[error("invalid bao url '{0}': scheme must be http or https")]
-    Scheme(Url),
-
-    #[error("invalid bao url '{0}': must be scheme://host[:port] with no path, query, or fragment")]
-    Components(Url),
-
     #[error(
         "invalid namespace '{0}': expected non-empty '/' separated segments of visible ascii, relative to root (no leading '/')"
     )]
     Namespace(String),
-}
-
-/// The OpenBao / Vault server base URL: `http(s)://host[:port]`.
-///
-/// Guaranteed hierarchical with nothing but scheme and authority, so
-/// endpoint URLs can always be built from it and nothing is silently
-/// discarded.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "Url", into = "Url")]
-pub struct BaoServerUrl(Url);
-
-impl BaoServerUrl {
-    /// Builds an endpoint URL from path segments.
-    pub fn endpoint<'a>(&self, segments: impl IntoIterator<Item = &'a str>) -> Url {
-        let mut url = self.0.clone();
-        url.path_segments_mut()
-            .expect("http(s) urls are hierarchical")
-            .clear()
-            .extend(segments);
-        url
-    }
-}
-
-impl TryFrom<Url> for BaoServerUrl {
-    type Error = BaoConfigError;
-
-    fn try_from(url: Url) -> Result<Self, Self::Error> {
-        if !matches!(url.scheme(), "http" | "https") {
-            return Err(BaoConfigError::Scheme(url));
-        }
-        if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
-            return Err(BaoConfigError::Components(url));
-        }
-        Ok(Self(url))
-    }
-}
-
-impl FromStr for BaoServerUrl {
-    type Err = BaoConfigError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Url::parse(s)?.try_into()
-    }
-}
-
-impl From<BaoServerUrl> for Url {
-    fn from(url: BaoServerUrl) -> Self {
-        url.0
-    }
-}
-
-impl fmt::Display for BaoServerUrl {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
 
 /// An OpenBao / Vault namespace path (e.g. `admin/team1`).
@@ -145,7 +80,7 @@ impl fmt::Display for BaoNamespace {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BaoConfig {
-    pub bao_url: BaoServerUrl,
+    pub bao_url: ServerUrl,
     pub bao_namespace: Option<BaoNamespace>,
     pub bao_auth_mount: BaoMount,
     pub bao_role_id: String,
@@ -172,7 +107,7 @@ impl Signature for BaoConfig {
 pub struct BaoArgs {
     /// OpenBao / Vault server URL
     #[arg(long, env = "BAO_URL")]
-    pub bao_url: Option<BaoServerUrl>,
+    pub bao_url: Option<ServerUrl>,
 
     /// OpenBao / Vault namespace (Enterprise/OpenBao Namespaces feature)
     #[arg(long, env = "BAO_NAMESPACE")]
@@ -203,56 +138,6 @@ pub struct BaoArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_server_url_accepts_bare_host() {
-        assert!(BaoServerUrl::from_str("https://bao.example.com:8200").is_ok());
-        assert!(BaoServerUrl::from_str("http://127.0.0.1:8200/").is_ok());
-    }
-
-    #[test]
-    fn test_server_url_rejects_non_http_schemes() {
-        // cannot-be-a-base urls parse as Urls but cannot host endpoint paths
-        assert!(matches!(
-            BaoServerUrl::from_str("data:text/plain,hello"),
-            Err(BaoConfigError::Scheme(_))
-        ));
-        assert!(matches!(
-            BaoServerUrl::from_str("unix:/var/run/bao.sock"),
-            Err(BaoConfigError::Scheme(_))
-        ));
-        assert!(matches!(
-            BaoServerUrl::from_str("not a url"),
-            Err(BaoConfigError::Url(_))
-        ));
-    }
-
-    #[test]
-    fn test_server_url_rejects_extra_components() {
-        for bad in [
-            "https://bao.example.com/some/prefix",
-            "https://bao.example.com?query=1",
-            "https://bao.example.com/#fragment",
-        ] {
-            assert!(
-                matches!(
-                    BaoServerUrl::from_str(bad),
-                    Err(BaoConfigError::Components(_))
-                ),
-                "'{bad}' should be rejected"
-            );
-        }
-    }
-
-    #[test]
-    fn test_server_url_endpoint() {
-        let url = BaoServerUrl::from_str("https://bao.example.com:8200").unwrap();
-        let endpoint = url.endpoint(["v1", "auth", "app role", "login"]);
-        assert_eq!(
-            endpoint.as_str(),
-            "https://bao.example.com:8200/v1/auth/app%20role/login"
-        );
-    }
 
     #[test]
     fn test_namespace_normalizes_trailing_slash() {
