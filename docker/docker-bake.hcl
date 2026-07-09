@@ -13,6 +13,10 @@ variable "CACHE_SUFFIX"   { default = "" }
 # a native runner and stitch the manifest lists together afterwards.
 variable "PUSH_BY_DIGEST" { default = false }
 
+# Exporting cache needs package write access, which PR tokens lack.
+# Reads stay enabled everywhere in CI; writes are opt-in for trusted runs
+variable "CACHE_WRITE"    { default = false }
+
 group "release" {
   targets = ["connect", "op", "bws", "infisical", "bao", "aio", "plugin"]
 }
@@ -49,7 +53,7 @@ function "cache_ref" {
 
 function "cache_to_for" {
   params = [name]
-  result = CI ? ["type=registry,ref=${cache_ref(name)},mode=max"] : []
+  result = CACHE_WRITE ? ["type=registry,ref=${cache_ref(name)},mode=max"] : []
 }
 
 function "cache_from_for" {

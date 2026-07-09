@@ -88,5 +88,8 @@ jobs:
                   # Match the release workflow's amd64 cache refs so PR and
                   # release builds share a warm cache.
                   CACHE_SUFFIX: amd64
+                  # Fork PR tokens cannot write packages, so only refresh
+                  # the cache on pushes to main.
+                  CACHE_WRITE: ${{ github.event_name == 'push' }}
               run: |
                   docker buildx bake --allow=fs.read=.. -f docker-bake.hcl --set "*.output=type=cacheonly" release

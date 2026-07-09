@@ -83,6 +83,7 @@ jobs:
                   PLATFORMS: ${{ matrix.platform }}
                   CACHE_SUFFIX: ${{ matrix.suffix }}
                   PUSH_BY_DIGEST: true
+                  CACHE_WRITE: true
                   CI: true
               run: |
                   docker buildx bake \
