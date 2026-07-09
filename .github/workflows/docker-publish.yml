@@ -50,7 +50,7 @@ jobs:
         env:
             BUILDX_BAKE_ENTITLEMENTS_FS: 0
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Setup Registries
               run: |
@@ -108,7 +108,7 @@ jobs:
             VERSION: ${{ needs.meta.outputs.version }}
             IS_PRERELEASE: ${{ needs.meta.outputs.is_prerelease }}
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Setup Registries
               run: |
