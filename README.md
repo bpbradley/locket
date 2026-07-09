@@ -29,6 +29,7 @@ locket is a versatile tool and it supports various forms of secrets injection.
 2. [1password Service Accounts](./docs/providers/op.md)
 3. [Bitwarden Secrets Manager](./docs/providers/bws.md)
 4. [Infisical](./docs/providers/infisical.md)
+5. [OpenBao / HashiCorp Vault](./docs/providers/bao.md)
 
 > [!TIP]
 > Each provider has its own docker image for sidecar mode, if a slim version is preferred. The `latest` tag bundles all providers and their respective dependencies. But a provider specific tag like `locket:connect` is only about 4MB and has no extra dependencies besides what is needed for the connect provider.

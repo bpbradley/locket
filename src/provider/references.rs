@@ -2,12 +2,16 @@
 use std::str::FromStr;
 use thiserror::Error;
 
+#[cfg(feature = "bao")]
+mod bao;
 #[cfg(feature = "bws")]
 mod bws;
 #[cfg(feature = "infisical")]
 mod infisical;
 #[cfg(any(feature = "op", feature = "connect"))]
 mod op;
+#[cfg(feature = "bao")]
+pub use bao::{BaoMount, BaoParseError, BaoReference, BaoSecretLocation};
 #[cfg(feature = "bws")]
 pub use bws::BwsReference;
 #[cfg(feature = "infisical")]
@@ -35,6 +39,10 @@ pub enum ReferenceParseError {
     #[cfg(feature = "infisical")]
     #[error(transparent)]
     Infisical(#[from] InfisicalParseError),
+
+    #[cfg(feature = "bao")]
+    #[error(transparent)]
+    Bao(#[from] BaoParseError),
 }
 
 /// A parsed reference to a secret.
@@ -54,6 +62,10 @@ pub enum SecretReference {
     #[cfg(feature = "infisical")]
     /// An Infisical reference
     Infisical(InfisicalReference),
+
+    #[cfg(feature = "bao")]
+    /// An OpenBao / Vault reference
+    Bao(BaoReference),
 
     #[cfg(any(test, doctest, feature = "testing"))]
     /// A mock reference for testing purposes
@@ -110,6 +122,9 @@ impl std::fmt::Display for SecretReference {
             #[cfg(feature = "infisical")]
             Self::Infisical(reference) => write!(f, "{}", reference),
 
+            #[cfg(feature = "bao")]
+            Self::Bao(reference) => write!(f, "{}", reference),
+
             #[cfg(any(test, doctest, feature = "testing"))]
             Self::Mock(reference) => write!(f, "{}", reference),
         }
@@ -138,6 +153,13 @@ impl FromStr for SecretReference {
         #[cfg(feature = "bws")]
         if let Ok(bws_ref) = BwsReference::from_str(s) {
             return Ok(Self::Bws(bws_ref));
+        }
+
+        // Check OpenBao / Vault
+        #[cfg(feature = "bao")]
+        if s.starts_with("bao://") {
+            let bao_ref = BaoReference::from_str(s)?;
+            return Ok(Self::Bao(bao_ref));
         }
 
         // Fallback

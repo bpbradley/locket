@@ -8,6 +8,7 @@
 
 use super::{
     ConcurrencyLimit, ProviderError, SecretsProvider,
+    auth::{ExpiringToken, SecretView, TokenAuthenticator, TokenExchange},
     config::infisical::InfisicalConfig,
     references::{
         Extract, InfisicalParseError, InfisicalPath, InfisicalProjectId, InfisicalReference,
@@ -21,16 +22,15 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use std::time::Duration;
+use tracing::warn;
 use url::Url;
 use uuid::Uuid;
 
 pub struct InfisicalProvider {
     client: Client,
     config: ProviderConfig,
-    auth: InfisicalAuthenticator,
+    auth: TokenAuthenticator<UniversalAuthLogin>,
 }
 
 impl InfisicalProvider {
@@ -49,7 +49,11 @@ impl InfisicalProvider {
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
 
-        let auth = InfisicalAuthenticator::try_new(client.clone(), auth_config).await?;
+        let auth = TokenAuthenticator::try_new(UniversalAuthLogin {
+            client: client.clone(),
+            config: auth_config,
+        })
+        .await?;
 
         Ok(Self {
             client,
@@ -219,68 +223,28 @@ impl SecretsProvider for InfisicalProvider {
     }
 }
 
-/// Handles authentication and token renewal for Infisical
-///
-/// Tokens are automatically renewed when they expire or when
-/// intentionally invalidated.
-///
-/// Uses Universal Auth method for authentication, and the token
-/// is held in a RwLock to allow concurrent reads and exclusive writes
-struct InfisicalAuthenticator {
+/// Universal Auth credential exchange for Infisical.
+struct UniversalAuthLogin {
     client: Client,
     config: AuthConfig,
-    token: RwLock<InfisicalToken>,
 }
 
-impl InfisicalAuthenticator {
-    pub async fn try_new(client: Client, config: AuthConfig) -> Result<Self, ProviderError> {
-        let token = Self::login(&client, &config).await?;
-
-        Ok(Self {
-            client,
-            config,
-            token: RwLock::new(token),
-        })
-    }
-
-    /// Returns a valid bearer token, renewing it if necessary.
-    pub async fn get_token(&self) -> Result<SecretString, ProviderError> {
-        {
-            let guard = self.token.read().await;
-            if !guard.is_expired() {
-                return Ok(guard.access_token.clone());
-            }
-        }
-
-        // Token expired. Need to renew
-        let mut guard = self.token.write().await;
-
-        // Check if token is expired again in case it was renewed by another thread
-        // while waiting for the write lock
-        if !guard.is_expired() {
-            return Ok(guard.access_token.clone());
-        }
-
-        debug!("Token expired. Renewing...");
-        let new_token = Self::login(&self.client, &self.config).await?;
-
-        *guard = new_token.clone();
-
-        Ok(new_token.access_token)
-    }
-
-    async fn login(client: &Client, config: &AuthConfig) -> Result<InfisicalToken, ProviderError> {
-        let url = config
+#[async_trait]
+impl TokenExchange for UniversalAuthLogin {
+    async fn login(&self) -> Result<ExpiringToken, ProviderError> {
+        let url = self
+            .config
             .url
             .join("/api/v1/auth/universal-auth/login")
             .map_err(ProviderError::Url)?;
 
         let payload = LoginParams {
-            client_id: &config.client_id,
-            client_secret: ClientSecretView(&config.client_secret),
+            client_id: &self.config.client_id,
+            client_secret: SecretView(&self.config.client_secret),
         };
 
-        let resp = client
+        let resp = self
+            .client
             .post(url)
             .json(&payload)
             .send()
@@ -301,22 +265,10 @@ impl InfisicalAuthenticator {
             .await
             .map_err(|e| ProviderError::Network(Box::new(e)))?;
 
-        debug!(
-            "Login successful. Expires in {} seconds",
-            login_resp.expires_in
-        );
-
-        Ok(InfisicalToken {
-            access_token: login_resp.access_token,
-            expiry: Instant::now() + Duration::from_secs(login_resp.expires_in),
-        })
-    }
-
-    async fn invalidate(&self, token: &SecretString) {
-        let mut guard = self.token.write().await;
-        if guard.access_token.expose_secret() == token.expose_secret() {
-            guard.poison();
-        }
+        Ok(ExpiringToken::new(
+            login_resp.access_token,
+            login_resp.expires_in,
+        ))
     }
 }
 
@@ -347,33 +299,6 @@ impl From<InfisicalConfig> for ProviderConfig {
             default_secret_type: config.infisical_default_secret_type,
             max_concurrent: config.infisical_max_concurrent,
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct InfisicalToken {
-    access_token: SecretString,
-    expiry: Instant,
-}
-
-impl InfisicalToken {
-    fn is_expired(&self) -> bool {
-        self.expiry <= Instant::now() + Duration::from_secs(60)
-    }
-    fn poison(&mut self) {
-        // Set to a point in the past so that it will be considered expired
-        self.expiry = Instant::now() - Duration::from_secs(1);
-    }
-}
-
-struct ClientSecretView<'a>(&'a SecretString);
-
-impl<'a> Serialize for ClientSecretView<'a> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.0.expose_secret())
     }
 }
 
@@ -414,5 +339,5 @@ struct LoginResponse {
 #[serde(rename_all = "camelCase")]
 struct LoginParams<'a> {
     client_id: &'a Uuid,
-    client_secret: ClientSecretView<'a>,
+    client_secret: SecretView<'a>,
 }

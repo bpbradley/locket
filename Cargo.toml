@@ -94,6 +94,7 @@ connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid"]
 compose = ["dep:dotenvy"]
 infisical = ["dep:reqwest", "dep:serde_urlencoded", "dep:percent-encoding", "dep:regex", "dep:uuid"]
+bao = ["dep:reqwest", "dep:percent-encoding"]
 exec = ["dep:dotenvy", "nix/signal", "nix/term", "tokio/process"]
 volume = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower", "dep:tower-service", "nix/mount", "dep:chrono"]
 
@@ -102,7 +103,7 @@ testing = []
 # Generates introspection types that are necessary for documentation generation
 locket-docs = []
 
-full = ["op", "connect", "bws", "infisical", "compose", "exec", "volume"]
+full = ["op", "connect", "bws", "infisical", "bao", "compose", "exec", "volume"]
 dev = ["locket-docs", "testing", "full"]
 default = ["full"]
 
