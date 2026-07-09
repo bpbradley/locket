@@ -1,12 +1,9 @@
 //! 1password (op) based provider implementation
-//! This module defines an `OpProvider` that implements
-//! the `SecretsProvider` trait for fetching secrets
-//!
-//! It interacts with the 1Password CLI tool (`op`)
-//! to retrieve secrets based on provided references.
-//!
-//! The provider supports authentication via service account tokens
-//! and can be configured with an optional config directory.
+
+#[allow(dead_code)]
+mod protocol;
+#[allow(dead_code)]
+mod transport;
 
 use super::references::{Extract, HasReference, OpReference, SecretReference};
 use crate::path::AbsolutePath;

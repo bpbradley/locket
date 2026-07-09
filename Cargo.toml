@@ -89,7 +89,7 @@ pre-release-hook = ["sh", "-c", 'cargo fmt -- --check && cargo xtask docs && car
 
 [features]
 # Base release features
-op = ["tokio/process", "dep:percent-encoding"]
+op = ["tokio/process", "tokio/io-util", "dep:percent-encoding"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid"]
 compose = ["dep:dotenvy"]
