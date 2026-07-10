@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OpConfig {
     pub op_token: AuthToken,
-    pub op_config_dir: Option<AbsolutePath>,
+    pub op_bridge: Option<AbsolutePath>,
 }
 
 impl HasReference for OpConfig {
@@ -37,11 +37,12 @@ pub struct OpArgs {
     #[arg(long, env = "OP_SERVICE_ACCOUNT_TOKEN", hide_env_values = true)]
     pub op_token: Option<AuthToken>,
 
-    /// Optional: Path to 1Password config directory
+    /// Optional: Path to the locket-op-bridge binary
     ///
-    /// Defaults to standard op config locations if not provided,
-    /// e.g. `$XDG_CONFIG_HOME/op`
-    #[arg(long, env = "OP_CONFIG_DIR")]
+    /// Overrides automatic discovery, which prefers a bridge embedded
+    /// in this binary and otherwise expects `locket-op-bridge` next to
+    /// the locket executable. PATH is never searched.
+    #[arg(long, env = "LOCKET_OP_BRIDGE")]
     #[locket(optional)]
-    pub op_config_dir: Option<AbsolutePath>,
+    pub op_bridge: Option<AbsolutePath>,
 }

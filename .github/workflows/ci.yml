@@ -37,6 +37,7 @@ jobs:
                         - 'Cargo.toml'
                         - 'Cargo.lock'
                         - 'rust-toolchain.*'
+                        - 'tools/op-bridge/**'
                       docker:
                         - 'docker/**'
                         - '!docker/tests/**'
@@ -63,6 +64,14 @@ jobs:
             - run: cargo test --locked
             - run: cargo clippy --all-targets
             - run: cargo xtask docs --check
+            - uses: actions/setup-go@v5
+              with:
+                  go-version-file: tools/op-bridge/go.mod
+                  cache-dependency-path: tools/op-bridge/go.sum
+            - run: go build -C tools/op-bridge -trimpath -o /tmp/locket-op-bridge .
+            - run: cargo test --locked --features testing --test op_bridge -- --ignored
+              env:
+                  LOCKET_OP_BRIDGE_TEST_BIN: /tmp/locket-op-bridge
 
     bridge:
         name: Go bridge

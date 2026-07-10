@@ -1,6 +1,6 @@
 //! Pipe transport to a spawned `locket-op-bridge` child.
 //!
-//! Requests are written to the bridge's stdin behind a mutex; a reader
+//! Requests are written to the bridge's stdin behind a mutex. a reader
 //! task demuxes stdout responses back to callers by request id, so
 //! overlapping `fetch_map` calls can share the one pipe. The child is
 //! reaped by `kill_on_drop`, and the bridge itself exits on stdin EOF,
@@ -12,7 +12,7 @@ use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStderr, Command};
@@ -21,17 +21,89 @@ use tokio::sync::{Mutex, oneshot};
 const INIT_TIMEOUT: Duration = Duration::from_secs(30);
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// `None` once the bridge connection is closed.
-type PendingMap = Arc<StdMutex<Option<HashMap<u64, oneshot::Sender<Response>>>>>;
-
 #[derive(Debug)]
 pub(super) struct BridgeInfo {
     pub bridge_version: String,
 }
 
+/// Correlation table for active requests.
+///
+/// The table is `None` once the bridge connection has failed; from
+/// then on every registration fails fast instead of queueing on a
+/// dead pipe.
+struct Pending(StdMutex<Option<HashMap<u64, oneshot::Sender<Response>>>>);
+
+type Waiters<'a> = MutexGuard<'a, Option<HashMap<u64, oneshot::Sender<Response>>>>;
+
+impl Pending {
+    fn new() -> Arc<Self> {
+        Arc::new(Self(StdMutex::new(Some(HashMap::new()))))
+    }
+
+    fn closed_error() -> ProviderError {
+        ProviderError::Other("op bridge connection closed".into())
+    }
+
+    fn waiters(&self) -> Waiters<'_> {
+        self.0.lock().expect("lock poisoned")
+    }
+
+    fn register(&self, id: u64) -> Result<oneshot::Receiver<Response>, ProviderError> {
+        let (tx, rx) = oneshot::channel();
+        match self.waiters().as_mut() {
+            Some(waiters) => {
+                waiters.insert(id, tx);
+                Ok(rx)
+            }
+            None => Err(Self::closed_error()),
+        }
+    }
+
+    fn forget(&self, id: u64) {
+        if let Some(waiters) = self.waiters().as_mut() {
+            waiters.remove(&id);
+        }
+    }
+
+    /// Deliver a response to its registered waiter. False when no
+    /// request with that id is active
+    fn dispatch(&self, response: Response) -> bool {
+        let waiter = self
+            .waiters()
+            .as_mut()
+            .and_then(|waiters| waiters.remove(&response.id()));
+        match waiter {
+            Some(tx) => {
+                let _ = tx.send(response);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Mark the connection dead and fail every active request.
+    fn close(&self) {
+        let Some(waiters) = self.waiters().take() else {
+            return;
+        };
+        for (id, tx) in waiters {
+            let _ = tx.send(Response::Error {
+                id,
+                code: super::protocol::ErrorCode::Internal,
+                message: "op bridge connection closed".into(),
+            });
+        }
+    }
+
+    #[cfg(test)]
+    fn is_drained(&self) -> bool {
+        self.waiters().as_ref().is_some_and(HashMap::is_empty)
+    }
+}
+
 pub(super) struct BridgeTransport {
     writer: Mutex<Box<dyn AsyncWrite + Send + Unpin>>,
-    pending: PendingMap,
+    pending: Arc<Pending>,
     next_id: AtomicU64,
     reader: tokio::task::JoinHandle<()>,
 }
@@ -41,14 +113,37 @@ impl BridgeTransport {
         reader: impl AsyncRead + Send + Unpin + 'static,
         writer: impl AsyncWrite + Send + Unpin + 'static,
     ) -> Self {
-        let pending: PendingMap = Arc::new(StdMutex::new(Some(HashMap::new())));
-        let reader = tokio::spawn(demux_responses(reader, Arc::clone(&pending)));
+        let pending = Pending::new();
+        let reader = tokio::spawn(Self::demux(reader, Arc::clone(&pending)));
         Self {
             writer: Mutex::new(Box::new(writer)),
             pending,
             next_id: AtomicU64::new(1),
             reader,
         }
+    }
+
+    /// Spawn the bridge from a prepared command and connect a transport
+    /// to its pipes.
+    pub(super) fn spawn(mut command: Command) -> Result<(Child, Self), ProviderError> {
+        command.env_clear();
+        for var in ["HOME", "PATH", "TMPDIR"] {
+            if let Ok(value) = std::env::var(var) {
+                command.env(var, value);
+            }
+        }
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut child = command.spawn().map_err(ProviderError::Io)?;
+        let stdin = child.stdin.take().expect("bridge stdin was piped above");
+        let stdout = child.stdout.take().expect("bridge stdout was piped above");
+        let stderr = child.stderr.take().expect("bridge stderr was piped above");
+        tokio::spawn(Self::forward_stderr(stderr));
+        Ok((child, Self::new(stdout, stdin)))
     }
 
     pub(super) async fn init(&self, token: &SecretString) -> Result<BridgeInfo, ProviderError> {
@@ -113,14 +208,7 @@ impl BridgeTransport {
             .map_err(|e| ProviderError::Other(format!("failed to encode bridge request: {e}")))?;
         line.push(b'\n');
 
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending.lock().expect("lock poisoned");
-            match pending.as_mut() {
-                Some(map) => map.insert(id, tx),
-                None => return Err(connection_closed()),
-            };
-        }
+        let rx = self.pending.register(id)?;
 
         let written = {
             let mut writer = self.writer.lock().await;
@@ -130,15 +218,15 @@ impl BridgeTransport {
             }
         };
         if let Err(e) = written {
-            self.forget(id);
+            self.pending.forget(id);
             return Err(ProviderError::Io(e));
         }
 
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err(connection_closed()),
+            Ok(Err(_)) => Err(Pending::closed_error()),
             Err(_) => {
-                self.forget(id);
+                self.pending.forget(id);
                 Err(ProviderError::Other(format!(
                     "op bridge did not respond within {timeout:?}"
                 )))
@@ -146,41 +234,17 @@ impl BridgeTransport {
         }
     }
 
-    fn forget(&self, id: u64) {
-        if let Some(map) = self.pending.lock().expect("lock poisoned").as_mut() {
-            map.remove(&id);
-        }
-    }
-}
-
-impl Drop for BridgeTransport {
-    fn drop(&mut self) {
-        self.reader.abort();
-    }
-}
-
-fn connection_closed() -> ProviderError {
-    ProviderError::Other("op bridge connection closed".into())
-}
-
-async fn demux_responses(reader: impl AsyncRead + Unpin, pending: PendingMap) {
-    let mut lines = BufReader::new(reader).lines();
-    loop {
-        match lines.next_line().await {
-            Ok(Some(line)) if line.trim().is_empty() => {}
-            Ok(Some(line)) => match serde_json::from_str::<Response>(&line) {
-                Ok(response) => {
-                    let id = response.id();
-                    let waiter = pending
-                        .lock()
-                        .expect("lock poisoned")
-                        .as_mut()
-                        .and_then(|map| map.remove(&id));
-                    match waiter {
-                        Some(tx) => {
-                            let _ = tx.send(response);
-                        }
-                        None => {
+    /// Reader task: routes each response line to its waiter. Any
+    /// malformed line or pipe error is fatal for the connection.
+    async fn demux(reader: impl AsyncRead + Unpin, pending: Arc<Pending>) {
+        let mut lines = BufReader::new(reader).lines();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) if line.trim().is_empty() => {}
+                Ok(Some(line)) => match serde_json::from_str::<Response>(&line) {
+                    Ok(response) => {
+                        let id = response.id();
+                        if !pending.dispatch(response) {
                             tracing::warn!(
                                 target: "locket::op_bridge",
                                 id,
@@ -188,69 +252,36 @@ async fn demux_responses(reader: impl AsyncRead + Unpin, pending: PendingMap) {
                             );
                         }
                     }
-                }
-                // Only the serde error is logged: the line may hold secrets.
+                    // Only the serde error is logged: the line may hold secrets.
+                    Err(e) => {
+                        tracing::error!(
+                            target: "locket::op_bridge",
+                            "bridge sent a malformed response, closing connection: {e}"
+                        );
+                        break;
+                    }
+                },
+                Ok(None) => break,
                 Err(e) => {
-                    tracing::error!(
-                        target: "locket::op_bridge",
-                        "bridge sent a malformed response, closing connection: {e}"
-                    );
+                    tracing::error!(target: "locket::op_bridge", "bridge pipe read failed: {e}");
                     break;
                 }
-            },
-            Ok(None) => break,
-            Err(e) => {
-                tracing::error!(target: "locket::op_bridge", "bridge pipe read failed: {e}");
-                break;
             }
         }
+        pending.close();
     }
-    fail_pending(&pending);
-}
 
-fn fail_pending(pending: &PendingMap) {
-    let Some(map) = pending.lock().expect("lock poisoned").take() else {
-        return;
-    };
-    for (id, tx) in map {
-        let _ = tx.send(Response::Error {
-            id,
-            code: super::protocol::ErrorCode::Internal,
-            message: "op bridge connection closed".into(),
-        });
-    }
-}
-
-/// Spawn the bridge from a prepared command, wiring pipes and stderr
-/// forwarding. The command's argv/env are the caller's business; this
-/// enforces the transport invariants (piped stdio, cleared env, reaping).
-pub(super) fn spawn_bridge(
-    mut command: Command,
-) -> Result<(Child, BridgeTransport), ProviderError> {
-    command.env_clear();
-    for var in ["HOME", "PATH", "TMPDIR"] {
-        if let Ok(value) = std::env::var(var) {
-            command.env(var, value);
+    async fn forward_stderr(stderr: ChildStderr) {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            tracing::warn!(target: "locket::op_bridge", "{line}");
         }
     }
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-
-    let mut child = command.spawn().map_err(ProviderError::Io)?;
-    let stdin = child.stdin.take().expect("bridge stdin was piped above");
-    let stdout = child.stdout.take().expect("bridge stdout was piped above");
-    let stderr = child.stderr.take().expect("bridge stderr was piped above");
-    tokio::spawn(forward_stderr(stderr));
-    Ok((child, BridgeTransport::new(stdout, stdin)))
 }
 
-async fn forward_stderr(stderr: ChildStderr) {
-    let mut lines = BufReader::new(stderr).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        tracing::warn!(target: "locket::op_bridge", "{line}");
+impl Drop for BridgeTransport {
+    fn drop(&mut self) {
+        self.reader.abort();
     }
 }
 
@@ -492,12 +523,7 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("did not respond"), "{err}");
         assert!(
-            transport
-                .pending
-                .lock()
-                .expect("lock poisoned")
-                .as_ref()
-                .is_some_and(HashMap::is_empty),
+            transport.pending.is_drained(),
             "timed out request must not leak a pending entry"
         );
     }

@@ -1,5 +1,5 @@
 //! Bridge binary embedded at build time. Only compiled when build.rs
-//! found a prebuilt bridge (see the env contract in build.rs).
+//! found a prebuilt bridge.
 
 pub(super) const BRIDGE_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/locket-op-bridge.bin"));

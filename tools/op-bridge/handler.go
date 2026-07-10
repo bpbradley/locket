@@ -18,7 +18,8 @@ import (
 const shutdownGrace = 2 * time.Second
 
 // resolver is the narrow slice of onepassword the bridge needs.
-//  Tests can just substitute a stub.
+//
+//	Tests can just substitute a stub.
 type resolver interface {
 	ResolveAll(ctx context.Context, secretReferences []string) (onepassword.ResolveAllResponse, error)
 }

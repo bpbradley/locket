@@ -18,10 +18,8 @@ use std::str::FromStr;
 /// and is free of relative components like `.` or `..` (lexically cleaned).
 ///
 /// Construction has two flavors with different relative-path policies:
-/// parsing (`FromStr`, and the serde/clap boundaries built on it) rejects
-/// relative input, as does [`AbsolutePath::strict`]; [`AbsolutePath::new`]
-/// and the `From` conversions anchor relative input to the working
-/// directory, for internal values whose base is known to be intended.
+/// [`AbsolutePath::strict`] rejects relative input, for values whose base
+/// directory must not be assumed.
 ///
 /// This type does not verify existence on disk. Use [`CanonicalPath`] for that.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -290,9 +288,12 @@ impl std::fmt::Display for AbsolutePath {
 impl FromStr for AbsolutePath {
     type Err = String;
 
+    // Relative CLI/config input resolves against the working directory,
+    // matching standard command-line behavior (`--config ./locket.toml`).
+    // Inputs whose base directory must not be assumed go through
+    // [`AbsolutePath::strict`] at their call sites instead.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        AbsolutePath::strict(Path::new(s))
-            .ok_or_else(|| format!("expected an absolute path, got '{s}'"))
+        Ok(AbsolutePath(Path::new(s).absolute()))
     }
 }
 
@@ -454,9 +455,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_rejects_relative() {
-        assert!("a/b/c".parse::<AbsolutePath>().is_err());
-        assert!("./c".parse::<AbsolutePath>().is_err());
+    fn test_parse_anchors_relative_to_cwd() {
+        let p: AbsolutePath = "a/b/c".parse().unwrap();
+        assert!(p.as_path().is_absolute());
+        assert!(p.as_path().ends_with("a/b/c"));
     }
 
     #[test]

@@ -115,7 +115,7 @@ impl BridgeExec {
 }
 
 /// On-disk home for the embedded bridge when memfd execution is
-/// unavailable (macOS, seccomp). Entries are keyed by locket version
+/// unavailable. Entries are keyed by locket version
 /// plus content hash so concurrent locket versions never collide, and
 /// a cache hit is re-hashed before it is trusted.
 #[cfg(any(locket_embed_op_bridge, test))]

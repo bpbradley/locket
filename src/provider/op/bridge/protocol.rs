@@ -53,26 +53,20 @@ impl Response {
 /// Exactly one of `secret` or `error` is present per reference.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub(super) enum ResolveResult {
+pub enum ResolveResult {
     Resolved { secret: SecretString },
     Failed { error: BridgeError },
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct BridgeError {
+pub struct BridgeError {
     pub code: ErrorCode,
     pub message: String,
 }
 
-impl BridgeError {
-    pub(super) fn into_provider_error(self) -> ProviderError {
-        self.code.into_provider_error(self.message)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum ErrorCode {
+pub enum ErrorCode {
     NotFound,
     RateLimited,
     InvalidReference,
@@ -84,7 +78,7 @@ pub(super) enum ErrorCode {
 }
 
 impl ErrorCode {
-    pub(super) fn into_provider_error(self, message: String) -> ProviderError {
+    pub fn into_provider_error(self, message: String) -> ProviderError {
         match self {
             ErrorCode::NotFound => ProviderError::NotFound(message),
             ErrorCode::RateLimited => ProviderError::RateLimit,

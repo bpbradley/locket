@@ -1,67 +1,31 @@
-//! 1password (op) based provider implementation
+//! 1Password (op) provider backed by the `locket-op-bridge` sidecar.
+//!
+//! All process and protocol machinery lives in [`bridge`]; this module
+//! is only the [`SecretsProvider`] glue: reference filtering, batch
+//! resolution through the bridge, and stitching results back to keys.
+//!
+//! Authentication is via service account token, sent once over the
+//! bridge's private pipe at startup (never argv or env).
 
-#[allow(dead_code)]
-mod discover;
-#[cfg(locket_embed_op_bridge)]
-mod embedded;
-#[allow(dead_code)]
-mod protocol;
-#[allow(dead_code)]
-mod transport;
+mod bridge;
 
 use super::references::{Extract, HasReference, OpReference, SecretReference};
-use crate::path::AbsolutePath;
 use crate::provider::config::op::OpConfig;
-use crate::provider::{ConcurrencyLimit, ProviderError, SecretsProvider};
+use crate::provider::{ProviderError, SecretsProvider};
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt};
-use secrecy::ExposeSecret;
+use bridge::{Bridge, ResolveResult};
 use secrecy::SecretString;
 use std::collections::HashMap;
-use std::process::Stdio;
-use tokio::process::Command;
 
 pub struct OpProvider {
-    token: SecretString,
-    config: Option<AbsolutePath>,
+    bridge: Bridge,
 }
 
 impl OpProvider {
     pub async fn new(cfg: OpConfig) -> Result<Self, ProviderError> {
-        let op_token = cfg.op_token.resolve().await?;
-
-        // Try to authenticate with the provided token
-        let mut cmd = Command::new("op");
-        cmd.arg("whoami")
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
-            .env("HOME", std::env::var("HOME").unwrap_or_default())
-            .env(
-                "XDG_CONFIG_HOME",
-                std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
-            )
-            .env("OP_SERVICE_ACCOUNT_TOKEN", op_token.expose_secret())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        if let Some(path) = &cfg.op_config_dir {
-            cmd.env("OP_CONFIG_DIR", path.as_path());
-        }
-
-        let output = cmd.output().await.map_err(ProviderError::Io)?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ProviderError::Unauthorized(format!(
-                "op login failed: {}",
-                stderr.trim()
-            )));
-        }
-
-        Ok(Self {
-            token: op_token,
-            config: cfg.op_config_dir,
-        })
+        let token = cfg.op_token.resolve().await?;
+        let bridge = Bridge::connect(cfg.op_bridge.as_ref(), &token).await?;
+        Ok(Self { bridge })
     }
 }
 
@@ -75,7 +39,6 @@ impl SecretsProvider for OpProvider {
         &self,
         references: &[SecretReference],
     ) -> Result<HashMap<SecretReference, SecretString>, ProviderError> {
-        const MAX_CONCURRENT_OPS: ConcurrencyLimit = ConcurrencyLimit::new(10);
         let op_refs: Vec<&OpReference> =
             references.iter().filter_map(OpReference::extract).collect();
 
@@ -83,65 +46,109 @@ impl SecretsProvider for OpProvider {
             return Ok(HashMap::new());
         }
 
-        let results: Vec<Result<Option<(SecretReference, SecretString)>, ProviderError>> =
-            stream::iter(op_refs.into_iter().cloned())
-                .map(|reference| async move {
-                    let key = reference.as_str();
-                    let mut cmd = Command::new("op");
-                    cmd.arg("read")
-                        .arg("--no-newline")
-                        .arg(key)
-                        .env_clear()
-                        .env("PATH", std::env::var("PATH").unwrap_or_default())
-                        .env("HOME", std::env::var("HOME").unwrap_or_default())
-                        .env(
-                            "XDG_CONFIG_HOME",
-                            std::env::var("XDG_CONFIG_HOME").unwrap_or_default(),
-                        )
-                        .env("OP_SERVICE_ACCOUNT_TOKEN", self.token.expose_secret())
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::piped())
-                        .stderr(Stdio::piped());
+        let refs: Vec<&str> = op_refs.iter().map(|r| r.as_str()).collect();
+        let mut results = self.bridge.resolve(&refs).await?;
 
-                    if let Some(path) = &self.config {
-                        cmd.env("OP_CONFIG_DIR", path.as_path());
-                    }
-
-                    let output = cmd.output().await.map_err(ProviderError::Io)?;
-
-                    if output.status.success() {
-                        let secret = String::from_utf8(output.stdout).map_err(|e| {
-                            ProviderError::InvalidConfig(format!("utf8 error: {}", e))
-                        })?;
-
-                        Ok(Some((
-                            SecretReference::OnePassword(reference),
-                            SecretString::new(secret.into()),
-                        )))
-                    } else {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        Err(ProviderError::Other(format!(
-                            "op error for {}: {}",
-                            key,
-                            stderr.trim()
-                        )))
-                    }
-                })
-                .buffer_unordered(MAX_CONCURRENT_OPS.into_inner())
-                .collect()
-                .await;
-
-        let mut map = HashMap::new();
-        for res in results {
-            match res {
-                Ok(Some((k, v))) => {
-                    map.insert(k, v);
+        let mut map = HashMap::with_capacity(op_refs.len());
+        for reference in op_refs {
+            match results.remove(reference.as_str()) {
+                Some(ResolveResult::Resolved { secret }) => {
+                    map.insert(SecretReference::OnePassword(reference.clone()), secret);
                 }
-                Ok(None) => {}
-                Err(e) => return Err(e),
+                Some(ResolveResult::Failed { error }) => {
+                    return Err(error.code.into_provider_error(format!(
+                        "{}: {}",
+                        reference.as_str(),
+                        error.message
+                    )));
+                }
+                None => {
+                    return Err(ProviderError::Other(format!(
+                        "op bridge response missing reference {}",
+                        reference.as_str()
+                    )));
+                }
             }
         }
 
         Ok(map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secrecy::ExposeSecret;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    /// Provider over a scripted bridge that answers every resolve
+    /// request from a fixed results payload.
+    fn scripted_provider(results_json: &'static str) -> OpProvider {
+        let (locket_end, bridge_end) = tokio::io::duplex(64 * 1024);
+        let (l_read, l_write) = tokio::io::split(locket_end);
+        let (b_read, mut b_write) = tokio::io::split(bridge_end);
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(b_read).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                let id = request["id"].as_u64().unwrap();
+                let response =
+                    format!(r#"{{"type":"resolve-ok","id":{id},"results":{results_json}}}"#);
+                b_write
+                    .write_all(format!("{response}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+        });
+        OpProvider {
+            bridge: Bridge::from_pipes(l_read, l_write),
+        }
+    }
+
+    fn op_ref(raw: &str) -> SecretReference {
+        SecretReference::OnePassword(raw.parse().unwrap())
+    }
+
+    #[tokio::test]
+    async fn fetch_map_ignores_non_op_references() {
+        let provider = scripted_provider("{}");
+        let refs = [SecretReference::Mock("not-op".into())];
+        let map = provider.fetch_map(&refs).await.unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_map_stitches_results_to_references() {
+        let provider = scripted_provider(r#"{"op://v/i/f":{"secret":"hunter2"}}"#);
+        let reference = op_ref("op://v/i/f");
+        let map = provider
+            .fetch_map(std::slice::from_ref(&reference))
+            .await
+            .unwrap();
+        assert_eq!(map[&reference].expose_secret(), "hunter2");
+    }
+
+    #[tokio::test]
+    async fn fetch_map_fails_on_per_reference_error() {
+        let provider = scripted_provider(
+            r#"{"op://v/i/f":{"error":{"code":"not_found","message":"itemNotFound"}}}"#,
+        );
+        let refs = [op_ref("op://v/i/f")];
+        let err = provider.fetch_map(&refs).await.unwrap_err();
+        assert!(
+            matches!(&err, ProviderError::NotFound(m) if m.contains("op://v/i/f")),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_map_fails_on_missing_reference() {
+        let provider = scripted_provider("{}");
+        let refs = [op_ref("op://v/i/f")];
+        let err = provider.fetch_map(&refs).await.unwrap_err();
+        assert!(
+            matches!(&err, ProviderError::Other(m) if m.contains("missing reference")),
+            "{err}"
+        );
     }
 }
