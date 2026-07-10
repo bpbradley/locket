@@ -93,7 +93,7 @@ jobs:
                       --metadata-file metadata.json
 
             - name: Upload Bake Metadata
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: bake-metadata-${{ matrix.suffix }}
                   path: docker/metadata.json
@@ -128,7 +128,7 @@ jobs:
                   password: ${{ secrets.DOCKERHUB_TOKEN }}
 
             - name: Download Bake Metadata
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v8
               with:
                   pattern: bake-metadata-*
                   path: bake-metadata
