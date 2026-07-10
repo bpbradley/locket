@@ -26,6 +26,7 @@ homepage = "https://github.com/bpbradley/locket"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1" }
 serde_json = "1"
+sha2 = "0.10"
 indexmap = "2"
 toml = "1"
 
@@ -89,7 +90,7 @@ pre-release-hook = ["sh", "-c", 'cargo fmt -- --check && cargo xtask docs && car
 
 [features]
 # Base release features
-op = ["tokio/process", "tokio/io-util", "dep:percent-encoding"]
+op = ["tokio/process", "tokio/io-util", "dep:percent-encoding", "dep:sha2"]
 connect = ["dep:reqwest", "dep:percent-encoding"]
 bws = ["dep:bitwarden", "dep:uuid"]
 compose = ["dep:dotenvy"]
@@ -143,6 +144,10 @@ tower-service = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+
+[build-dependencies]
+sha2.workspace = true
 
 [dev-dependencies]
 assert_fs.workspace = true

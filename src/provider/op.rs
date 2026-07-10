@@ -1,6 +1,10 @@
 //! 1password (op) based provider implementation
 
 #[allow(dead_code)]
+mod discover;
+#[cfg(locket_embed_op_bridge)]
+mod embedded;
+#[allow(dead_code)]
 mod protocol;
 #[allow(dead_code)]
 mod transport;

@@ -92,6 +92,10 @@ description = "Sync go.mod/go.sum with actual imports (like cargo update -w for 
 path = "tools/op-bridge"
 cmd = "go mod tidy && go mod verify"
 
+[build-embedded]
+description = "Release build with the op bridge embedded in the locket binary"
+cmd = "mkdir -p target/tools && (cd tools/op-bridge && CGO_ENABLED=0 go build -trimpath -o ../../target/tools/locket-op-bridge .) && LOCKET_OP_BRIDGE_BIN=$PWD/target/tools/locket-op-bridge cargo build --release"
+
 [docs]
 description = "Generate clap derived docs"
 cmd = "cargo xtask docs"
