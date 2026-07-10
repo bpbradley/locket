@@ -16,7 +16,7 @@ categories = ["command-line-utilities", "config"]
 members = [".", "locket_derive", "xtask"]
 
 [workspace.package]
-version = "0.17.3"
+version = "0.18.0-rc.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/bpbradley/locket"
@@ -35,7 +35,7 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 # locket deps
-locket_derive = { path = "./locket_derive", version = "0.17.3" }
+locket_derive = { path = "./locket_derive", version = "0.18.0-rc.1" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 notify = "8"
