@@ -37,7 +37,7 @@ cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoi
 [docker-test]
 description = "Run test of docker image"
 path = "docker/tests/sidecar"
-cmd = "docker compose -f compose.tests.yaml -p tests up"
+cmd = "LOCKET_IMAGE_REPO=${LOCKET_IMAGE_REPO:-bpbradley/locket} docker compose -f compose.tests.yaml -p tests up"
 
 [docker-plugin-config]
 cmd = 'docker plugin set bpbradley/locket:plugin config.source="/etc/locket" && docker plugin enable bpbradley/locket:plugin'
@@ -70,7 +70,7 @@ cmd = "cargo release major -p locket -p locket_derive --execute"
 [bridge-build]
 description = "Build locket-op-bridge (Go)"
 path = "tools/op-bridge"
-cmd = "mkdir -p ../../target/tools && CGO_ENABLED=0 go build -trimpath -o ../../target/tools/locket-op-bridge ."
+cmd = "mkdir -p ../../target/tools && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../../target/tools/locket-op-bridge ."
 
 [bridge-fmt]
 description = "Format Go code (gofmt, applies changes like cargo fmt)"

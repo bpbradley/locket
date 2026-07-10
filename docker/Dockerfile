@@ -3,6 +3,7 @@
 
 ARG RUST_TAG=1.95-alpine3.22
 ARG XX_TAG=1.7.0
+ARG GO_TAG=1.26-alpine
 
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_TAG} AS xx
 
@@ -53,6 +54,17 @@ RUN xx-cargo build --release --locked \
     && xx-verify --static "${locket_bin}" \
     && cp "${locket_bin}" /locket
 
+# The op bridge cross-compiles natively on the build platform; the Go
+# SDK's service account path needs no cgo, so the binary is fully static.
+FROM --platform=$BUILDPLATFORM golang:${GO_TAG} AS opbridge
+WORKDIR /src
+COPY tools/op-bridge/go.mod tools/op-bridge/go.sum ./
+RUN go mod download
+COPY tools/op-bridge/ ./
+ARG TARGETARCH
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /locket-op-bridge .
 
 FROM --platform=$BUILDPLATFORM alpine:3.23 AS rootfs
 RUN addgroup -g 65532 nonroot \
@@ -69,7 +81,6 @@ RUN install -d -m 0755 skeleton \
     && install -d -m 0755 /templates && chown nonroot:nonroot /templates \
     && install -d -m 0755 /run/secrets && chown nonroot:nonroot /run/secrets \
     && install -d -m 0755 /etc/locket && chown nonroot:nonroot /etc/locket \
-    && install -d -m 0700 /config/op && chown nonroot:nonroot /config/op \
     && apk add --no-cache ca-certificates
 
 RUN install -d -m 0755 -o root -g root /plugin-fs/run/docker/plugins \
@@ -89,9 +100,7 @@ LABEL org.opencontainers.image.title="locket"
 
 ENV PATH=/usr/local/bin \
     HOME=/home/nonroot \
-    TMPDIR=/tmp \
-    XDG_CONFIG_HOME=/config \
-    HOME=/home/nonroot
+    TMPDIR=/tmp
 
 COPY --from=rootfs /skeleton /
 COPY --from=rootfs /ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
@@ -112,29 +121,16 @@ HEALTHCHECK --interval=5s --timeout=3s --retries=30 \
     CMD ["locket","healthcheck"]
 ENTRYPOINT ["locket","inject", "--config", "/etc/locket/locket.toml"]
 
-FROM --platform=$BUILDPLATFORM alpine:3.23 AS opstage
-ARG OP_VERSION=2.32.0
-ARG TARGETARCH
-RUN set -eux; \
-    apk add --no-cache ca-certificates unzip; \
-    wget -O /tmp/op.zip \
-      "https://cache.agilebits.com/dist/1P/op2/pkg/v${OP_VERSION}/op_linux_${TARGETARCH}_v${OP_VERSION}.zip"; \
-    unzip /tmp/op.zip -d /tmp/op; \
-    install -m 755 /tmp/op/op /usr/bin/op; \
-    rm -rf /tmp/op /tmp/op.zip
-
 FROM runtime AS base
 ARG DEFAULT_PROVIDER
 ENV SECRETS_PROVIDER=${DEFAULT_PROVIDER}
 
 FROM base AS op
 LABEL org.opencontainers.image.title="locket (op)"
-COPY --from=opstage /usr/bin/op /usr/local/bin/op
-COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
+COPY --from=opbridge /locket-op-bridge /usr/local/bin/locket-op-bridge
 
 FROM runtime AS aio
-COPY --from=opstage /usr/bin/op /usr/local/bin/op
-COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
+COPY --from=opbridge /locket-op-bridge /usr/local/bin/locket-op-bridge
 
 FROM aio AS plugin
 USER root
@@ -149,17 +145,15 @@ RUN apk add --no-cache bash curl vim tree strace jq coreutils
 
 ENV PATH="/usr/local/bin:${PATH}" \
     HOME=/root \
-    TMPDIR=/tmp \
-    XDG_CONFIG_HOME=/config
+    TMPDIR=/tmp
 
-RUN mkdir -p /run/secrets /templates /config/op \
-    && chmod 740 /run/secrets /templates /config/op
+RUN mkdir -p /run/secrets /templates \
+    && chmod 740 /run/secrets /templates
 
 RUN addgroup -g 65532 nonroot \
     && adduser -D -H -u 65532 -G nonroot nonroot
 
-COPY --from=opstage /usr/bin/op /usr/local/bin/op
-COPY --from=rootfs --chown=nonroot:nonroot --chmod=700 /config/op /config/op
+COPY --from=opbridge /locket-op-bridge /usr/local/bin/locket-op-bridge
 COPY --from=builder /locket /usr/local/bin/locket
 VOLUME ["/run/secrets/locket", "/templates"]
 ENTRYPOINT ["/bin/bash"]
