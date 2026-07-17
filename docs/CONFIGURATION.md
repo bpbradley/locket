@@ -1,4 +1,4 @@
-# locket 0.18.0-rc.1 -- Configuration Reference
+# locket 0.18.0-rc.2 -- Configuration Reference
 ## Commands
 
 - [`inject`](./inject.md) - Inject secrets from secret references into files and directories.
