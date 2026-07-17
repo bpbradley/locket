@@ -187,6 +187,9 @@ Otherwise, install the prebuilt binary directly for your architecture. The scrip
 | [locket-x86_64-unknown-linux-gnu.tar.xz](https://github.com/bpbradley/locket/releases/latest/download/locket-x86_64-unknown-linux-gnu.tar.xz) | x64 Linux | [checksum](https://github.com/bpbradley/locket/releases/latest/download/locket-x86_64-unknown-linux-gnu.tar.xz.sha256) |
 | [locket-x86_64-unknown-linux-musl.tar.xz](https://github.com/bpbradley/locket/releases/latest/download/locket-x86_64-unknown-linux-musl.tar.xz) | x64 MUSL Linux | [checksum](https://github.com/bpbradley/locket/releases/latest/download/locket-x86_64-unknown-linux-musl.tar.xz.sha256) |
 
+> [!NOTE]
+> The [1password service account provider](./docs/providers/op.md) uses a companion binary, `locket-op-bridge`. It is embedded in the prebuilt binaries above and bundled in the Docker images, so nothing extra is needed. Only `cargo install locket` builds require downloading `locket-op-bridge-<arch>-<os>` from the releases page into the same directory as `locket`.
+
 ### Symlink locket binary to docker-locket as a Docker CLI Plugin
 
 1. Confirm `locket` is installed with `locket --version`
