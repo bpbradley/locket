@@ -64,7 +64,7 @@ jobs:
             - run: cargo test --locked
             - run: cargo clippy --all-targets
             - run: cargo xtask docs --check
-            - uses: actions/setup-go@v5
+            - uses: actions/setup-go@v7
               with:
                   go-version-file: tools/op-bridge/go.mod
                   cache-dependency-path: tools/op-bridge/go.sum
@@ -83,7 +83,7 @@ jobs:
                 working-directory: tools/op-bridge
         steps:
             - uses: actions/checkout@v7
-            - uses: actions/setup-go@v5
+            - uses: actions/setup-go@v7
               with:
                   go-version-file: tools/op-bridge/go.mod
                   cache-dependency-path: tools/op-bridge/go.sum
