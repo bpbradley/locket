@@ -33,6 +33,10 @@ target "_common" {
   context   = ".."
   dockerfile = "docker/Dockerfile"
   platforms = split(",", PLATFORMS)
+  args = {
+    # Stamped into the op bridge binary (-X main.version).
+    VERSION = VERSION
+  }
   output = PUSH_BY_DIGEST ? [digest_output()] : []
 }
 

@@ -37,7 +37,7 @@ cmd = "docker compose -f compose.debug.yaml run --remove-orphans --rm --entrypoi
 [docker-test]
 description = "Run test of docker image"
 path = "docker/tests/sidecar"
-cmd = "docker compose -f compose.tests.yaml -p tests up"
+cmd = "LOCKET_IMAGE_REPO=${LOCKET_IMAGE_REPO:-bpbradley/locket} docker compose -f compose.tests.yaml -p tests up"
 
 [docker-plugin-config]
 cmd = 'docker plugin set bpbradley/locket:plugin config.source="/etc/locket" && docker plugin enable bpbradley/locket:plugin'
@@ -66,6 +66,35 @@ cmd = "cargo release minor -p locket -p locket_derive --execute"
 [release-major]
 description = "Bump major version and execute release"
 cmd = "cargo release major -p locket -p locket_derive --execute"
+
+[bridge-build]
+description = "Build locket-op-bridge (Go)"
+path = "tools/op-bridge"
+cmd = "mkdir -p ../../target/tools && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../../target/tools/locket-op-bridge ."
+
+[bridge-fmt]
+description = "Format Go code (gofmt, applies changes like cargo fmt)"
+path = "tools/op-bridge"
+cmd = "gofmt -s -w ."
+
+[bridge-lint]
+description = "Lint Go code (format check + go vet, like clippy)"
+path = "tools/op-bridge"
+cmd = "test -z \"$(gofmt -s -l .)\" && go vet ./..."
+
+[bridge-test]
+description = "Test locket-op-bridge"
+path = "tools/op-bridge"
+cmd = "go test ./..."
+
+[bridge-tidy]
+description = "Sync go.mod/go.sum with actual imports (like cargo update -w for hygiene)"
+path = "tools/op-bridge"
+cmd = "go mod tidy && go mod verify"
+
+[build-embedded]
+description = "Release build with the op bridge embedded in the locket binary"
+cmd = "mkdir -p target/tools && (cd tools/op-bridge && CGO_ENABLED=0 go build -trimpath -o ../../target/tools/locket-op-bridge .) && LOCKET_OP_BRIDGE_BIN=$PWD/target/tools/locket-op-bridge cargo build --release"
 
 [docs]
 description = "Generate clap derived docs"

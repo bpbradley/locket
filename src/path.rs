@@ -17,6 +17,10 @@ use std::str::FromStr;
 /// This type enforces that the contained path is anchored to a root (absolute)
 /// and is free of relative components like `.` or `..` (lexically cleaned).
 ///
+/// Construction has two flavors with different relative-path policies:
+/// [`AbsolutePath::strict`] rejects relative input, for values whose base
+/// directory must not be assumed.
+///
 /// This type does not verify existence on disk. Use [`CanonicalPath`] for that.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "String")]
@@ -37,6 +41,15 @@ impl AbsolutePath {
     }
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self(path.as_ref().absolute())
+    }
+    /// Accepts `path` only if it is already absolute; relative input
+    /// yields `None` instead of being anchored to the working directory.
+    ///
+    /// Prefer this when the input's base directory must not be assumed,
+    /// e.g. paths taken from environment variables.
+    pub fn strict(path: impl AsRef<Path>) -> Option<Self> {
+        let path = path.as_ref();
+        path.is_absolute().then(|| Self(path.clean()))
     }
     pub fn canonicalize(&self) -> Result<CanonicalPath, SecretError> {
         CanonicalPath::try_new(&self.0)
@@ -212,7 +225,8 @@ pub struct PathMapping {
 impl TryFromKv for PathMapping {
     type Err = SecretError;
     fn try_from_kv(key: String, val: String) -> Result<Self, SecretError> {
-        PathMapping::try_new(CanonicalPath::try_new(key)?, AbsolutePath::new(val))
+        let dst = val.parse().map_err(SecretError::Parse)?;
+        PathMapping::try_new(CanonicalPath::try_new(key)?, dst)
     }
 }
 
@@ -274,6 +288,10 @@ impl std::fmt::Display for AbsolutePath {
 impl FromStr for AbsolutePath {
     type Err = String;
 
+    // Relative CLI/config input resolves against the working directory,
+    // matching standard command-line behavior (`--config ./locket.toml`).
+    // Inputs whose base directory must not be assumed go through
+    // [`AbsolutePath::strict`] at their call sites instead.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(AbsolutePath(Path::new(s).absolute()))
     }
@@ -421,6 +439,32 @@ mod tests {
         let s = p.to_string();
         assert!(!s.contains(".."), "Path should be cleaned of '..'");
         assert!(s.ends_with("c"), "Path should end with 'c'");
+    }
+
+    #[test]
+    fn test_strict_rejects_relative() {
+        assert!(AbsolutePath::strict("a/b/c").is_none());
+        assert!(AbsolutePath::strict("./c").is_none());
+        assert!(AbsolutePath::strict("").is_none());
+    }
+
+    #[test]
+    fn test_strict_accepts_and_cleans_absolute() {
+        let p = AbsolutePath::strict("/a/b/../c/.").unwrap();
+        assert_eq!(p.as_path(), Path::new("/a/c"));
+    }
+
+    #[test]
+    fn test_parse_anchors_relative_to_cwd() {
+        let p: AbsolutePath = "a/b/c".parse().unwrap();
+        assert!(p.as_path().is_absolute());
+        assert!(p.as_path().ends_with("a/b/c"));
+    }
+
+    #[test]
+    fn test_parse_accepts_and_cleans_absolute() {
+        let p: AbsolutePath = "/a/b/../c/".parse().unwrap();
+        assert_eq!(p.as_path(), Path::new("/a/c"));
     }
 
     #[test]

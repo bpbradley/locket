@@ -33,7 +33,7 @@ Injects secrets into a Docker Compose service environment with `docker compose u
 | Command | Env | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--op-token` | `OP_SERVICE_ACCOUNT_TOKEN` |  | 1Password Service Account Token<br><br>Either provide the token directly or via a file with `file:` prefix |
-| `--op-config-dir` | `OP_CONFIG_DIR` |  | Optional: Path to 1Password config directory<br><br>Defaults to standard op config locations if not provided, e.g. `$XDG_CONFIG_HOME/op` |
+| `--op-bridge` | `LOCKET_OP_BRIDGE` |  | Optional: Path to the locket-op-bridge binary<br><br>Overrides automatic discovery, which prefers a bridge embedded in this binary and otherwise expects `locket-op-bridge` next to the locket executable. PATH is never searched. |
 ### 1Password Connect
 
 | Command | Env | Default | Description |

@@ -127,6 +127,14 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - name: "Install Go for locket-op-bridge"
+        uses: "actions/setup-go@v5"
+        with:
+          "cache-dependency-path": "tools/op-bridge/go.sum"
+          "go-version-file": "tools/op-bridge/go.mod"
+      - name: "Build locket-op-bridge for dist targets"
+        run: ".github/scripts/build-op-bridge.sh ${{ join(matrix.targets, ' ') }}"
+        shell: "bash"
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest

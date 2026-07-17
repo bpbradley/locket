@@ -15,3 +15,19 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "aarch64-unknown
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = true
+# Steps injected into build-local-artifacts: builds the Go op bridge per
+# target and exports LOCKET_OP_BRIDGE_BIN_<TRIPLE> for build.rs embedding.
+# Path is relative to .github/workflows/.
+github-build-setup = "../build-setup.yml"
+
+# Standalone bridge binaries for cargo-install users (the release
+# binaries embed the bridge; these are for `cargo install locket`,
+# dropped next to the locket binary, e.g. in ~/.cargo/bin).
+[[dist.extra-artifacts]]
+artifacts = [
+    "target/op-bridge-artifacts/locket-op-bridge-x86_64-linux",
+    "target/op-bridge-artifacts/locket-op-bridge-aarch64-linux",
+    "target/op-bridge-artifacts/locket-op-bridge-x86_64-macos",
+    "target/op-bridge-artifacts/locket-op-bridge-aarch64-macos",
+]
+build = ["bash", ".github/scripts/build-op-bridge-artifacts.sh"]

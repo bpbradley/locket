@@ -1,0 +1,12 @@
+# Injected into the dist-generated build-local-artifacts job right
+# after checkout (see github-build-setup in dist-workspace.toml).
+# Builds the Go op bridge for every target in this job's matrix and
+# exports LOCKET_OP_BRIDGE_BIN_<TRIPLE> so locket's build.rs embeds it.
+- name: Install Go for locket-op-bridge
+  uses: actions/setup-go@v5
+  with:
+    go-version-file: tools/op-bridge/go.mod
+    cache-dependency-path: tools/op-bridge/go.sum
+- name: Build locket-op-bridge for dist targets
+  shell: bash
+  run: .github/scripts/build-op-bridge.sh ${{ join(matrix.targets, ' ') }}

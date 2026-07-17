@@ -22,6 +22,7 @@ jobs:
         outputs:
             rust: ${{ steps.filter.outputs.rust }}
             docker: ${{ steps.filter.outputs.docker }}
+            bridge: ${{ steps.filter.outputs.bridge }}
         steps:
             - uses: actions/checkout@v7
             - uses: dorny/paths-filter@v4
@@ -36,11 +37,14 @@ jobs:
                         - 'Cargo.toml'
                         - 'Cargo.lock'
                         - 'rust-toolchain.*'
+                        - 'tools/op-bridge/**'
                       docker:
                         - 'docker/**'
                         - '!docker/tests/**'
                         - 'compose*.yml'
                         - 'compose*.yaml'
+                      bridge:
+                        - 'tools/op-bridge/**'
     locket:
         name: Build, clippy, test
         needs: filter
@@ -60,6 +64,33 @@ jobs:
             - run: cargo test --locked
             - run: cargo clippy --all-targets
             - run: cargo xtask docs --check
+            - uses: actions/setup-go@v5
+              with:
+                  go-version-file: tools/op-bridge/go.mod
+                  cache-dependency-path: tools/op-bridge/go.sum
+            - run: go build -C tools/op-bridge -trimpath -o /tmp/locket-op-bridge .
+            - run: cargo test --locked --features testing --test op_bridge -- --ignored
+              env:
+                  LOCKET_OP_BRIDGE_TEST_BIN: /tmp/locket-op-bridge
+
+    bridge:
+        name: Go bridge
+        needs: filter
+        if: needs.filter.outputs.bridge == 'true'
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: tools/op-bridge
+        steps:
+            - uses: actions/checkout@v7
+            - uses: actions/setup-go@v5
+              with:
+                  go-version-file: tools/op-bridge/go.mod
+                  cache-dependency-path: tools/op-bridge/go.sum
+            - run: test -z "$(gofmt -s -l .)"
+            - run: go vet ./...
+            - run: go test ./...
+            - run: CGO_ENABLED=0 go build -trimpath ./...
 
     docker:
         name: Docker build
