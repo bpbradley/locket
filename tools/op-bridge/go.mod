@@ -7,7 +7,7 @@ require (
 	// v0.4.1-beta.1 fails to compile with CGO_ENABLED=0.
 	// Main replaces the guard with a runtime error.
 	// Move to the next tagged release once available.
-	github.com/1password/onepassword-sdk-go v0.4.1-0.20260605221002-f1117e36ce06
+	github.com/1password/onepassword-sdk-go v0.4.1-beta.1
 	golang.org/x/sys v0.47.0
 )
 

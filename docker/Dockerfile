@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 # check=skip=SecretsUsedInArgOrEnv
 
-ARG RUST_TAG=1.95-alpine3.22
-ARG XX_TAG=1.7.0
+ARG RUST_TAG=1.97-alpine3.22
+ARG XX_TAG=1.9.0
 ARG GO_TAG=1.26-alpine
 
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_TAG} AS xx
@@ -66,7 +66,7 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /locket-op-bridge .
 
-FROM --platform=$BUILDPLATFORM alpine:3.23 AS rootfs
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS rootfs
 RUN addgroup -g 65532 nonroot \
     && adduser -D -H -u 65532 -G nonroot nonroot
 
@@ -138,7 +138,7 @@ USER root
 COPY --from=rootfs /plugin-fs /
 
 # Debug image with full distro, extra tools, and shell access
-FROM alpine:3.23 AS debug
+FROM alpine:3.24 AS debug
 LABEL org.opencontainers.image.title="locket (debug)"
 
 RUN apk add --no-cache bash curl vim tree strace jq coreutils
