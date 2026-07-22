@@ -1,5 +1,7 @@
 github.com/1password/onepassword-sdk-go v0.4.1-0.20260605221002-f1117e36ce06 h1:2PzobFFZwZ8gqdpCnIvw6shfV5LSlC7QOA8FWKK3uL4=
 github.com/1password/onepassword-sdk-go v0.4.1-0.20260605221002-f1117e36ce06/go.mod h1:j/CbzhucTywjlYrd6SE6k0LcQaFZ2l8OLBsAsOYtvD0=
+github.com/1password/onepassword-sdk-go v0.4.1-beta.1 h1:b/tt+bAXFXR5f3/irmPAaytfmsN6+5Nj6pbsx5nmKZA=
+github.com/1password/onepassword-sdk-go v0.4.1-beta.1/go.mod h1:j/CbzhucTywjlYrd6SE6k0LcQaFZ2l8OLBsAsOYtvD0=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dylibso/observe-sdk/go v0.0.0-20240828172851-9145d8ad07e1 h1:idfl8M8rPW93NehFw5H1qqH8yG158t5POr+LX9avbJY=
