@@ -291,10 +291,20 @@ user = "1000:1000"
 #### Install the Plugin
 Install the plugin and map your host directory to the plugin's config source.
 
+**AMD64 hosts:**
+
 ```bash
-docker plugin install bpbradley/locket:plugin \
- --alias locket \
- config.source=/etc/locket
+docker plugin install --alias locket \
+  bpbradley/locket:plugin \
+  config.source=/etc/locket
+```
+
+**ARM64 hosts, including 64-bit Raspberry Pi OS:**
+
+```bash
+docker plugin install --alias locket \
+  bpbradley/locket:plugin-arm64 \
+  config.source=/etc/locket
 ```
 
 ### Example usage

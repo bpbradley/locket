@@ -101,7 +101,7 @@ jobs:
                   retention-days: 1
 
     merge:
-        name: Merge Manifests / Publish Plugin
+        name: Merge Manifests
         needs: [meta, build]
         runs-on: ubuntu-latest
         env:
@@ -154,8 +154,64 @@ jobs:
                       done
                   done
 
-            - name: Create and Push Plugin
+
+    plugin:
+        name: Build / Push Plugin (${{ matrix.arch }})
+        needs: [meta, merge]
+        strategy:
+            matrix:
+                include:
+                    - arch: amd64
+                      platform: linux/amd64
+                      runner: ubuntu-latest
+                    - arch: arm64
+                      platform: linux/arm64
+                      runner: ubuntu-24.04-arm
+        runs-on: ${{ matrix.runner }}
+        steps:
+            - uses: actions/checkout@v7
+
+            - name: Setup Registries
+              run: |
+                  echo "REGISTRIES=ghcr.io/${{ github.repository_owner }},docker.io/${{ secrets.DOCKERHUB_USERNAME }}" >> $GITHUB_ENV
+
+            - name: Login to GHCR
+              uses: docker/login-action@v4
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Login to Docker Hub
+              uses: docker/login-action@v4
+              with:
+                  username: ${{ secrets.DOCKERHUB_USERNAME }}
+                  password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+            - name: Generate Plugin Metadata
+              working-directory: docker
+              env:
+                  VERSION: ${{ needs.meta.outputs.version }}
+                  IS_PRERELEASE: ${{ needs.meta.outputs.is_prerelease }}
+              run: |
+                  docker buildx bake -f docker-bake.hcl release --print > bake-plan.json
+                  jq '{plugin: {"image.name": (.target.plugin.tags | join(","))}}' \
+                      bake-plan.json > plugin-metadata.json
+
+            - name: Build / Push Plugin
               working-directory: docker
               run: |
-                  jq '{plugin: {"image.name": (.target.plugin.tags | join(","))}}' bake-plan.json > plugin-metadata.json
-                  ./build-plugin.sh --metadata ./plugin-metadata.json --push
+                  # Managed Docker plugins do not reliably support manifest lists.
+                  # Keep the existing unqualified tags as amd64 aliases for backwards
+                  # compatibility. The unqualified :plugin tag is amd64-only; ARM
+                  # hosts must use the explicit :plugin-arm64 tag.
+                  plugin_args=(
+                      --metadata ./plugin-metadata.json
+                      --platform "${{ matrix.platform }}"
+                      --tag-suffix "-${{ matrix.arch }}"
+                      --push
+                  )
+                  if [[ "${{ matrix.arch }}" == "amd64" ]]; then
+                      plugin_args+=(--alias-unqualified)
+                  fi
+                  ./build-plugin.sh "${plugin_args[@]}"
