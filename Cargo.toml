@@ -39,7 +39,7 @@ proc-macro2 = "1.0"
 locket_derive = { path = "./locket_derive", version = "0.18.0-rc.2" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-notify = "8"
+notify = "9"
 tempfile = "3"
 thiserror = "2"
 walkdir = "2"
